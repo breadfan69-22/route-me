@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_import_file"
+        android:title="@string/menu_import_file"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_sync_sheets"
+        android:title="@string/menu_sync_sheets"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_cu_override"
+        android:checkable="true"
+        android:title="@string/menu_cu_override"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_toggle_direction"
+        android:title="@string/menu_direction_outward"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_open_route_maps"
+        android:title="@string/menu_open_route_maps"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_daily_summary"
+        android:title="@string/menu_daily_summary"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_route_history"
+        android:title="@string/menu_route_history"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear_skips"
+        android:title="@string/menu_clear_skips"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_edit_notes"
+        android:title="@string/menu_edit_notes"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_toggle_break_logging"
+        android:checkable="true"
+        android:title="@string/menu_break_logging"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_break_threshold"
+        android:title="@string/menu_break_threshold"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_min_days"
+        android:title="@string/menu_min_days"
+        app:showAsAction="never" />
+</menu>

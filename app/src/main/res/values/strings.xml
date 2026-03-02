@@ -1,0 +1,121 @@
+<resources>
+    <string name="app_name">RouteMe</string>
+    <string name="mvp_subtitle">Lawn treatment routing MVP: suggest the next stop by service timing + distance + mow-day preference.</string>
+    <string name="import_clients">Import Clients File</string>
+    <string name="select_service_step">Service step</string>
+    <string name="min_days_hint">Minimum days since last visit</string>
+    <string name="suggest_next">Suggest Next Client</string>
+    <string name="open_in_maps">Open in Google Maps</string>
+    <string name="mark_arrived">Mark Arrived</string>
+    <string name="confirm_job_done">Confirm Job Done</string>
+    <string name="sync_google_sheets">Sync from Google Sheets</string>
+    <string name="sheets_url_hint">Published Google Sheet CSV URL</string>
+    <string name="start_tracking">Start Route Tracking</string>
+    <string name="stop_tracking">Stop Route Tracking</string>
+    <string name="geocoding_clients">Geocoding addresses…</string>
+
+    <!-- Status messages -->
+    <string name="status_loading_clients">Loading clients…</string>
+    <string name="status_no_clients">No clients yet. Import a file or sync from Sheets.</string>
+    <string name="status_loaded_clients">Loaded %d clients from database.</string>
+    <string name="status_load_failed">Failed to load clients: %s</string>
+    <string name="status_save_clients_failed">Failed to save clients: %s</string>
+    <string name="status_save_record_failed">Failed to save service record: %s</string>
+    <string name="status_cancelled_arrival">Cancelled arrival at %s</string>
+    <string name="status_pick_client_first">Pick a suggested client first.</string>
+    <string name="status_pick_client">Pick a client first.</string>
+    <string name="status_arrival_started">Arrival started for %1$s at %2$s</string>
+    <string name="status_selected">Selected: %s</string>
+    <string name="status_fetching_times">Fetching driving times…</string>
+    <string name="status_fetch_times_failed">Failed to fetch driving times: %s</string>
+    <string name="status_tap_arrived_first">Tap Mark Arrived first so stop time can be tracked.</string>
+    <string name="status_sheet_updated">%s Sheet updated!</string>
+    <string name="status_saved_write_url">Saved write-back URL. No read URL to sync.</string>
+    <string name="status_syncing_sheets">Syncing from Google Sheets…</string>
+    <string name="status_sync_failed">Sheets sync failed: %s</string>
+    <string name="status_tracking_started">Route tracking started — I\'ll detect when you stop at a client.</string>
+    <string name="status_tracking_stopped">Route tracking stopped.</string>
+    <string name="status_all_have_coords">All clients already have coordinates.</string>
+    <string name="status_geocoding">Geocoding %d addresses…</string>
+    <string name="status_geocoding_failed">Geocoding failed: %s</string>
+    <string name="status_confirmed_service">Confirmed %1$s for %2$s at %3$s (%4$d min stop).</string>
+
+    <!-- Overflow menu -->
+    <string name="menu_import_file">Import File</string>
+    <string name="menu_sync_sheets">Sync Sheets</string>
+    <string name="menu_cu_override">CU Override</string>
+    <string name="menu_direction_outward">→ Working Outward</string>
+    <string name="menu_direction_homeward">← Heading Home</string>
+    <string name="menu_open_route_maps">Open route in Maps</string>
+    <string name="menu_daily_summary">Today\u2019s Summary</string>
+    <string name="menu_clear_skips">Clear Skipped Clients</string>
+    <string name="menu_edit_notes">Edit Client Notes</string>
+    <string name="menu_break_logging">Log Breaks</string>
+    <string name="menu_break_threshold">Break Threshold…</string>
+    <string name="dialog_break_threshold_title">Break Threshold (minutes)</string>
+    <string name="menu_min_days">Min Days Since Service…</string>
+    <string name="dialog_min_days_title">Minimum Days Since Last Service</string>
+    <string name="hint_visit_notes">Visit notes (optional)</string>
+    <string name="dialog_daily_summary_title">Today\u2019s Route Summary</string>
+    <string name="menu_route_history">Route History</string>
+    <string name="dialog_route_history_title">Route History</string>
+
+    <!-- Stale arrival dialog -->
+    <string name="dialog_stale_arrival_title">Unfinished Stop</string>
+    <string name="dialog_stale_arrival_message">You arrived at %1$s %2$d min ago but haven\u2019t marked the job done.\n\nWhat would you like to do?</string>
+    <string name="dialog_stale_mark_complete">Mark Complete</string>
+    <string name="dialog_stale_discard">Discard</string>
+    <string name="dialog_stale_go_back">Go Back</string>
+    <string name="cu_override_label">CU Override</string>
+
+    <!-- Button labels -->
+    <string name="btn_arrived">Arrived</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_prev">← Back 5</string>
+    <string name="btn_next_more">Next 5 →</string>
+    <string name="btn_skip">Skip</string>
+
+    <!-- UI text -->
+    <string name="no_eligible_clients">No clients are eligible for %1$s with min %2$d day(s).</string>
+    <string name="summary_format">Clients: %1$d • Recorded services: %2$d</string>
+    <string name="suggestion_header">%1$s (min %2$d d) — showing %3$d–%4$d of %5$d</string>
+
+    <!-- Dialog -->
+    <string name="dialog_sheets_title">Google Sheets Setup</string>
+    <string name="dialog_sheets_message">Read URL: paste any Google Sheets link (share with \"Anyone with link\")\nWrite URL: Apps Script web app URL</string>
+    <string name="dialog_sheets_read_hint">Any Google Sheets URL (paste from browser)</string>
+    <string name="dialog_sheets_write_hint">Apps Script URL (for writing back)</string>
+    <string name="dialog_sync_now">Sync Now</string>
+    <string name="dialog_arrived_title">Arrived at %s?</string>
+    <string name="dialog_arrived_message">It looks like you\'re at:\n%1$s\n\nMark %2$s as started?</string>
+    <string name="dialog_yes_arrived">Yes — Mark Arrived</string>
+    <string name="dialog_not_here">Not here</string>
+
+    <!-- Toast messages -->
+    <string name="toast_sheet_write_failed">Sheet write-back failed: %s</string>
+    <string name="toast_sheet_write_error">Sheet write-back error: %s</string>
+
+    <!-- Notification -->
+    <string name="notif_channel_name">Route Tracking</string>
+    <string name="notif_channel_desc">Shows when RouteMe is tracking your location for auto-arrival detection</string>
+    <string name="notif_tracking_title">RouteMe Active</string>
+    <string name="notif_tracking_text">Tracking location — will detect when you arrive at a client</string>
+    <string name="notif_arrival_title">Arrived at %s?</string>
+    <string name="notif_arrival_text">Tap to mark service for %s</string>
+    <string name="notif_complete_title">Mark job complete for %s?</string>
+    <string name="notif_complete_text">You were at %1$s for %2$d min. Tap to confirm.</string>
+
+    <!-- Dialog - completion -->
+    <string name="dialog_complete_title">Mark job complete for %s?</string>
+    <string name="dialog_complete_message">You were at %1$s for %2$d minutes.\n\nMark %3$s as done?</string>
+    <string name="dialog_yes_complete">Yes — Mark Complete</string>
+    <string name="dialog_not_yet">Not yet</string>
+
+    <!-- Cluster completion -->
+    <string name="notif_cluster_title">Mark all %d complete?</string>
+    <string name="notif_cluster_text">Finished cluster: %s</string>
+    <string name="dialog_cluster_title">Mark cluster complete?</string>
+    <string name="dialog_cluster_message">You serviced %d nearby properties.\nUncheck any you didn\u2019t do:</string>
+    <string name="dialog_cluster_confirm">Mark Selected Complete</string>
+    <string name="dialog_cluster_cancel">Not yet</string>
+</resources>

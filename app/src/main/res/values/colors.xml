@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Lawncare palette — turf greens + warm amber accents -->
+
+    <!-- Primary: fresh grass green -->
+    <color name="seed_green">#4CAF50</color>
+
+    <!-- Light-mode tokens -->
+    <color name="md_theme_light_primary">#2E7D32</color>
+    <color name="md_theme_light_onPrimary">#FFFFFF</color>
+    <color name="md_theme_light_primaryContainer">#A5D6A7</color>
+    <color name="md_theme_light_onPrimaryContainer">#1B5E20</color>
+    <color name="md_theme_light_secondary">#F57F17</color>
+    <color name="md_theme_light_onSecondary">#FFFFFF</color>
+    <color name="md_theme_light_secondaryContainer">#FFF9C4</color>
+    <color name="md_theme_light_onSecondaryContainer">#3E2723</color>
+    <color name="md_theme_light_tertiary">#00695C</color>
+    <color name="md_theme_light_onTertiary">#FFFFFF</color>
+    <color name="md_theme_light_tertiaryContainer">#B2DFDB</color>
+    <color name="md_theme_light_onTertiaryContainer">#004D40</color>
+    <color name="md_theme_light_surface">#F9FAF4</color>
+    <color name="md_theme_light_onSurface">#1A1C18</color>
+    <color name="md_theme_light_surfaceVariant">#DEE5D9</color>
+    <color name="md_theme_light_onSurfaceVariant">#424940</color>
+    <color name="md_theme_light_outline">#727970</color>
+
+    <!-- Dark-mode tokens (your daily driver) -->
+    <color name="md_theme_dark_primary">#66BB6A</color>
+    <color name="md_theme_dark_onPrimary">#1B3A1B</color>
+    <color name="md_theme_dark_primaryContainer">#1B5E20</color>
+    <color name="md_theme_dark_onPrimaryContainer">#A5D6A7</color>
+    <color name="md_theme_dark_secondary">#FFB74D</color>
+    <color name="md_theme_dark_onSecondary">#3E2723</color>
+    <color name="md_theme_dark_secondaryContainer">#5D4037</color>
+    <color name="md_theme_dark_onSecondaryContainer">#FFE0B2</color>
+    <color name="md_theme_dark_tertiary">#4DB6AC</color>
+    <color name="md_theme_dark_onTertiary">#003731</color>
+    <color name="md_theme_dark_tertiaryContainer">#00695C</color>
+    <color name="md_theme_dark_onTertiaryContainer">#B2DFDB</color>
+    <color name="md_theme_dark_surface">#1A1C1A</color>
+    <color name="md_theme_dark_onSurface">#E2E3DE</color>
+    <color name="md_theme_dark_surfaceVariant">#414942</color>
+    <color name="md_theme_dark_onSurfaceVariant">#C1C9BE</color>
+    <color name="md_theme_dark_outline">#8B9389</color>
+
+    <!-- Suggestion button highlight colours -->
+    <color name="suggestion_selected_stroke">#66BB6A</color>
+    <color name="suggestion_selected_bg">#1B5E20</color>
+</resources>

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!--
+        Old English–inspired "RM" monogram.
+        R drawn first (dark green), M overlays on top (lighter green).
+        Content centered in the 66×66 adaptive-icon safe zone (21–87).
+    -->
+
+    <!-- ══ R letter (background layer, dark green) ══ -->
+    <path
+        android:fillColor="#1B5E20"
+        android:fillType="evenOdd"
+        android:pathData="
+            M34,80 L34,28 L62,28
+            C74,28 76,34 76,42
+            C76,50 72,55 62,55
+            L54,55 L76,80 L66,80 L44,55 L44,80 Z
+            M44,35 L58,35
+            C65,35 68,38 68,42
+            C68,46 65,49 58,49
+            L44,49 Z" />
+
+    <!-- Small diamond serif at R base -->
+    <path
+        android:fillColor="#1B5E20"
+        android:pathData="M32,80 L34,77 L36,80 Z" />
+
+    <!-- ══ M letter (foreground layer, lighter green) ══ -->
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="
+            M24,80 L24,30 L28,26 L54,60 L80,26 L84,30
+            L84,80 L76,80 L76,40 L54,70 L32,40 L32,80 Z" />
+
+    <!-- Small diamond serifs on M peaks for old-English flair -->
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M28,26 L30,22 L32,26 Z" />
+    <path
+        android:fillColor="#A5D6A7"
+        android:pathData="M76,26 L78,22 L80,26 Z" />
+
+    <!-- ══ Decorative bar beneath monogram ══ -->
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M26,84 L82,84 L80,87 L28,87 Z" />
+</vector>

@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+
+# Local configuration
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Android
+captures/
+*.apk
+*.aab
+
+# Debug/data files
+sheet_debug.txt
+
+# Emulator config
+Medium_Phone.ini
+
+# VS Code
+.vscode/

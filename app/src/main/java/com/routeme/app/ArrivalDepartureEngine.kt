@@ -1,0 +1,138 @@
+package com.routeme.app
+
+import android.location.Location
+
+class ArrivalDepartureEngine(
+    private val distanceCalculator: (Double, Double, Double, Double) -> Float = { fromLat, fromLng, toLat, toLng ->
+        val results = FloatArray(1)
+        Location.distanceBetween(fromLat, fromLng, toLat, toLng, results)
+        results[0]
+    }
+) {
+
+    data class ArrivalPrompt(
+        val client: Client,
+        val arrivedAtMillis: Long,
+        val location: Location
+    )
+
+    data class CompletionCandidate(
+        val client: Client,
+        val arrivedAtMillis: Long,
+        val location: Location,
+        val timeOnSiteMillis: Long
+    )
+
+    data class DepartureEvaluation(
+        val departedClientIds: List<String>,
+        val completionCandidates: List<CompletionCandidate>
+    )
+
+    private data class ActiveArrivalState(
+        val client: Client,
+        val arrivedAtMillis: Long,
+        val location: Location,
+        var completionNotified: Boolean = false
+    )
+
+    private var dwellClientId: String? = null
+    private var dwellStartTime: Long = 0L
+    private val activeArrivals = mutableMapOf<String, ActiveArrivalState>()
+
+    fun hasActiveArrivals(): Boolean = activeArrivals.isNotEmpty()
+
+    fun activeArrivalClientIds(): Set<String> = activeArrivals.keys
+
+    fun reset() {
+        dwellClientId = null
+        dwellStartTime = 0L
+        activeArrivals.clear()
+    }
+
+    fun evaluateArrival(
+        location: Location,
+        trackedClients: List<Client>,
+        arrivalRadiusMeters: Float,
+        dwellThresholdMs: Long,
+        nowMillis: Long
+    ): ArrivalPrompt? {
+        val nearestClient = ClientProximityHelper.findNearestClient(
+            location = location,
+            clients = trackedClients,
+            radiusMeters = arrivalRadiusMeters,
+            distanceCalculator = distanceCalculator
+        )
+            ?: run {
+                dwellClientId = null
+                dwellStartTime = 0L
+                return null
+            }
+
+        if (dwellClientId == nearestClient.id) {
+            val dwelled = nowMillis - dwellStartTime
+            if (dwelled >= dwellThresholdMs && !activeArrivals.containsKey(nearestClient.id)) {
+                val state = ActiveArrivalState(
+                    client = nearestClient,
+                    arrivedAtMillis = dwellStartTime,
+                    location = location
+                )
+                activeArrivals[nearestClient.id] = state
+                return ArrivalPrompt(nearestClient, dwellStartTime, location)
+            }
+        } else {
+            dwellClientId = nearestClient.id
+            dwellStartTime = nowMillis
+        }
+
+        return null
+    }
+
+    fun evaluateDepartures(
+        location: Location,
+        trackedClients: List<Client>,
+        onSiteRadiusMeters: Float,
+        clusterRadiusMeters: Float,
+        jobMinDurationMs: Long,
+        nowMillis: Long
+    ): DepartureEvaluation {
+        val departed = mutableListOf<String>()
+        val completable = mutableListOf<CompletionCandidate>()
+
+        for ((clientId, state) in activeArrivals) {
+            val lat = state.client.latitude ?: continue
+            val lng = state.client.longitude ?: continue
+            val dist = distanceCalculator(location.latitude, location.longitude, lat, lng)
+
+            if (dist > onSiteRadiusMeters) {
+                val stillInCluster = ClientProximityHelper.isInCluster(
+                    departingClient = state.client,
+                    location = location,
+                    trackedClients = trackedClients,
+                    activeArrivalClientIds = activeArrivalClientIds(),
+                    clusterRadiusMeters = clusterRadiusMeters,
+                    onSiteRadiusMeters = onSiteRadiusMeters,
+                    distanceCalculator = distanceCalculator
+                )
+                if (stillInCluster) continue
+
+                val timeOnSite = nowMillis - state.arrivedAtMillis
+                if (timeOnSite >= jobMinDurationMs && !state.completionNotified) {
+                    state.completionNotified = true
+                    completable.add(
+                        CompletionCandidate(
+                            client = state.client,
+                            arrivedAtMillis = state.arrivedAtMillis,
+                            location = state.location,
+                            timeOnSiteMillis = timeOnSite
+                        )
+                    )
+                }
+
+                departed.add(clientId)
+            }
+        }
+
+        departed.forEach { activeArrivals.remove(it) }
+        return DepartureEvaluation(departedClientIds = departed, completionCandidates = completable)
+    }
+}
