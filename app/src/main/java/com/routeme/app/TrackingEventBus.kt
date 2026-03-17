@@ -24,6 +24,8 @@ sealed interface TrackingEvent {
     /** Fired when the user departs a cluster of 2+ adjacent clients at once. */
     data class ClusterComplete(val members: List<ClusterMember>) : TrackingEvent
     data class LocationUpdated(val location: Location) : TrackingEvent
+    /** Fired when the user has dwelled at the current active destination. */
+    data class DestinationReached(val destinationName: String, val arrivedAtMillis: Long, val location: Location) : TrackingEvent
 }
 
 class TrackingEventBus {

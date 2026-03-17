@@ -7,6 +7,7 @@ import com.routeme.app.GeocodingHelper
 import com.routeme.app.RouteDirection
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
+import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
 import com.routeme.app.util.DateUtils
 import java.util.Calendar
@@ -25,11 +26,14 @@ class RoutingEngine {
         lastLocation: Location?,
         cuOverrideEnabled: Boolean,
         routeDirection: RouteDirection,
-        skippedClientIds: Set<String> = emptySet()
+        skippedClientIds: Set<String> = emptySet(),
+        destination: SavedDestination? = null
     ): List<ClientSuggestion> {
         val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        val destLat = destination?.lat ?: SHOP_LAT
+        val destLng = destination?.lng ?: SHOP_LNG
         val userDistanceToShopMiles = lastLocation?.let { loc ->
-            distanceMilesBetween(loc.latitude, loc.longitude, SHOP_LAT, SHOP_LNG)
+            distanceMilesBetween(loc.latitude, loc.longitude, destLat, destLng)
         }
 
         val scored = clients
@@ -52,7 +56,7 @@ class RoutingEngine {
 
                 val distance = distanceMiles(client, lastLocation)
                 val distanceToShopMiles = if (client.latitude != null && client.longitude != null) {
-                    distanceMilesBetween(client.latitude!!, client.longitude!!, SHOP_LAT, SHOP_LNG)
+                    distanceMilesBetween(client.latitude!!, client.longitude!!, destLat, destLng)
                 } else {
                     null
                 }
@@ -91,14 +95,16 @@ class RoutingEngine {
         return orderRoute(
             scored = scored,
             currentLocation = lastLocation,
-            routeDirection = routeDirection
+            routeDirection = routeDirection,
+            destination = destination
         )
     }
 
     private fun orderRoute(
         scored: List<ScoredSuggestion>,
         currentLocation: Location?,
-        routeDirection: RouteDirection
+        routeDirection: RouteDirection,
+        destination: SavedDestination? = null
     ): List<ClientSuggestion> {
         if (scored.isEmpty()) return emptyList()
 
@@ -120,7 +126,9 @@ class RoutingEngine {
 
         var currentLat = currentLocation.latitude
         var currentLng = currentLocation.longitude
-        var currentDistToShop = distanceMilesBetween(currentLat, currentLng, SHOP_LAT, SHOP_LNG)
+        val destLat = destination?.lat ?: SHOP_LAT
+        val destLng = destination?.lng ?: SHOP_LNG
+        var currentDistToShop = distanceMilesBetween(currentLat, currentLng, destLat, destLng)
 
         val ordered = mutableListOf<ScoredSuggestion>()
 
@@ -133,19 +141,28 @@ class RoutingEngine {
                 val hopPenalty = hopMiles * 14.0
 
                 val candidateDistToShop = candidate.suggestion.distanceToShopMiles
-                    ?: distanceMilesBetween(lat, lng, SHOP_LAT, SHOP_LNG)
+                    ?: distanceMilesBetween(lat, lng, destLat, destLng)
                 val delta = candidateDistToShop - currentDistToShop
 
-                val directionAdjustment = when (routeDirection) {
-                    RouteDirection.OUTWARD -> when {
-                        delta > 0.2 -> 28.0
-                        delta < -0.8 -> -35.0
-                        else -> -8.0
-                    }
-                    RouteDirection.HOMEWARD -> when {
+                val directionAdjustment = if (destination != null) {
+                    // When a destination is active, always score toward it
+                    when {
                         delta < -0.2 -> 28.0
                         delta > 0.8 -> -35.0
                         else -> -8.0
+                    }
+                } else {
+                    when (routeDirection) {
+                        RouteDirection.OUTWARD -> when {
+                            delta > 0.2 -> 28.0
+                            delta < -0.8 -> -35.0
+                            else -> -8.0
+                        }
+                        RouteDirection.HOMEWARD -> when {
+                            delta < -0.2 -> 28.0
+                            delta > 0.8 -> -35.0
+                            else -> -8.0
+                        }
                     }
                 }
 
@@ -160,7 +177,7 @@ class RoutingEngine {
             currentLat = next.suggestion.client.latitude ?: currentLat
             currentLng = next.suggestion.client.longitude ?: currentLng
             currentDistToShop = next.suggestion.distanceToShopMiles
-                ?: distanceMilesBetween(currentLat, currentLng, SHOP_LAT, SHOP_LNG)
+                ?: distanceMilesBetween(currentLat, currentLng, destLat, destLng)
         }
 
         val tail = withoutCoords.sortedWith(
@@ -331,5 +348,70 @@ class RoutingEngine {
             lines.add("Last service: ${lastService.serviceType.label} on ${DateUtils.formatTimestamp(lastService.completedAtMillis)}")
         }
         return lines.joinToString("\n")
+    }
+
+    /**
+     * Optimize the visit order for a list of destinations using nearest-neighbor + 2-opt.
+     * Returns the same destinations in an improved order starting from [startLat]/[startLng].
+     */
+    fun optimizeDestinationOrder(
+        destinations: List<SavedDestination>,
+        startLat: Double,
+        startLng: Double
+    ): List<SavedDestination> {
+        if (destinations.size <= 1) return destinations
+
+        // --- Nearest-neighbor initial route ---
+        val remaining = destinations.toMutableList()
+        val route = mutableListOf<SavedDestination>()
+        var curLat = startLat
+        var curLng = startLng
+
+        while (remaining.isNotEmpty()) {
+            val next = remaining.minByOrNull { distanceMilesBetween(curLat, curLng, it.lat, it.lng) }!!
+            route.add(next)
+            remaining.remove(next)
+            curLat = next.lat
+            curLng = next.lng
+        }
+
+        if (route.size <= 2) return route
+
+        // --- 2-opt improvement ---
+        // Prepend a virtual start node for distance calculations
+        val lats = DoubleArray(route.size + 1)
+        val lngs = DoubleArray(route.size + 1)
+        lats[0] = startLat; lngs[0] = startLng
+        for (i in route.indices) { lats[i + 1] = route[i].lat; lngs[i + 1] = route[i].lng }
+
+        val n = lats.size
+        val order = IntArray(n) { it } // indices into lats/lngs
+
+        fun segDist(i: Int, j: Int) = distanceMilesBetween(lats[order[i]], lngs[order[i]], lats[order[j]], lngs[order[j]])
+
+        var improved = true
+        var passes = 0
+        while (improved && passes < 50) {
+            improved = false
+            passes++
+            for (i in 1 until n - 1) {
+                for (j in i + 1 until n) {
+                    val oldDist = segDist(i - 1, i) + if (j + 1 < n) segDist(j, j + 1) else 0.0
+                    val newDist = segDist(i - 1, j) + if (j + 1 < n) segDist(i, j + 1) else 0.0
+                    if (newDist < oldDist - 0.01) {
+                        // Reverse the segment between i and j
+                        var left = i; var right = j
+                        while (left < right) {
+                            val tmp = order[left]; order[left] = order[right]; order[right] = tmp
+                            left++; right--
+                        }
+                        improved = true
+                    }
+                }
+            }
+        }
+
+        // Map back, skipping index 0 (the virtual start node)
+        return (1 until n).map { destinations[order[it] - 1] }
     }
 }

@@ -84,6 +84,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
+    // ML Kit text recognition (camera OCR for destination input)
+    implementation("com.google.mlkit:text-recognition:16.0.0")
+
     // Unit tests
     testImplementation("junit:junit:4.13.2")
     testImplementation("io.mockk:mockk:1.13.10")

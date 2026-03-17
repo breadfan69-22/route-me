@@ -125,6 +125,14 @@ object GeocodingHelper {
     }
 
     /**
+     * Geocodes a single address string and returns lat/lng, or null on failure.
+     * Must be called on a background thread.
+     */
+    fun geocodeAddress(address: String): Pair<Double, Double>? {
+        return geocodeWithGoogle(address).coords
+    }
+
+    /**
      * Geocodes all clients that don't yet have lat/lng.
      * Must be called on a background thread.
      */

@@ -75,7 +75,16 @@ data class NonClientStop(
     val address: String? = null,
     val arrivedAtMillis: Long,
     val departedAtMillis: Long? = null,
-    val durationMinutes: Long = 0
+    val durationMinutes: Long = 0,
+    val label: String? = null
+)
+
+data class SavedDestination(
+    val id: String,
+    val name: String,
+    val address: String,
+    val lat: Double,
+    val lng: Double
 )
 
 enum class ServiceType(val label: String, val stepNumber: Int) {

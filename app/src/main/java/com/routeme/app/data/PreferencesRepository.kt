@@ -1,6 +1,9 @@
 package com.routeme.app.data
 
 import android.content.Context
+import com.routeme.app.SavedDestination
+import org.json.JSONArray
+import org.json.JSONObject
 
 class PreferencesRepository(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -43,6 +46,75 @@ class PreferencesRepository(context: Context) {
         get() = prefs.getLong(PREF_SELECTED_STEPS_DATE, 0L)
         set(value) = prefs.edit().putLong(PREF_SELECTED_STEPS_DATE, value).apply()
 
+    // ─── Saved & active destinations ───────────────────────────
+
+    /** Persistent list of saved destination presets (vendors, common locations). */
+    var savedDestinations: List<SavedDestination>
+        get() {
+            val json = prefs.getString(PREF_SAVED_DESTINATIONS, null) ?: return emptyList()
+            return try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    SavedDestination(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        address = obj.getString("address"),
+                        lat = obj.getDouble("lat"),
+                        lng = obj.getDouble("lng")
+                    )
+                }
+            } catch (_: Exception) { emptyList() }
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { d ->
+                arr.put(JSONObject().apply {
+                    put("id", d.id)
+                    put("name", d.name)
+                    put("address", d.address)
+                    put("lat", d.lat)
+                    put("lng", d.lng)
+                })
+            }
+            prefs.edit().putString(PREF_SAVED_DESTINATIONS, arr.toString()).apply()
+        }
+
+    /**
+     * The currently active destination (for tracking service dwell detection).
+     * Null means no destination is active. This is a transient value set by the
+     * ViewModel when a destination queue entry becomes active; it does NOT
+     * persist across app restarts (the queue in SavedStateHandle handles that).
+     */
+    var activeDestination: SavedDestination?
+        get() {
+            val json = prefs.getString(PREF_ACTIVE_DESTINATION, null) ?: return null
+            return try {
+                val obj = JSONObject(json)
+                SavedDestination(
+                    id = obj.getString("id"),
+                    name = obj.getString("name"),
+                    address = obj.getString("address"),
+                    lat = obj.getDouble("lat"),
+                    lng = obj.getDouble("lng")
+                )
+            } catch (_: Exception) { null }
+        }
+        set(value) {
+            if (value == null) {
+                prefs.edit().remove(PREF_ACTIVE_DESTINATION).apply()
+            } else {
+                val obj = JSONObject().apply {
+                    put("id", value.id)
+                    put("name", value.name)
+                    put("address", value.address)
+                    put("lat", value.lat)
+                    put("lng", value.lng)
+                }
+                prefs.edit().putString(PREF_ACTIVE_DESTINATION, obj.toString()).apply()
+            }
+        }
+
     companion object {
         private const val PREFS_NAME = "routeme_prefs"
         private const val PREF_SHEETS_READ_URL = "sheets_read_url"
@@ -54,6 +126,8 @@ class PreferencesRepository(context: Context) {
         private const val PREF_NON_CLIENT_THRESHOLD = "non_client_stop_threshold_min"
         private const val PREF_SELECTED_STEPS = "selected_steps"
         private const val PREF_SELECTED_STEPS_DATE = "selected_steps_date"
+        private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
+        private const val PREF_ACTIVE_DESTINATION = "active_destination"
         const val DEFAULT_NON_CLIENT_THRESHOLD = 5
     }
 }

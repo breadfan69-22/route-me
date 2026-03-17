@@ -3,6 +3,7 @@ package com.routeme.app.ui
 import com.routeme.app.Client
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
+import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
 
 data class MainUiState(
@@ -25,8 +26,18 @@ data class MainUiState(
     val completedSteps: Set<ServiceType> = emptySet(),
     val minDays: Int = 21,
     val cuOverrideEnabled: Boolean = false,
-    val routeDirection: RouteDirection = RouteDirection.OUTWARD
-)
+    val routeDirection: RouteDirection = RouteDirection.OUTWARD,
+    /** Ordered queue of destinations for today. */
+    val destinationQueue: List<SavedDestination> = emptyList(),
+    /** Index into [destinationQueue] for the current active destination. */
+    val activeDestinationIndex: Int = 0,
+    /** Persistent list of saved destination presets. */
+    val savedDestinations: List<SavedDestination> = emptyList()
+) {
+    /** The current active destination, or null if the queue is empty/exhausted. */
+    val activeDestination: SavedDestination?
+        get() = destinationQueue.getOrNull(activeDestinationIndex)
+}
 
 sealed interface MainEvent {
     data class ShowSnackbar(val message: String) : MainEvent

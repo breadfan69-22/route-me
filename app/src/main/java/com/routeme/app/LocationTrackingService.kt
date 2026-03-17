@@ -90,6 +90,9 @@ class LocationTrackingService : Service(), KoinComponent {
         private const val NON_CLIENT_STOP_RADIUS_METERS = 60f   // Stationary threshold radius
         private const val NON_CLIENT_DEPART_RADIUS_METERS = 80f // Leave radius (slightly wider to avoid flicker)
 
+        // --- Destination dwell detection ---
+        private const val DESTINATION_RADIUS_METERS = 150f      // Near-destination radius
+        private const val DESTINATION_DWELL_MS = 3 * 60 * 1000L // 3 min dwell → arrived
     }
 
     private var locationManager: LocationManager? = null
@@ -116,6 +119,12 @@ class LocationTrackingService : Service(), KoinComponent {
         nonClientStopRadiusMeters = NON_CLIENT_STOP_RADIUS_METERS,
         nonClientDepartRadiusMeters = NON_CLIENT_DEPART_RADIUS_METERS
     )
+
+    // Destination dwell state
+    private var destDwellStartMs: Long = 0L
+    private var destDwellLat: Double = 0.0
+    private var destDwellLng: Double = 0.0
+    private var destDwellFired: Boolean = false
     private val trackingNotifier by lazy {
         LocationTrackingNotifier(
             context = this,
@@ -140,6 +149,7 @@ class LocationTrackingService : Service(), KoinComponent {
         checkForClientArrival(location)
         checkForDepartures(location)
         checkForNonClientStop(location)
+        checkForDestinationArrival(location)
     }
 
     override fun onCreate() {
@@ -484,6 +494,82 @@ class LocationTrackingService : Service(), KoinComponent {
         if (closeRequest != null) {
             closeActiveNonClientStop(closeRequest)
         }
+    }
+
+    // ─── Destination dwell detection ───────────────────────────
+
+    /**
+     * Detects when the user has been stationary at the active destination for
+     * [DESTINATION_DWELL_MS] (3 min). Fires [TrackingEvent.DestinationReached]
+     * and inserts a labeled non-client stop record.
+     *
+     * Skipped when near a tracked client (doing a job on the way).
+     */
+    private fun checkForDestinationArrival(location: Location) {
+        val dest = preferencesRepository.activeDestination ?: run {
+            resetDestDwell()
+            return
+        }
+
+        val nearClient = isNearAnyClient(location, ARRIVAL_RADIUS_METERS)
+        if (nearClient || arrivalDepartureEngine.hasActiveArrivals()) {
+            resetDestDwell()
+            return
+        }
+
+        val results = FloatArray(1)
+        Location.distanceBetween(location.latitude, location.longitude, dest.lat, dest.lng, results)
+        val distMeters = results[0]
+
+        if (distMeters > DESTINATION_RADIUS_METERS) {
+            resetDestDwell()
+            return
+        }
+
+        val now = System.currentTimeMillis()
+
+        if (destDwellStartMs == 0L) {
+            destDwellStartMs = now
+            destDwellLat = location.latitude
+            destDwellLng = location.longitude
+            return
+        }
+
+        if (destDwellFired) return
+
+        val elapsed = now - destDwellStartMs
+        if (elapsed >= DESTINATION_DWELL_MS) {
+            destDwellFired = true
+            Log.d(TAG, "Destination reached: ${dest.name} (${elapsed / 1000}s dwell)")
+
+            // Insert a labeled non-client stop
+            val entity = NonClientStopEntity(
+                lat = destDwellLat,
+                lng = destDwellLng,
+                address = dest.address,
+                arrivedAtMillis = destDwellStartMs,
+                label = dest.name
+            )
+            serviceScope.launch {
+                try {
+                    nonClientStopDao.insertStop(entity)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to log destination stop: ${e.message}")
+                }
+            }
+
+            val handler = android.os.Handler(mainLooper)
+            handler.post {
+                trackingEventBus.tryEmit(
+                    TrackingEvent.DestinationReached(dest.name, destDwellStartMs, location)
+                )
+            }
+        }
+    }
+
+    private fun resetDestDwell() {
+        destDwellStartMs = 0L
+        destDwellFired = false
     }
 
     // ─── Notifications ─────────────────────────────────────────

@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.routeme.app.Client
 import com.routeme.app.RouteDirection
+import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.SHOP_LAT
@@ -15,6 +16,8 @@ import com.routeme.app.SheetsWriteBack
 import com.routeme.app.DailyRecordRow
 import com.routeme.app.NonClientStop
 import com.routeme.app.suggestedStepsForDate
+import com.routeme.app.TrackingEvent
+import com.routeme.app.TrackingEventBus
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.domain.RoutingEngine
@@ -49,6 +52,8 @@ class MainViewModel(
         private const val KEY_ARRIVAL_LAT = "arrival_lat"
         private const val KEY_ARRIVAL_LNG = "arrival_lng"
         private const val KEY_IS_TRACKING = "is_tracking"
+        private const val KEY_DEST_QUEUE = "dest_queue"
+        private const val KEY_DEST_INDEX = "dest_index"
     }
 
     private val pageSize = 5
@@ -105,7 +110,19 @@ class MainViewModel(
             arrivalStartedAtMillis = savedStateHandle.get<Long?>(KEY_ARRIVAL_STARTED_AT),
             arrivalLat = savedStateHandle.get<Double?>(KEY_ARRIVAL_LAT),
             arrivalLng = savedStateHandle.get<Double?>(KEY_ARRIVAL_LNG),
-            isTracking = savedStateHandle.get<Boolean>(KEY_IS_TRACKING) ?: false
+            isTracking = savedStateHandle.get<Boolean>(KEY_IS_TRACKING) ?: false,
+            destinationQueue = savedStateHandle.get<String>(KEY_DEST_QUEUE)
+                ?.takeIf { it.isNotBlank() }
+                ?.split("|")
+                ?.mapNotNull { entry ->
+                    val parts = entry.split(",", limit = 5)
+                    if (parts.size == 5) SavedDestination(
+                        parts[0], parts[1], parts[2],
+                        parts[3].toDoubleOrNull() ?: return@mapNotNull null,
+                        parts[4].toDoubleOrNull() ?: return@mapNotNull null
+                    ) else null
+                } ?: emptyList(),
+            activeDestinationIndex = savedStateHandle.get<Int>(KEY_DEST_INDEX) ?: 0
         )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -116,6 +133,7 @@ class MainViewModel(
     init {
         loadSyncSettings()
         loadClients()
+        loadSavedDestinations()
     }
 
     fun loadClients() {
@@ -315,6 +333,119 @@ class MainViewModel(
         }
     }
 
+    // ─── Destination queue management ──────────────────────────
+
+    private fun loadSavedDestinations() {
+        _uiState.update { it.copy(savedDestinations = preferencesRepository.savedDestinations) }
+    }
+
+    fun addSavedDestination(dest: SavedDestination) {
+        val updated = preferencesRepository.savedDestinations + dest
+        preferencesRepository.savedDestinations = updated
+        _uiState.update { it.copy(savedDestinations = updated) }
+    }
+
+    fun removeSavedDestination(id: String) {
+        val updated = preferencesRepository.savedDestinations.filter { it.id != id }
+        preferencesRepository.savedDestinations = updated
+        _uiState.update { it.copy(savedDestinations = updated) }
+    }
+
+    fun addToDestinationQueue(dest: SavedDestination) {
+        _uiState.update { it.copy(destinationQueue = it.destinationQueue + dest) }
+        syncActiveDestinationToPrefs()
+        viewModelScope.launch { setStatus("Added ${dest.name} to destinations") }
+    }
+
+    fun removeFromDestinationQueue(index: Int) {
+        _uiState.update { state ->
+            val queue = state.destinationQueue.toMutableList().apply { removeAt(index) }
+            val newIndex = when {
+                queue.isEmpty() -> 0
+                state.activeDestinationIndex >= queue.size -> queue.size - 1
+                index < state.activeDestinationIndex -> state.activeDestinationIndex - 1
+                else -> state.activeDestinationIndex
+            }
+            state.copy(destinationQueue = queue, activeDestinationIndex = newIndex)
+        }
+        syncActiveDestinationToPrefs()
+    }
+
+    fun moveDestinationInQueue(fromIndex: Int, toIndex: Int) {
+        _uiState.update { state ->
+            val queue = state.destinationQueue.toMutableList()
+            val item = queue.removeAt(fromIndex)
+            queue.add(toIndex, item)
+            // Track where the active index moved
+            val oldActive = state.activeDestinationIndex
+            val newActive = when {
+                fromIndex == oldActive -> toIndex
+                fromIndex < oldActive && toIndex >= oldActive -> oldActive - 1
+                fromIndex > oldActive && toIndex <= oldActive -> oldActive + 1
+                else -> oldActive
+            }
+            state.copy(destinationQueue = queue, activeDestinationIndex = newActive)
+        }
+        syncActiveDestinationToPrefs()
+    }
+
+    fun clearDestinationQueue() {
+        _uiState.update { it.copy(destinationQueue = emptyList(), activeDestinationIndex = 0) }
+        preferencesRepository.activeDestination = null
+        viewModelScope.launch { setStatus("Destinations cleared") }
+    }
+
+    fun skipDestination() {
+        advanceDestinationQueue()
+    }
+
+    fun optimizeDestinationQueue(currentLocation: Location?) {
+        val state = _uiState.value
+        if (state.destinationQueue.size <= 1) return
+        val startLat = currentLocation?.latitude ?: SHOP_LAT
+        val startLng = currentLocation?.longitude ?: SHOP_LNG
+        val optimized = routingEngine.optimizeDestinationOrder(state.destinationQueue, startLat, startLng)
+        _uiState.update { it.copy(destinationQueue = optimized, activeDestinationIndex = 0) }
+        syncActiveDestinationToPrefs()
+        viewModelScope.launch { setStatus("Optimized ${optimized.size} destinations") }
+    }
+
+    /** Called when tracking detects arrival at the active destination. */
+    fun onDestinationReached(destinationName: String) {
+        viewModelScope.launch {
+            val state = _uiState.value
+            val remaining = state.destinationQueue.size - state.activeDestinationIndex - 1
+            if (remaining > 0) {
+                val nextDest = state.destinationQueue.getOrNull(state.activeDestinationIndex + 1)
+                _events.emit(MainEvent.ShowSnackbar(
+                    "Arrived at $destinationName — next: ${nextDest?.name} ($remaining remaining)"
+                ))
+            } else {
+                _events.emit(MainEvent.ShowSnackbar(
+                    "Arrived at $destinationName — all destinations reached"
+                ))
+            }
+            advanceDestinationQueue()
+        }
+    }
+
+    private fun advanceDestinationQueue() {
+        _uiState.update { state ->
+            val nextIndex = state.activeDestinationIndex + 1
+            if (nextIndex >= state.destinationQueue.size) {
+                state.copy(destinationQueue = emptyList(), activeDestinationIndex = 0)
+            } else {
+                state.copy(activeDestinationIndex = nextIndex)
+            }
+        }
+        syncActiveDestinationToPrefs()
+    }
+
+    /** Push current active destination to SharedPrefs so the tracking service can read it. */
+    private fun syncActiveDestinationToPrefs() {
+        preferencesRepository.activeDestination = _uiState.value.activeDestination
+    }
+
     fun suggestNextClients(currentLocation: Location?) {
         if (checkAndPromptStaleArrival { suggestNextClients(currentLocation) }) return
         viewModelScope.launch {
@@ -327,6 +458,7 @@ class MainViewModel(
             if (todayEpoch != skipDateEpochDay) {
                 skippedTodayIds.clear()
                 skipDateEpochDay = todayEpoch
+                clearDestinationQueue()
             }
 
             val ranked = routingEngine.rankClients(
@@ -336,7 +468,8 @@ class MainViewModel(
                 lastLocation = location,
                 cuOverrideEnabled = state.cuOverrideEnabled,
                 routeDirection = state.routeDirection,
-                skippedClientIds = skippedTodayIds
+                skippedClientIds = skippedTodayIds,
+                destination = state.activeDestination
             )
 
             if (ranked.isEmpty()) {
@@ -923,16 +1056,30 @@ class MainViewModel(
 
         val requestedStops = minOf(routeExportTopN, mappableClients.size)
         val topStops = mappableClients.take(requestedStops)
-        return buildMapsRouteExport(topStops, state.routeDirection)
+        return buildMapsRouteExport(topStops, state.routeDirection, state.activeDestination)
     }
 
     private fun buildMapsRouteExport(
         clients: List<Client>,
-        routeDirection: RouteDirection
+        routeDirection: RouteDirection,
+        activeDestination: SavedDestination? = null
     ): RouteExportResult? {
         if (clients.isEmpty()) return null
 
         val origin = lastSuggestionLocation?.let { "${it.latitude},${it.longitude}" } ?: "$SHOP_LAT,$SHOP_LNG"
+
+        // When navigating toward a destination, always end at that destination
+        if (activeDestination != null) {
+            val usableStops = clients.take(maxGoogleWaypoints)
+            val destination = "${activeDestination.lat},${activeDestination.lng}"
+            val waypoints = usableStops.mapNotNull { locationToken(it) }
+            val uri = buildMapsDirectionsUrl(
+                origin = origin,
+                destination = destination,
+                waypoints = waypoints
+            )
+            return RouteExportResult(uri, usableStops.size, clients.size)
+        }
 
         return when (routeDirection) {
             RouteDirection.OUTWARD -> {
@@ -1087,27 +1234,7 @@ class MainViewModel(
             if (index < rows.size - 1) sb.appendLine()
         }
 
-        // Append non-client stops section
-        if (nonClientStops.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-            sb.appendLine("Breaks / Non-Client Stops")
-            sb.appendLine()
-            val breakMinutes = nonClientStops.sumOf { it.durationMinutes }
-            val bHours = breakMinutes / 60
-            val bMins = breakMinutes % 60
-            val breakLabel = if (bHours > 0) "${bHours}h ${bMins}m" else "${bMins}m"
-            sb.appendLine("${nonClientStops.size} break(s)  •  $breakLabel total")
-            sb.appendLine()
-            nonClientStops.forEachIndexed { i, stop ->
-                val addr = stop.address ?: "Unknown location"
-                val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
-                val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
-                sb.appendLine("☕ $addr")
-                sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
-                if (i < nonClientStops.size - 1) sb.appendLine()
-            }
-        }
+        appendNonClientStopsSummary(sb, nonClientStops)
         return sb.toString()
     }
 
@@ -1210,28 +1337,56 @@ class MainViewModel(
             if (index < rows.size - 1) sb.appendLine()
         }
 
-        // Append non-client stops section
-        if (nonClientStops.isNotEmpty()) {
+        appendNonClientStopsSummary(sb, nonClientStops)
+        return sb.toString()
+    }
+
+    /** Format non-client stops split into destination stops and breaks. */
+    private fun appendNonClientStopsSummary(sb: StringBuilder, nonClientStops: List<NonClientStop>) {
+        val destinationStops = nonClientStops.filter { it.label != null }
+        val breakStops = nonClientStops.filter { it.label == null }
+
+        if (destinationStops.isNotEmpty()) {
+            sb.appendLine()
+            sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+            sb.appendLine("Destination Stops \uD83D\uDCE6")
+            sb.appendLine()
+            val destMinutes = destinationStops.sumOf { it.durationMinutes }
+            val dHours = destMinutes / 60
+            val dMins = destMinutes % 60
+            val destLabel = if (dHours > 0) "${dHours}h ${dMins}m" else "${dMins}m"
+            sb.appendLine("${destinationStops.size} destination(s)  •  $destLabel total")
+            sb.appendLine()
+            destinationStops.forEachIndexed { i, stop ->
+                val name = stop.label ?: "Destination"
+                val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
+                val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
+                sb.appendLine("\uD83D\uDCCD $name")
+                sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
+                if (i < destinationStops.size - 1) sb.appendLine()
+            }
+        }
+
+        if (breakStops.isNotEmpty()) {
             sb.appendLine()
             sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
             sb.appendLine("Breaks / Non-Client Stops")
             sb.appendLine()
-            val breakMinutes = nonClientStops.sumOf { it.durationMinutes }
+            val breakMinutes = breakStops.sumOf { it.durationMinutes }
             val bHours = breakMinutes / 60
             val bMins = breakMinutes % 60
             val breakLabel = if (bHours > 0) "${bHours}h ${bMins}m" else "${bMins}m"
-            sb.appendLine("${nonClientStops.size} break(s)  •  $breakLabel total")
+            sb.appendLine("${breakStops.size} break(s)  •  $breakLabel total")
             sb.appendLine()
-            nonClientStops.forEachIndexed { i, stop ->
+            breakStops.forEachIndexed { i, stop ->
                 val addr = stop.address ?: "Unknown location"
                 val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
                 val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
                 sb.appendLine("☕ $addr")
                 sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
-                if (i < nonClientStops.size - 1) sb.appendLine()
+                if (i < breakStops.size - 1) sb.appendLine()
             }
         }
-        return sb.toString()
     }
 
     private fun persistCriticalState(state: MainUiState) {
@@ -1245,6 +1400,11 @@ class MainViewModel(
         savedStateHandle[KEY_ARRIVAL_LAT] = state.arrivalLat
         savedStateHandle[KEY_ARRIVAL_LNG] = state.arrivalLng
         savedStateHandle[KEY_IS_TRACKING] = state.isTracking
+        // Destination queue
+        savedStateHandle[KEY_DEST_QUEUE] = state.destinationQueue.joinToString("|") {
+            "${it.id},${it.name},${it.address},${it.lat},${it.lng}"
+        }
+        savedStateHandle[KEY_DEST_INDEX] = state.activeDestinationIndex
     }
 
     // ─── Retry-queue helpers ───────────────────────────────────

@@ -59,6 +59,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_destinations"
+        android:title="@string/menu_destinations"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_min_days"
         android:title="@string/menu_min_days"
         app:showAsAction="never" />

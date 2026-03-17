@@ -118,4 +118,24 @@
     <string name="dialog_cluster_message">You serviced %d nearby properties.\nUncheck any you didn\u2019t do:</string>
     <string name="dialog_cluster_confirm">Mark Selected Complete</string>
     <string name="dialog_cluster_cancel">Not yet</string>
+
+    <!-- Destination queue -->
+    <string name="menu_destinations">Working Toward…</string>
+    <string name="dialog_destinations_title">Destination Queue</string>
+    <string name="dialog_dest_empty">No destinations queued.\nAdd addresses you need to visit today.</string>
+    <string name="dialog_dest_active">Now heading toward: %s</string>
+    <string name="dialog_dest_add_hint">Address or place name</string>
+    <string name="dialog_dest_add">Add</string>
+    <string name="dialog_dest_voice">Voice</string>
+    <string name="dialog_dest_paste">Paste</string>
+    <string name="dialog_dest_camera">Camera</string>
+    <string name="dialog_dest_optimize">Optimize Order</string>
+    <string name="dialog_dest_clear">Clear All</string>
+    <string name="dialog_dest_save_preset">Save as Preset</string>
+    <string name="dialog_dest_presets">Saved Presets</string>
+    <string name="dialog_dest_geocoding">Geocoding address…</string>
+    <string name="dialog_dest_geocode_failed">Could not geocode: %s</string>
+    <string name="dialog_dest_select_lines">Select lines to add as destinations:</string>
+    <string name="dialog_dest_no_text">No text found in image</string>
+    <string name="toast_dest_arrived">Arrived at %s</string>
 </resources>

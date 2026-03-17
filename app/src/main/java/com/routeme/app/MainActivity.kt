@@ -60,6 +60,34 @@ class MainActivity : AppCompatActivity() {
         viewModel.importClients(uri)
     }
 
+    // ─── Destination input launchers ───────────────────────────
+
+    /** Pending callback for geocoded results from voice/paste/camera input. */
+    private var pendingDestinationCallback: ((SavedDestination) -> Unit)? = null
+    private var pendingCameraImageUri: Uri? = null
+
+    private val voiceInputLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+            if (!spoken.isNullOrBlank()) {
+                geocodeAndAddDestination(spoken)
+            }
+        }
+    }
+
+    private val cameraLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            val uri = pendingCameraImageUri ?: return@registerForActivityResult
+            runOcrOnImage(uri)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -170,6 +198,9 @@ class MainActivity : AppCompatActivity() {
                             is TrackingEvent.ClientArrival -> showArrivalDialog(event.client, event.arrivedAtMillis, event.location)
                             is TrackingEvent.JobComplete -> showCompletionDialog(event.client, event.timeOnSiteMillis, event.arrivedAtMillis, event.location)
                             is TrackingEvent.ClusterComplete -> showClusterCompletionDialog(event.members)
+                            is TrackingEvent.DestinationReached -> {
+                                viewModel.onDestinationReached(event.destinationName)
+                            }
                             is TrackingEvent.LocationUpdated -> Unit
                         }
                     }
@@ -631,6 +662,10 @@ class MainActivity : AppCompatActivity() {
                 showMinDaysDialog()
                 true
             }
+            R.id.action_destinations -> {
+                showDestinationDialog()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -1038,6 +1073,283 @@ class MainActivity : AppCompatActivity() {
             intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
             return
         }
+    }
+
+    // ─── Destination Queue Dialog ────────────────────────────
+
+    private fun showDestinationDialog() {
+        val state = viewModel.uiState.value
+        val queue = state.destinationQueue
+        val activeIdx = state.activeDestinationIndex
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 8)
+        }
+
+        // Active destination header
+        val activeDest = state.activeDestination
+        if (activeDest != null) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.dialog_dest_active, activeDest.name)
+                setTypeface(null, Typeface.BOLD)
+                textSize = 14f
+                setPadding(0, 0, 0, 16)
+            })
+        }
+
+        // Queue list
+        if (queue.isEmpty()) {
+            container.addView(TextView(this).apply {
+                text = getString(R.string.dialog_dest_empty)
+                setPadding(0, 8, 0, 16)
+            })
+        } else {
+            queue.forEachIndexed { index, dest ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 4, 0, 4)
+                }
+                val prefix = if (index == activeIdx) "\u25B6 " else "${index + 1}. "
+                row.addView(TextView(this).apply {
+                    text = "$prefix${dest.name}"
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                    if (index == activeIdx) setTypeface(null, Typeface.BOLD)
+                })
+                row.addView(TextView(this).apply {
+                    text = "\u2716"
+                    textSize = 18f
+                    setPadding(16, 0, 0, 0)
+                    setOnClickListener {
+                        viewModel.removeFromDestinationQueue(index)
+                        showDestinationDialog() // refresh
+                    }
+                })
+                container.addView(row)
+            }
+        }
+
+        // Address input
+        val addressInput = AndroidEditText(this).apply {
+            hint = getString(R.string.dialog_dest_add_hint)
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
+            setPadding(0, 24, 0, 8)
+        }
+        container.addView(addressInput)
+
+        // Input method buttons row
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 8, 0, 8)
+        }
+
+        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.dialog_dest_add)
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = 4
+            }
+            setOnClickListener {
+                val address = addressInput.text.toString().trim()
+                if (address.isNotBlank()) {
+                    geocodeAndAddDestination(address)
+                }
+            }
+        })
+
+        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.dialog_dest_voice)
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = 4
+                marginEnd = 4
+            }
+            setOnClickListener { launchVoiceInput() }
+        })
+
+        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.dialog_dest_paste)
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = 4
+                marginEnd = 4
+            }
+            setOnClickListener { pasteDestinations() }
+        })
+
+        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.dialog_dest_camera)
+            textSize = 11f
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = 4
+            }
+            setOnClickListener { launchCameraForOcr() }
+        })
+        container.addView(buttonRow)
+
+        // Action buttons row (optimize, clear)
+        if (queue.size >= 2) {
+            val actionRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 8, 0, 0)
+            }
+            actionRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = getString(R.string.dialog_dest_optimize)
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 4
+                }
+                setOnClickListener {
+                    viewModel.optimizeDestinationQueue(lastLocation)
+                    showDestinationDialog() // refresh
+                }
+            })
+            actionRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = getString(R.string.dialog_dest_clear)
+                textSize = 11f
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = 4
+                }
+                setOnClickListener {
+                    viewModel.clearDestinationQueue()
+                    showDestinationDialog() // refresh
+                }
+            })
+            container.addView(actionRow)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_destinations_title))
+            .setView(container)
+            .setPositiveButton("Done", null)
+            .create()
+
+        // If there's an active destination, add Skip button
+        if (queue.isNotEmpty() && activeIdx < queue.size) {
+            dialog.setButton(AlertDialog.BUTTON_NEUTRAL, "Skip") { _, _ ->
+                viewModel.skipDestination()
+                rerunSuggestionsIfVisible()
+            }
+        }
+
+        dialog.show()
+    }
+
+    // ─── Destination Input Methods ─────────────────────────────
+
+    private fun geocodeAndAddDestination(address: String) {
+        Snackbar.make(binding.root, getString(R.string.dialog_dest_geocoding), Snackbar.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val coords = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                GeocodingHelper.geocodeAddress(address)
+            }
+            if (coords != null) {
+                val dest = SavedDestination(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = address,
+                    address = address,
+                    lat = coords.first,
+                    lng = coords.second
+                )
+                viewModel.addToDestinationQueue(dest)
+                rerunSuggestionsIfVisible()
+            } else {
+                Snackbar.make(
+                    binding.root,
+                    getString(R.string.dialog_dest_geocode_failed, address),
+                    Snackbar.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun launchVoiceInput() {
+        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say an address or place name")
+        }
+        try {
+            voiceInputLauncher.launch(intent)
+        } catch (_: Exception) {
+            Snackbar.make(binding.root, "Voice input not available", Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun pasteDestinations() {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+        if (text.isNullOrBlank()) {
+            Snackbar.make(binding.root, "Clipboard is empty", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val lines = text.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return
+
+        if (lines.size == 1) {
+            geocodeAndAddDestination(lines.first())
+        } else {
+            showLinePickerDialog(lines)
+        }
+    }
+
+    private fun launchCameraForOcr() {
+        try {
+            val imageFile = java.io.File(cacheDir, "dest_ocr_${System.currentTimeMillis()}.jpg")
+            pendingCameraImageUri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", imageFile
+            )
+            cameraLauncher.launch(pendingCameraImageUri)
+        } catch (e: Exception) {
+            Snackbar.make(binding.root, "Camera not available: ${e.message}", Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun runOcrOnImage(uri: Uri) {
+        lifecycleScope.launch {
+            try {
+                val image = com.google.mlkit.vision.common.InputImage.fromFilePath(this@MainActivity, uri)
+                val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(
+                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                )
+                val visionText = kotlin.coroutines.suspendCoroutine<com.google.mlkit.vision.text.Text> { cont ->
+                    recognizer.process(image)
+                        .addOnSuccessListener { cont.resumeWith(Result.success(it)) }
+                        .addOnFailureListener { cont.resumeWith(Result.failure(it)) }
+                }
+                val lines = visionText.textBlocks
+                    .flatMap { block -> block.lines }
+                    .map { line -> line.text.trim() }
+                    .filter { text -> text.isNotBlank() }
+
+                if (lines.isEmpty()) {
+                    Snackbar.make(binding.root, getString(R.string.dialog_dest_no_text), Snackbar.LENGTH_SHORT).show()
+                } else {
+                    showLinePickerDialog(lines)
+                }
+            } catch (e: Exception) {
+                Snackbar.make(binding.root, "OCR failed: ${e.message}", Snackbar.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** Show a multi-choice dialog for the user to pick which lines are addresses to geocode. */
+    private fun showLinePickerDialog(lines: List<String>) {
+        val checked = BooleanArray(lines.size) { true }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.dialog_dest_select_lines))
+            .setMultiChoiceItems(lines.toTypedArray(), checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("Add Selected") { _, _ ->
+                lines.forEachIndexed { i, line ->
+                    if (checked[i]) geocodeAndAddDestination(line)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun dismissNotification(notifId: Int) {
