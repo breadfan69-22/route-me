@@ -49,6 +49,9 @@ class MainActivity : AppCompatActivity() {
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
     private val arrivedClientIds = mutableSetOf<String>()
 
+    /** Holds the open destination dialog so async geocode can refresh it. */
+    private var destinationDialog: AlertDialog? = null
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
             return@registerForActivityResult
@@ -144,6 +147,14 @@ class MainActivity : AppCompatActivity() {
                         }
                         // Grey out toggle buttons for fully completed steps
                         updateStepToggleEnabled(state.completedSteps)
+                        // Active destination banner
+                        val activeDest = state.activeDestination
+                        if (activeDest != null) {
+                            binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDest.name}"
+                            binding.destinationBanner.visibility = View.VISIBLE
+                        } else {
+                            binding.destinationBanner.visibility = View.GONE
+                        }
                         showCurrentPage()
                     }
                 }
@@ -1078,6 +1089,7 @@ class MainActivity : AppCompatActivity() {
     // ─── Destination Queue Dialog ────────────────────────────
 
     private fun showDestinationDialog() {
+        destinationDialog?.dismiss()
         val state = viewModel.uiState.value
         val queue = state.destinationQueue
         val activeIdx = state.activeDestinationIndex
@@ -1232,6 +1244,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        destinationDialog = dialog
         dialog.show()
     }
 
@@ -1252,6 +1265,7 @@ class MainActivity : AppCompatActivity() {
                     lng = coords.second
                 )
                 viewModel.addToDestinationQueue(dest)
+                showDestinationDialog()
                 rerunSuggestionsIfVisible()
             } else {
                 Snackbar.make(

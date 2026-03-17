@@ -32,6 +32,21 @@
                 android:layout_height="wrap_content"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
 
+            <!-- Active destination banner -->
+            <TextView
+                android:id="@+id/destinationBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:background="?attr/colorSecondaryContainer"
+                android:textColor="?attr/colorOnSecondaryContainer"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:visibility="gone" />
+
         <!-- Row: Step toggle buttons + Min days -->
         <LinearLayout
             android:layout_width="match_parent"
