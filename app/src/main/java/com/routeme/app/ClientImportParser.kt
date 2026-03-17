@@ -149,6 +149,9 @@ object ClientImportParser {
                 for (step in 1..6) {
                     val cellValue = map["step $step"] ?: ""
                     if (cellValue.isNotBlank()) {
+                        val lower = cellValue.lowercase(Locale.US)
+                        if (lower.contains("sold") || lower.contains("deceased") || lower.contains("cancel")) continue
+                        // Subscribed: checkmarks (√/✓), checkboxes (TRUE/FALSE), or dates
                         subscribedSteps.add(step)
                         val completionDate = parseStepDate(cellValue, yearForDates)
                         if (completionDate != null) {
@@ -314,6 +317,9 @@ object ClientImportParser {
         for (step in 1..6) {
             val cellValue = map["step $step"] ?: ""
             if (cellValue.isNotBlank()) {
+                val lower = cellValue.lowercase(Locale.US)
+                if (lower.contains("sold") || lower.contains("deceased") || lower.contains("cancel")) continue
+                // Subscribed: checkmarks (√/✓), checkboxes (TRUE/FALSE), or dates
                 subscribedSteps.add(step)
                 val completionDate = parseStepDate(cellValue, yearForDates)
                 if (completionDate != null) {

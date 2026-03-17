@@ -227,6 +227,9 @@ object GoogleSheetsSync {
                 val lower = cellValue.lowercase(Locale.US)
                 // Skip sold/deceased/cancelled clients for this step
                 if (lower.contains("sold") || lower.contains("deceased") || lower.contains("cancel")) continue
+                // Subscribed: checkmarks (√/✓), Google Sheets checkboxes
+                // (TRUE/FALSE — presence means subscribed, state is irrelevant),
+                // or dates (already serviced). Empty cell = not subscribed.
                 subscribedSteps.add(step)
                 val date = parseStepDate(cellValue, year)
                 if (date != null) {
@@ -236,6 +239,7 @@ object GoogleSheetsSync {
             }
         }
 
+        // Grub subscription: checkmark, checkbox (TRUE/FALSE), or date = subscribed
         val grubValue = map["grub"] ?: ""
         val hasGrub = grubValue.isNotBlank()
         if (hasGrub) {
