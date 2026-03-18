@@ -4,7 +4,6 @@ import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.NonClientStop
 import com.routeme.app.data.ClientRepository
-import com.routeme.app.data.WeatherRepository
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -16,17 +15,15 @@ import org.junit.Test
 class RouteHistoryUseCaseTest {
 
     private lateinit var repository: ClientRepository
-    private lateinit var weatherRepository: WeatherRepository
 
     @Before
     fun setup() {
         repository = mockk(relaxed = true)
-        weatherRepository = mockk(relaxed = true)
     }
 
     @Test
     fun `loadDailySummary returns empty when no records and no stops`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
         coEvery { repository.getClientStops(any(), any()) } returns emptyList()
         coEvery { repository.getDailyRecords(any(), any()) } returns emptyList()
         coEvery { repository.getNonClientStops(any(), any()) } returns emptyList()
@@ -38,7 +35,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadDailySummary returns success payload when data exists`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
         val rows = listOf(
             ClientStopRow(
                 clientId = "1",
@@ -78,7 +75,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadRouteHistoryStart returns no history when no dates`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns emptyList()
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -91,7 +88,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadRouteHistoryStart returns latest day data with navigation flags`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns listOf(2_000L, 1_000L)
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -112,7 +109,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadRouteHistoryForDate returns no records for requested date when date missing`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns listOf(1_000L)
         coEvery { repository.getDistinctServiceDates() } returns listOf(1_000L)
@@ -125,7 +122,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `navigateHistory returns adjacent day after loading history`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns listOf(3_000L, 2_000L)
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -154,7 +151,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadRouteHistoryStart prefers latest non-future day when future-dated records exist`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository, nowProvider = { 2_500L })
+        val useCase = RouteHistoryUseCase(repository, nowProvider = { 2_500L })
 
         coEvery { repository.getDistinctClientStopDates() } returns listOf(9_000L, 2_000L, 1_000L)
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -174,7 +171,7 @@ class RouteHistoryUseCaseTest {
 
     @Test
     fun `loadRouteHistoryForDate supports day that has only non-client stops`() = runTest {
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns emptyList()
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -209,7 +206,7 @@ class RouteHistoryUseCaseTest {
         val day0 = 0L
         val day3 = 86_400_000L * 3
 
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         coEvery { repository.getDistinctClientStopDates() } returns listOf(day3, day0)
         coEvery { repository.getDistinctServiceDates() } returns emptyList()
@@ -233,7 +230,7 @@ class RouteHistoryUseCaseTest {
     fun `loadWeekSummary returns week data for anchor date`() = runTest {
         // Anchor at Thursday epoch+3 days
         val anchorMillis = 86_400_000L * 3
-        val useCase = RouteHistoryUseCase(repository, weatherRepository)
+        val useCase = RouteHistoryUseCase(repository)
 
         // Return some data for any range queries
         coEvery { repository.getClientStops(any(), any()) } returns emptyList()

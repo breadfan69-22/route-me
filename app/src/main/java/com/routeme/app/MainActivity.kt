@@ -89,6 +89,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val destinationsScreenLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val queueResult = DestinationsActivity.extractQueueResult(result.data) ?: return@registerForActivityResult
+        viewModel.replaceDestinationQueue(
+            queue = queueResult.destinationQueue,
+            activeDestinationIndex = queueResult.activeDestinationIndex
+        )
+        rerunSuggestionsIfVisible()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -112,7 +124,8 @@ class MainActivity : AppCompatActivity() {
             launchVoiceRecognizer = { intent -> voiceInputLauncher.launch(intent) },
             launchCameraCapture = { uri -> cameraLauncher.launch(uri) },
             getLastLocation = { lastLocation },
-            rerunSuggestionsIfVisible = ::rerunSuggestionsIfVisible
+            rerunSuggestionsIfVisible = ::rerunSuggestionsIfVisible,
+            launchDestinationsScreen = ::launchDestinationsScreen
         )
         eventObserver = EventObserver(
             lifecycleOwner = this,
@@ -577,6 +590,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun launchDestinationsScreen() {
+        val state = viewModel.uiState.value
+        val intent = DestinationsActivity.createIntent(
+            context = this,
+            destinationQueue = state.destinationQueue,
+            activeDestinationIndex = state.activeDestinationIndex,
+            currentLocation = lastLocation
+        )
+        destinationsScreenLauncher.launch(intent)
+    }
+
     private fun getCurrentLocation(): Location? {
         val hasCoarse = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasFine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -712,8 +736,6 @@ class MainActivity : AppCompatActivity() {
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
         val stepsLabel = getSelectedStepsLabel()
 
-        trackingUiController.dismissNotification(2000 + client.id.hashCode())
-
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_complete_title, client.name))
             .setMessage(getString(R.string.dialog_complete_message, client.address, minutesOnSite, stepsLabel))
@@ -732,7 +754,6 @@ class MainActivity : AppCompatActivity() {
                     reason = "completion_prompt_not_yet",
                     location = location
                 )
-                trackingUiController.dismissNotification(3000 + client.id.hashCode())
             }
             .setCancelable(false)
             .show()
@@ -790,8 +811,6 @@ class MainActivity : AppCompatActivity() {
         if (completeClientId != null) {
             val minutes = intent.getIntExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, 5)
             val arrivedAt = intent.getLongExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, System.currentTimeMillis() - minutes * 60_000L)
-            val completeAction = intent.getStringExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
-                ?: LocationTrackingService.COMPLETE_ACTION_PROMPT
             val client = clients.find { it.id == completeClientId } ?: return
             val location = locationFromIntent(
                 intent,
@@ -799,32 +818,7 @@ class MainActivity : AppCompatActivity() {
                 LocationTrackingService.EXTRA_COMPLETE_LNG,
                 LocationTrackingService.EXTRA_COMPLETE_TIME
             ) ?: trackingEventBus.latestLocation.value ?: getCurrentLocation() ?: return
-
-            when (completeAction) {
-                LocationTrackingService.COMPLETE_ACTION_DONE -> {
-                    lastLocation = location
-                    viewModel.markArrivalForClient(client, location, arrivedAt)
-                    confirmSelectedClientService()
-                    trackingUiController.dismissNotification(2000 + client.id.hashCode())
-                    trackingUiController.dismissNotification(3000 + client.id.hashCode())
-                }
-
-                LocationTrackingService.COMPLETE_ACTION_NOT_YET -> {
-                    viewModel.recordCancelledClientStop(
-                        client = client,
-                        arrivedAtMillis = arrivedAt,
-                        reason = "completion_notification_not_yet",
-                        location = location
-                    )
-                    trackingUiController.dismissNotification(2000 + client.id.hashCode())
-                    trackingUiController.dismissNotification(3000 + client.id.hashCode())
-                }
-
-                else -> {
-                    showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
-                }
-            }
-
+            showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
             // Clear extras only after successfully handling
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES)
@@ -832,7 +826,6 @@ class MainActivity : AppCompatActivity() {
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_LNG)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_TIME)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
             return
         }
 

@@ -99,6 +99,24 @@ class DestinationQueueUseCase(
         )
     }
 
+    fun replaceDestinationQueue(
+        destinationQueue: List<SavedDestination>,
+        activeDestinationIndex: Int
+    ): QueueMutationResult {
+        val newActiveIndex = when {
+            destinationQueue.isEmpty() -> 0
+            activeDestinationIndex < 0 -> 0
+            activeDestinationIndex >= destinationQueue.size -> destinationQueue.lastIndex
+            else -> activeDestinationIndex
+        }
+
+        persistActiveDestination(destinationQueue, newActiveIndex)
+        return QueueMutationResult(
+            destinationQueue = destinationQueue,
+            activeDestinationIndex = newActiveIndex
+        )
+    }
+
     fun clearDestinationQueue(): QueueMutationResult {
         preferencesRepository.activeDestination = null
         return QueueMutationResult(

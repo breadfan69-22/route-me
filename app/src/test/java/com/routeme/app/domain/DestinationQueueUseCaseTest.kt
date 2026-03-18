@@ -106,6 +106,30 @@ class DestinationQueueUseCaseTest {
     }
 
     @Test
+    fun `replaceDestinationQueue clamps index and persists active destination`() {
+        val useCase = DestinationQueueUseCase(prefs, routingEngine)
+        val a = dest("1", "A")
+        val b = dest("2", "B")
+
+        val result = useCase.replaceDestinationQueue(
+            destinationQueue = listOf(a, b),
+            activeDestinationIndex = 10
+        )
+
+        assertEquals(listOf(a, b), result.destinationQueue)
+        assertEquals(1, result.activeDestinationIndex)
+        assertEquals(b, activeDestinationStore)
+
+        val emptyResult = useCase.replaceDestinationQueue(
+            destinationQueue = emptyList(),
+            activeDestinationIndex = 0
+        )
+        assertTrue(emptyResult.destinationQueue.isEmpty())
+        assertEquals(0, emptyResult.activeDestinationIndex)
+        assertNull(activeDestinationStore)
+    }
+
+    @Test
     fun `clear and skip destination queue update active destination`() {
         val useCase = DestinationQueueUseCase(prefs, routingEngine)
         val a = dest("1", "A")

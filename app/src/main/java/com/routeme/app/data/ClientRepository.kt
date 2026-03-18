@@ -15,6 +15,7 @@ import com.routeme.app.NonClientStopDao
 import com.routeme.app.NonClientStopEntity
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
+import com.routeme.app.data.db.GeocodeCacheEntity
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.network.GoogleSheetsSync
@@ -27,19 +28,24 @@ import kotlinx.coroutines.withContext
 class ClientRepository(
     private val appContext: Context,
     private val clientDao: ClientDao,
-    private val nonClientStopDao: NonClientStopDao
+    private val nonClientStopDao: NonClientStopDao,
+    private val geocodeCacheDao: com.routeme.app.data.db.GeocodeCacheDao? = null
 ) {
     suspend fun loadAllClients(): List<Client> = withContext(Dispatchers.IO) {
         clientDao.getAllClientsWithRecords().map { it.toDomain() }
     }
 
     suspend fun saveClients(clients: List<Client>) = withContext(Dispatchers.IO) {
-        for (client in clients) {
+        val clientsToSave = applyCachedCoordinates(clients)
+
+        for (client in clientsToSave) {
             clientDao.insertClient(client.toEntity())
             for (record in client.records) {
                 clientDao.insertServiceRecord(record.toEntity(client.id))
             }
         }
+
+        upsertGeocodeCacheEntries(cacheEntriesFrom(clientsToSave))
     }
 
     suspend fun saveServiceRecord(clientId: String, record: ServiceRecord) = withContext(Dispatchers.IO) {
@@ -89,12 +95,28 @@ class ClientRepository(
     suspend fun syncFromSheets(url: String): GoogleSheetsSync.SyncResult = withContext(Dispatchers.IO) {
         val result = GoogleSheetsSync.fetch(url)
         if (result.clients.isNotEmpty()) {
+            val existingClients = clientDao.getAllClients()
+
             // Preserve existing coordinates so a re-sync doesn't lose geocoded data
-            val existingCoords = clientDao.getAllClients().associate { entity ->
+            val existingCoords = existingClients.associate { entity ->
                 entity.name.lowercase() to Pair(entity.latitude, entity.longitude)
             }
 
-            val mergedClients = result.clients.map { client ->
+            upsertGeocodeCacheEntries(
+                existingClients.mapNotNull { entity ->
+                    val lat = entity.latitude ?: return@mapNotNull null
+                    val lng = entity.longitude ?: return@mapNotNull null
+                    val addressKey = addressKeyFor(entity.address, entity.zone) ?: return@mapNotNull null
+                    GeocodeCacheEntity(
+                        addressKey = addressKey,
+                        latitude = lat,
+                        longitude = lng,
+                        updatedAtMillis = System.currentTimeMillis()
+                    )
+                }
+            )
+
+            val mergedByNameClients = result.clients.map { client ->
                 if (client.latitude == null || client.longitude == null) {
                     val saved = existingCoords[client.name.lowercase()]
                     if (saved != null) {
@@ -107,6 +129,8 @@ class ClientRepository(
                 }
             }
 
+            val mergedClients = applyCachedCoordinates(mergedByNameClients)
+
             clientDao.deleteAllClients()
             for (client in mergedClients) {
                 clientDao.insertClient(client.toEntity())
@@ -114,6 +138,8 @@ class ClientRepository(
                     clientDao.insertServiceRecord(record.toEntity(client.id))
                 }
             }
+
+            upsertGeocodeCacheEntries(cacheEntriesFrom(mergedClients))
 
             return@withContext result.copy(clients = mergedClients)
         }
@@ -137,7 +163,8 @@ class ClientRepository(
     }
 
     suspend fun geocodeClients(clients: List<Client>): GeocodingHelper.GeocodingResult = withContext(Dispatchers.IO) {
-        val result = GeocodingHelper.geocodeClients(appContext, clients)
+        val clientsWithCachedCoordinates = applyCachedCoordinates(clients)
+        val result = GeocodingHelper.geocodeClients(appContext, clientsWithCachedCoordinates)
         for (client in result.clients) {
             val lat = client.latitude
             val lng = client.longitude
@@ -145,7 +172,79 @@ class ClientRepository(
                 clientDao.updateClientCoordinates(client.id, lat, lng)
             }
         }
+        upsertGeocodeCacheEntries(cacheEntriesFrom(result.clients))
         result
+    }
+
+    private fun addressKeyFor(client: Client): String? = addressKeyFor(client.address, client.zone)
+
+    private fun addressKeyFor(address: String, zone: String): String? {
+        val enrichedAddress = GeocodingHelper.enrichAddress(address, zone)
+        return enrichedAddress
+            .lowercase()
+            .replace(WHITESPACE_REGEX, " ")
+            .trim()
+            .takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun cachedCoordsByKey(keys: Set<String>): Map<String, Pair<Double, Double>> {
+        if (keys.isEmpty()) return emptyMap()
+        val cacheDao = geocodeCacheDao ?: return emptyMap()
+        return cacheDao.getByKeys(keys.toList()).associate { entry ->
+            entry.addressKey to Pair(entry.latitude, entry.longitude)
+        }
+    }
+
+    private suspend fun applyCachedCoordinates(clients: List<Client>): List<Client> {
+        if (clients.isEmpty()) return clients
+
+        val keysNeedingCoordinates = clients
+            .filter { it.latitude == null || it.longitude == null }
+            .mapNotNull { addressKeyFor(it) }
+            .toSet()
+
+        if (keysNeedingCoordinates.isEmpty()) return clients
+
+        val cachedCoordinates = cachedCoordsByKey(keysNeedingCoordinates)
+        if (cachedCoordinates.isEmpty()) return clients
+
+        return clients.map { client ->
+            if (client.latitude != null && client.longitude != null) {
+                client
+            } else {
+                val key = addressKeyFor(client) ?: return@map client
+                val coords = cachedCoordinates[key] ?: return@map client
+                client.copy(latitude = coords.first, longitude = coords.second)
+            }
+        }
+    }
+
+    private fun cacheEntriesFrom(clients: List<Client>, now: Long = System.currentTimeMillis()): List<GeocodeCacheEntity> {
+        if (clients.isEmpty()) return emptyList()
+
+        val entriesByKey = linkedMapOf<String, GeocodeCacheEntity>()
+        for (client in clients) {
+            val lat = client.latitude ?: continue
+            val lng = client.longitude ?: continue
+            val key = addressKeyFor(client) ?: continue
+            entriesByKey[key] = GeocodeCacheEntity(
+                addressKey = key,
+                latitude = lat,
+                longitude = lng,
+                updatedAtMillis = now
+            )
+        }
+
+        return entriesByKey.values.toList()
+    }
+
+    private suspend fun upsertGeocodeCacheEntries(entries: List<GeocodeCacheEntity>) {
+        if (entries.isEmpty()) return
+        geocodeCacheDao?.upsertAll(entries)
+    }
+
+    companion object {
+        private val WHITESPACE_REGEX = "\\s+".toRegex()
     }
 
     suspend fun fetchDrivingTimes(

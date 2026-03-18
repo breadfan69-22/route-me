@@ -15,19 +15,98 @@
         app:title="@string/screen_destinations_title"
         app:titleTextColor="?attr/colorOnPrimaryContainer" />
 
-    <FrameLayout
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:padding="24dp">
+        android:orientation="vertical"
+        android:padding="16dp">
 
         <TextView
+            android:id="@+id/activeDestinationText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="8dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/dragHintText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="8dp"
+            android:text="@string/dialog_dest_drag_hint"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/emptyText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="20dp"
             android:gravity="center"
-            android:text="@string/screen_placeholder_coming_soon"
-            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
-    </FrameLayout>
+            android:text="@string/dialog_dest_empty"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/destinationRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingTop="4dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/optimizeButton"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/dialog_dest_optimize" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/clearButton"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="@string/dialog_dest_clear" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/skipButton"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:text="@string/btn_skip" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/doneButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:text="@string/screen_destinations_done" />
+        </LinearLayout>
+    </LinearLayout>
 
 </LinearLayout>

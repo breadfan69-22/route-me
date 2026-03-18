@@ -24,8 +24,9 @@ val appModule = module {
     single { get<AppDatabase>().clientDao() }
     single { get<AppDatabase>().nonClientStopDao() }
     single { get<AppDatabase>().weatherDao() }
+    single { get<AppDatabase>().geocodeCacheDao() }
 
-    single { ClientRepository(androidContext(), get(), get()) }
+    single { ClientRepository(androidContext(), get(), get(), get()) }
     single { PreferencesRepository(androidContext()) }
     single { WeatherRepository(get()) }
     single { RoutingEngine() }

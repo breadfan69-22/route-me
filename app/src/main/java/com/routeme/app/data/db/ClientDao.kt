@@ -81,12 +81,7 @@ interface ClientDao {
                cse.status AS status,
                cse.serviceTypes AS serviceTypes,
                cse.cancelReason AS cancelReason,
-               cse.notes AS notes,
-               cse.lat AS lat,
-               cse.lng AS lng,
-               cse.weatherTempF AS weatherTempF,
-               cse.weatherWindMph AS weatherWindMph,
-               cse.weatherDesc AS weatherDesc
+               cse.notes AS notes
         FROM client_stop_events cse
         WHERE cse.endedAtMillis >= :startMillis AND cse.endedAtMillis < :endMillis
         ORDER BY cse.endedAtMillis

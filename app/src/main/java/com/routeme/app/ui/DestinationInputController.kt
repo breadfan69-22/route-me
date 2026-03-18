@@ -7,11 +7,16 @@ import android.content.Intent
 import android.graphics.Typeface
 import android.location.Location
 import android.net.Uri
+import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.LifecycleCoroutineScope
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.button.MaterialButton
 import com.routeme.app.R
@@ -21,6 +26,7 @@ import com.routeme.app.network.GeocodingHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class DestinationInputController(
     private val activity: AppCompatActivity,
@@ -30,7 +36,8 @@ class DestinationInputController(
     private val launchVoiceRecognizer: (Intent) -> Unit,
     private val launchCameraCapture: (Uri) -> Unit,
     private val getLastLocation: () -> Location?,
-    private val rerunSuggestionsIfVisible: () -> Unit
+    private val rerunSuggestionsIfVisible: () -> Unit,
+    private val launchDestinationsScreen: () -> Unit
 ) {
     private var destinationDialog: AlertDialog? = null
     private var pendingCameraImageUri: Uri? = null
@@ -62,28 +69,60 @@ class DestinationInputController(
                 setPadding(0, 8, 0, 16)
             })
         } else {
-            queue.forEachIndexed { index, dest ->
-                val row = LinearLayout(activity).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, 4, 0, 4)
-                }
-                val prefix = if (index == activeIdx) "▶ " else "${index + 1}. "
-                row.addView(TextView(activity).apply {
-                    text = "$prefix${dest.name}"
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    if (index == activeIdx) setTypeface(null, Typeface.BOLD)
+            if (queue.size >= 2) {
+                container.addView(TextView(activity).apply {
+                    text = activity.getString(R.string.dialog_dest_drag_hint)
+                    textSize = 12f
+                    setPadding(0, 0, 0, 8)
                 })
-                row.addView(TextView(activity).apply {
-                    text = "✖"
-                    textSize = 18f
-                    setPadding(16, 0, 0, 0)
-                    setOnClickListener {
-                        viewModel.removeFromDestinationQueue(index)
-                        showDestinationDialog()
-                    }
-                })
-                container.addView(row)
             }
+
+            val queueAdapter = DestinationQueueAdapter(
+                items = queue.toMutableList(),
+                activeIndex = activeIdx,
+                onRemoveAt = { index ->
+                    viewModel.removeFromDestinationQueue(index)
+                    showDestinationDialog()
+                }
+            )
+
+            val queueRecyclerView = RecyclerView(activity).apply {
+                layoutManager = LinearLayoutManager(activity)
+                adapter = queueAdapter
+                isNestedScrollingEnabled = false
+                overScrollMode = RecyclerView.OVER_SCROLL_NEVER
+            }
+
+            if (queue.size >= 2) {
+                val touchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+                    ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+                    0
+                ) {
+                    override fun onMove(
+                        recyclerView: RecyclerView,
+                        viewHolder: RecyclerView.ViewHolder,
+                        target: RecyclerView.ViewHolder
+                    ): Boolean {
+                        val fromIndex = viewHolder.adapterPosition
+                        val toIndex = target.adapterPosition
+                        if (fromIndex == RecyclerView.NO_POSITION || toIndex == RecyclerView.NO_POSITION || fromIndex == toIndex) {
+                            return false
+                        }
+
+                        queueAdapter.moveItem(fromIndex, toIndex)
+                        viewModel.moveDestinationInQueue(fromIndex, toIndex)
+                        queueAdapter.setActiveIndex(viewModel.uiState.value.activeDestinationIndex)
+                        return true
+                    }
+
+                    override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+                    override fun isLongPressDragEnabled(): Boolean = true
+                })
+                touchHelper.attachToRecyclerView(queueRecyclerView)
+            }
+
+            container.addView(queueRecyclerView)
         }
 
         val addressInput = EditText(activity).apply {
@@ -172,6 +211,25 @@ class DestinationInputController(
             container.addView(actionRow)
         }
 
+        if (queue.isNotEmpty()) {
+            container.addView(
+                MaterialButton(activity, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                    text = activity.getString(R.string.dialog_dest_open_full_screen)
+                    textSize = 11f
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        topMargin = 8
+                    }
+                    setOnClickListener {
+                        destinationDialog?.dismiss()
+                        launchDestinationsScreen()
+                    }
+                }
+            )
+        }
+
         val dialog = AlertDialog.Builder(activity)
             .setTitle(activity.getString(R.string.dialog_destinations_title))
             .setView(container)
@@ -187,6 +245,82 @@ class DestinationInputController(
 
         destinationDialog = dialog
         dialog.show()
+    }
+
+    private class DestinationQueueAdapter(
+        private val items: MutableList<SavedDestination>,
+        private var activeIndex: Int,
+        private val onRemoveAt: (Int) -> Unit
+    ) : RecyclerView.Adapter<DestinationQueueAdapter.DestinationViewHolder>() {
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DestinationViewHolder {
+            val row = LinearLayout(parent.context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 8, 0, 8)
+            }
+
+            val dragHandle = TextView(parent.context).apply {
+                text = "☰"
+                textSize = 16f
+                setPadding(0, 0, 16, 0)
+            }
+
+            val name = TextView(parent.context).apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val remove = TextView(parent.context).apply {
+                text = "✖"
+                textSize = 18f
+                setPadding(16, 0, 0, 0)
+            }
+
+            row.addView(dragHandle)
+            row.addView(name)
+            row.addView(remove)
+
+            return DestinationViewHolder(row, name, remove)
+        }
+
+        override fun onBindViewHolder(holder: DestinationViewHolder, position: Int) {
+            val destination = items[position]
+            val prefix = if (position == activeIndex) "▶ " else "${position + 1}. "
+            holder.nameView.text = "$prefix${destination.name}"
+            holder.nameView.setTypeface(null, if (position == activeIndex) Typeface.BOLD else Typeface.NORMAL)
+
+            holder.removeView.setOnClickListener {
+                val adapterPosition = holder.adapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION) {
+                    onRemoveAt(adapterPosition)
+                }
+            }
+        }
+
+        override fun getItemCount(): Int = items.size
+
+        fun moveItem(fromIndex: Int, toIndex: Int) {
+            if (fromIndex == toIndex || fromIndex !in items.indices || toIndex !in items.indices) return
+            val moved = items.removeAt(fromIndex)
+            items.add(toIndex, moved)
+
+            notifyItemMoved(fromIndex, toIndex)
+            val rangeStart = minOf(fromIndex, toIndex)
+            val rangeCount = abs(fromIndex - toIndex) + 1
+            notifyItemRangeChanged(rangeStart, rangeCount)
+        }
+
+        fun setActiveIndex(newActiveIndex: Int) {
+            if (activeIndex == newActiveIndex) return
+            activeIndex = newActiveIndex
+            notifyDataSetChanged()
+        }
+
+        class DestinationViewHolder(
+            view: LinearLayout,
+            val nameView: TextView,
+            val removeView: TextView
+        ) : RecyclerView.ViewHolder(view)
     }
 
     fun onVoiceInputResult(resultCode: Int, data: Intent?) {
