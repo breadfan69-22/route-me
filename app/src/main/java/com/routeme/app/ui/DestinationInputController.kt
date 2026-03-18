@@ -83,6 +83,7 @@ class DestinationInputController(
                 onRemoveAt = { index ->
                     viewModel.removeFromDestinationQueue(index)
                     showDestinationDialog()
+                    rerunSuggestionsIfVisible()
                 }
             )
 
@@ -347,14 +348,15 @@ class DestinationInputController(
         ).show()
 
         lifecycleScope.launch {
+            val enrichedAddress = GeocodingHelper.enrichAddress(address, "")
             val coords = withContext(Dispatchers.IO) {
-                GeocodingHelper.geocodeAddress(address)
+                GeocodingHelper.geocodeAddress(enrichedAddress)
             }
             if (coords != null) {
                 val destination = SavedDestination(
                     id = java.util.UUID.randomUUID().toString(),
-                    name = address,
-                    address = address,
+                    name = enrichedAddress,
+                    address = enrichedAddress,
                     lat = coords.first,
                     lng = coords.second
                 )
