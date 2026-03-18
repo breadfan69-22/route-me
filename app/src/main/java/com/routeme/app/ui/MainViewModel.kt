@@ -6,10 +6,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.routeme.app.Client
+import com.routeme.app.ClientStopRow
+import com.routeme.app.ClientStopStatus
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
-import com.routeme.app.DailyRecordRow
 import com.routeme.app.NonClientStop
 import com.routeme.app.suggestedStepsForDate
 import com.routeme.app.TrackingEvent
@@ -677,10 +678,29 @@ class MainViewModel(
 
     fun cancelArrival() {
         val state = _uiState.value
+        val selectedClient = state.selectedClient
+        val arrivalStartedAtMillis = state.arrivalStartedAtMillis
         val statusMessage = arrivalUseCase.cancelArrival(
-            arrivalStartedAtMillis = state.arrivalStartedAtMillis,
-            selectedClientName = state.selectedClient?.name
+            arrivalStartedAtMillis = arrivalStartedAtMillis,
+            selectedClientName = selectedClient?.name
         ) ?: return
+
+        if (selectedClient != null && arrivalStartedAtMillis != null) {
+            recordCancelledClientStop(
+                client = selectedClient,
+                arrivedAtMillis = arrivalStartedAtMillis,
+                reason = "manual_cancel",
+                location = state.arrivalLat?.let { lat ->
+                    state.arrivalLng?.let { lng ->
+                        Location("arrival").apply {
+                            latitude = lat
+                            longitude = lng
+                        }
+                    }
+                }
+            )
+        }
+
         _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
         viewModelScope.launch { setStatus(statusMessage) }
@@ -719,10 +739,53 @@ class MainViewModel(
                 result.deferredAction?.invoke()
             }
             is ArrivalUseCase.ResolveStaleResult.DiscardAndContinue -> {
+                val state = _uiState.value
+                if (state.selectedClient != null && state.arrivalStartedAtMillis != null) {
+                    recordCancelledClientStop(
+                        client = state.selectedClient,
+                        arrivedAtMillis = state.arrivalStartedAtMillis,
+                        reason = "stale_discard",
+                        location = state.arrivalLat?.let { lat ->
+                            state.arrivalLng?.let { lng ->
+                                Location("arrival").apply {
+                                    latitude = lat
+                                    longitude = lng
+                                }
+                            }
+                        }
+                    )
+                }
                 _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
                 savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
                 viewModelScope.launch { setStatus(result.statusMessage) }
                 result.deferredAction?.invoke()
+            }
+        }
+    }
+
+    fun recordCancelledClientStop(
+        client: Client,
+        arrivedAtMillis: Long,
+        reason: String,
+        location: Location? = null
+    ) {
+        viewModelScope.launch {
+            val endedAtMillis = System.currentTimeMillis()
+            val elapsedMillis = (endedAtMillis - arrivedAtMillis).coerceAtLeast(0L)
+            val durationMinutes = (elapsedMillis / 60_000L).coerceAtLeast(1L)
+
+            runCatching {
+                clientRepository.saveClientStopEvent(
+                    clientId = client.id,
+                    clientName = client.name,
+                    arrivedAtMillis = arrivedAtMillis,
+                    endedAtMillis = endedAtMillis,
+                    durationMinutes = durationMinutes,
+                    status = ClientStopStatus.CANCELLED,
+                    cancelReason = reason,
+                    lat = location?.latitude,
+                    lng = location?.longitude
+                )
             }
         }
     }
@@ -1137,7 +1200,7 @@ class MainViewModel(
         viewModelScope.launch {
             when (val result = routeHistoryUseCase.loadDailySummary()) {
                 is RouteHistoryUseCase.DailySummaryResult.Empty -> {
-                    setStatus("No completed services today")
+                    setStatus("No completed services or non-client stops today")
                 }
 
                 is RouteHistoryUseCase.DailySummaryResult.Error -> {
@@ -1152,7 +1215,7 @@ class MainViewModel(
         }
     }
 
-    private fun buildDailySummaryText(rows: List<DailyRecordRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
+    private fun buildDailySummaryText(rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
         val sb = StringBuilder()
         val totalStops = rows.size
         val totalMinutes = rows.sumOf { it.durationMinutes }
@@ -1162,15 +1225,22 @@ class MainViewModel(
 
         sb.appendLine("Today's Route Summary")
         sb.appendLine("─────────────────────")
+
+        // First/last stop clock window
+        val firstArrival = rows.mapNotNull { it.arrivedAtMillis }.minOrNull()
+        val lastEnd = rows.maxOfOrNull { it.endedAtMillis }
+        if (firstArrival != null && lastEnd != null) {
+            sb.appendLine("${DateUtils.formatTime(firstArrival)} – ${DateUtils.formatTime(lastEnd)}")
+        }
         sb.appendLine("$totalStops stops  •  $durationLabel total")
         sb.appendLine()
 
         rows.forEachIndexed { index, row ->
             val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
-            val endStr = DateUtils.formatTime(row.completedAtMillis)
+            val endStr = DateUtils.formatTime(row.endedAtMillis)
             sb.appendLine("${index + 1}. ${row.clientName}")
-            sb.appendLine("   ${row.serviceType}")
-            sb.appendLine("   $timeStr → $endStr")
+            sb.appendLine("   ${formatClientStopDetail(row)}")
+            sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
             if (row.notes.isNotBlank()) {
                 sb.appendLine("   \uD83D\uDCDD ${row.notes}")
             }
@@ -1221,7 +1291,7 @@ class MainViewModel(
             }
 
             RouteHistoryUseCase.HistoryResult.NoHistory -> {
-                setStatus("No service history yet")
+                setStatus("No route history yet")
             }
 
             RouteHistoryUseCase.HistoryResult.NoRecordsForRequestedDate -> {
@@ -1241,12 +1311,14 @@ class MainViewModel(
                 dateLabel = dateLabel,
                 dateMillis = dayData.dateMillis,
                 hasPrevDay = dayData.hasPrevDay,
-                hasNextDay = dayData.hasNextDay
+                hasNextDay = dayData.hasNextDay,
+                gapDaysToOlder = dayData.gapDaysToOlder,
+                gapDaysToNewer = dayData.gapDaysToNewer
             )
         )
     }
 
-    private fun buildHistorySummaryText(@Suppress("UNUSED_PARAMETER") dateMillis: Long, rows: List<DailyRecordRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
+    private fun buildHistorySummaryText(@Suppress("UNUSED_PARAMETER") dateMillis: Long, rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
         val sb = StringBuilder()
         val totalStops = rows.size
         val totalMinutes = rows.sumOf { it.durationMinutes }
@@ -1255,13 +1327,26 @@ class MainViewModel(
         val durationLabel = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
 
         sb.appendLine("$totalStops stops  •  $durationLabel total")
+
+        // Step breakdown
+        val stepCounts = rows
+            .flatMap { row -> row.serviceTypes.split(",").map { it.trim() }.filter { it.isNotBlank() } }
+            .groupingBy { it }
+            .eachCount()
+        if (stepCounts.isNotEmpty()) {
+            val parts = stepCounts.map { (type, count) ->
+                val label = runCatching { ServiceType.valueOf(type).label }.getOrElse { type }
+                "$label: $count"
+            }
+            sb.appendLine(parts.joinToString("  •  "))
+        }
         sb.appendLine()
 
         rows.forEachIndexed { index, row ->
             val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
-            val endStr = DateUtils.formatTime(row.completedAtMillis)
+            val endStr = DateUtils.formatTime(row.endedAtMillis)
             sb.appendLine("${index + 1}. ${row.clientName}")
-            sb.appendLine("   ${row.serviceType}")
+            sb.appendLine("   ${formatClientStopDetail(row)}")
             sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
             if (row.notes.isNotBlank()) {
                 sb.appendLine("   \uD83D\uDCDD ${row.notes}")
@@ -1270,6 +1355,123 @@ class MainViewModel(
         }
 
         appendNonClientStopsSummary(sb, nonClientStops)
+        return sb.toString()
+    }
+
+    private fun formatClientStopDetail(row: ClientStopRow): String {
+        val status = runCatching { ClientStopStatus.valueOf(row.status) }.getOrDefault(ClientStopStatus.DONE)
+        return when (status) {
+            ClientStopStatus.DONE -> {
+                val stepsLabel = formatServiceTypes(row.serviceTypes)
+                if (stepsLabel.isBlank()) "✅ Done" else "✅ Done — $stepsLabel"
+            }
+
+            ClientStopStatus.CANCELLED -> {
+                val reason = row.cancelReason?.replace('_', ' ')?.trim().orEmpty()
+                if (reason.isBlank()) "❌ Cancelled" else "❌ Cancelled — $reason"
+            }
+        }
+    }
+
+    private fun formatServiceTypes(serviceTypes: String): String {
+        if (serviceTypes.isBlank()) return ""
+        val labels = serviceTypes
+            .split(",")
+            .mapNotNull { token ->
+                val normalized = token.trim()
+                if (normalized.isBlank()) return@mapNotNull null
+                runCatching { ServiceType.valueOf(normalized).label }.getOrElse { normalized }
+            }
+        return labels.joinToString("+")
+    }
+
+    // ─── Week Summary ──────────────────────────────────────────
+
+    /** Show a week summary anchored to [dateMillis]. */
+    fun showWeekSummary(dateMillis: Long) {
+        viewModelScope.launch {
+            when (val result = routeHistoryUseCase.loadWeekSummary(dateMillis)) {
+                is RouteHistoryUseCase.WeekResult.Success -> {
+                    val text = buildWeekSummaryText(result.weekData)
+                    _events.emit(MainEvent.ShowWeekSummary(text))
+                }
+                is RouteHistoryUseCase.WeekResult.NoHistory -> {
+                    setStatus("No activity this week")
+                }
+                is RouteHistoryUseCase.WeekResult.Error -> {
+                    setStatus(result.message)
+                }
+            }
+        }
+    }
+
+    private fun buildWeekSummaryText(week: RouteHistoryUseCase.WeekData): String {
+        val sb = StringBuilder()
+        val startLabel = DateUtils.formatDate(week.startMillis)
+        val endLabel = DateUtils.formatDate(week.endMillis - 1) // last day, not day after
+        sb.appendLine("Week: $startLabel – $endLabel")
+        sb.appendLine("═════════════════════════")
+
+        val activeDays = week.days.filter { it.rows.isNotEmpty() || it.nonClientStops.isNotEmpty() }
+        val totalStops = week.days.sumOf { it.rows.size }
+        val totalMinutes = week.days.sumOf { day -> day.rows.sumOf { it.durationMinutes } }
+        val hours = totalMinutes / 60
+        val mins = totalMinutes % 60
+        val durationLabel = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+
+        sb.appendLine("${activeDays.size} day(s) worked  •  $totalStops stops  •  $durationLabel total")
+
+        // Step totals across the week
+        val weekStepCounts = week.days.flatMap { day ->
+            day.rows.flatMap { row ->
+                row.serviceTypes.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            }
+        }.groupingBy { it }.eachCount()
+
+        if (weekStepCounts.isNotEmpty()) {
+            val parts = weekStepCounts.map { (type, count) ->
+                val label = runCatching { ServiceType.valueOf(type).label }.getOrElse { type }
+                "$label: $count"
+            }
+            sb.appendLine(parts.joinToString("  •  "))
+        }
+
+        // Days-per-step: how many distinct days included each step
+        val daysPerStep = mutableMapOf<String, Int>()
+        for (day in week.days) {
+            val stepsThisDay = day.rows.flatMap { row ->
+                row.serviceTypes.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            }.toSet()
+            for (step in stepsThisDay) {
+                daysPerStep[step] = (daysPerStep[step] ?: 0) + 1
+            }
+        }
+        if (daysPerStep.isNotEmpty()) {
+            val dayParts = daysPerStep.map { (type, days) ->
+                val label = runCatching { ServiceType.valueOf(type).label }.getOrElse { type }
+                "$label: ${days}d"
+            }
+            sb.appendLine("Days per step: ${dayParts.joinToString("  •  ")}")
+        }
+
+        sb.appendLine()
+
+        // Per-day breakdown
+        for (day in week.days) {
+            val dayLabel = DateUtils.formatDate(day.dateMillis)
+            val dayStops = day.rows.size
+            val dayNonClient = day.nonClientStops.size
+            if (dayStops == 0 && dayNonClient == 0) {
+                sb.appendLine("$dayLabel  —  no activity")
+            } else {
+                val dayMin = day.rows.sumOf { it.durationMinutes }
+                val dH = dayMin / 60
+                val dM = dayMin % 60
+                val dayDur = if (dH > 0) "${dH}h ${dM}m" else "${dM}m"
+                sb.appendLine("$dayLabel  —  $dayStops stops  •  $dayDur")
+            }
+        }
+
         return sb.toString()
     }
 

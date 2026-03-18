@@ -1,6 +1,7 @@
 package com.routeme.app.domain
 
 import com.routeme.app.Client
+import com.routeme.app.ClientStopStatus
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
@@ -155,6 +156,21 @@ class ServiceCompletionUseCase(
         val stepsLabel = stepsToConfirm.joinToString("+") { it.label }
         val statusMsg = "Confirmed $stepsLabel for ${updatedClient.name} at ${DateUtilsBridge.formatTimestamp(finishedAt)} (${durationMinutes}m)"
 
+        runCatching {
+            clientRepository.saveClientStopEvent(
+                clientId = updatedClient.id,
+                clientName = updatedClient.name,
+                arrivedAtMillis = arrivalStartedAtMillis,
+                endedAtMillis = finishedAt,
+                durationMinutes = durationMinutes,
+                status = ClientStopStatus.DONE,
+                serviceTypes = stepsToConfirm,
+                notes = trimmedNotes,
+                lat = request.arrivalLat ?: request.currentLocation?.latitude,
+                lng = request.arrivalLng ?: request.currentLocation?.longitude
+            )
+        }
+
         var sheetStatusMessage: String? = null
         var sheetSnackbarMessage: String? = null
         var retryDrainSucceeded = 0
@@ -203,6 +219,7 @@ class ServiceCompletionUseCase(
             val client = updatedClients.find { it.id == member.clientId } ?: continue
             val durationMinutes = ((finishedAt - member.arrivedAtMillis) / 60_000L).coerceAtLeast(1)
             var updatedClient = client
+            var savedAnyRecord = false
 
             val stepsForClient = request.suggestionEligibleStepsByClientId[client.id]
                 ?.takeIf { it.isNotEmpty() }
@@ -222,6 +239,7 @@ class ServiceCompletionUseCase(
                 updatedClient = updatedClient.copy(records = updatedClient.records + record)
                 try {
                     clientRepository.saveServiceRecord(updatedClient.id, record)
+                    savedAnyRecord = true
                 } catch (e: Exception) {
                     transientFailures += "Save failed for ${updatedClient.name}: ${e.message ?: "Unknown"}"
                     continue
@@ -236,6 +254,22 @@ class ServiceCompletionUseCase(
                     } catch (_: Exception) {
                         retryQueue.enqueue(updatedClient.name, serviceTypeToColumn(serviceType), "√${formatCheckValue(finishedAt)}")
                     }
+                }
+            }
+
+            if (savedAnyRecord) {
+                runCatching {
+                    clientRepository.saveClientStopEvent(
+                        clientId = updatedClient.id,
+                        clientName = updatedClient.name,
+                        arrivedAtMillis = member.arrivedAtMillis,
+                        endedAtMillis = finishedAt,
+                        durationMinutes = durationMinutes,
+                        status = ClientStopStatus.DONE,
+                        serviceTypes = stepsForClient,
+                        lat = member.location.latitude,
+                        lng = member.location.longitude
+                    )
                 }
             }
 

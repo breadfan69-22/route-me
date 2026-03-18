@@ -4,13 +4,17 @@ import android.content.Context
 import android.net.Uri
 import com.routeme.app.Client
 import com.routeme.app.ClientDao
+import com.routeme.app.ClientStopEventEntity
+import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientImportParser
 import com.routeme.app.DailyRecordRow
+import com.routeme.app.ClientStopStatus
 import com.routeme.app.ImportResult
 import com.routeme.app.NonClientStop
 import com.routeme.app.NonClientStopDao
 import com.routeme.app.NonClientStopEntity
 import com.routeme.app.ServiceRecord
+import com.routeme.app.ServiceType
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.network.GoogleSheetsSync
@@ -40,6 +44,36 @@ class ClientRepository(
 
     suspend fun saveServiceRecord(clientId: String, record: ServiceRecord) = withContext(Dispatchers.IO) {
         clientDao.insertServiceRecord(record.toEntity(clientId))
+    }
+
+    suspend fun saveClientStopEvent(
+        clientId: String,
+        clientName: String,
+        arrivedAtMillis: Long?,
+        endedAtMillis: Long,
+        durationMinutes: Long,
+        status: ClientStopStatus,
+        serviceTypes: Set<ServiceType> = emptySet(),
+        cancelReason: String? = null,
+        notes: String = "",
+        lat: Double? = null,
+        lng: Double? = null
+    ) = withContext(Dispatchers.IO) {
+        clientDao.insertClientStopEvent(
+            ClientStopEventEntity(
+                clientId = clientId,
+                clientName = clientName,
+                arrivedAtMillis = arrivedAtMillis,
+                endedAtMillis = endedAtMillis,
+                durationMinutes = durationMinutes,
+                status = status.name,
+                serviceTypes = serviceTypes.joinToString(",") { it.name },
+                cancelReason = cancelReason,
+                notes = notes,
+                lat = lat,
+                lng = lng
+            )
+        )
     }
 
     suspend fun updateClientCoordinates(clientId: String, lat: Double, lng: Double) = withContext(Dispatchers.IO) {
@@ -122,6 +156,14 @@ class ClientRepository(
 
     suspend fun getDistinctServiceDates(): List<Long> = withContext(Dispatchers.IO) {
         clientDao.getDistinctServiceDates()
+    }
+
+    suspend fun getClientStops(startMillis: Long, endMillis: Long): List<ClientStopRow> = withContext(Dispatchers.IO) {
+        clientDao.getClientStopsForDateRange(startMillis, endMillis)
+    }
+
+    suspend fun getDistinctClientStopDates(): List<Long> = withContext(Dispatchers.IO) {
+        clientDao.getDistinctClientStopDates()
     }
 
     suspend fun deleteServiceRecord(clientId: String, completedAtMillis: Long) = withContext(Dispatchers.IO) {

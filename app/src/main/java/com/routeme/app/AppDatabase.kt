@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         ClientEntity::class,
         ServiceRecordEntity::class,
         PendingWriteBackEntity::class,
-        NonClientStopEntity::class
+        NonClientStopEntity::class,
+        ClientStopEventEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

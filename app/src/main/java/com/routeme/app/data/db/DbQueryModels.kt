@@ -21,3 +21,15 @@ data class DailyRecordRow(
     val durationMinutes: Long,
     val notes: String
 )
+
+data class ClientStopRow(
+    val clientId: String,
+    val clientName: String,
+    val arrivedAtMillis: Long?,
+    val endedAtMillis: Long,
+    val durationMinutes: Long,
+    val status: String,
+    val serviceTypes: String,
+    val cancelReason: String?,
+    val notes: String
+)

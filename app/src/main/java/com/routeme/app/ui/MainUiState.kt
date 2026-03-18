@@ -50,8 +50,12 @@ sealed interface MainEvent {
         val dateLabel: String,
         val dateMillis: Long,
         val hasPrevDay: Boolean,
-        val hasNextDay: Boolean
+        val hasNextDay: Boolean,
+        val gapDaysToOlder: Int = 0,
+        val gapDaysToNewer: Int = 0
     ) : MainEvent
+    /** Week summary dialog. */
+    data class ShowWeekSummary(val summary: String) : MainEvent
     data class StaleArrivalPrompt(val clientName: String, val minutesElapsed: Long) : MainEvent
     /** Prompt user to batch-confirm 2+ clients that were in the same location cluster. */
     data class ClusterCompletePrompt(val members: List<com.routeme.app.ClusterMember>) : MainEvent

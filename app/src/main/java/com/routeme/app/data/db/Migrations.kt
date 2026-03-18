@@ -59,11 +59,37 @@ object AppDatabaseMigrations {
         }
     }
 
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS client_stop_events (
+                    stopEventId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    clientId TEXT NOT NULL,
+                    clientName TEXT NOT NULL,
+                    arrivedAtMillis INTEGER,
+                    endedAtMillis INTEGER NOT NULL,
+                    durationMinutes INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    serviceTypes TEXT NOT NULL DEFAULT '',
+                    cancelReason TEXT,
+                    notes TEXT NOT NULL DEFAULT '',
+                    lat REAL,
+                    lng REAL
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_client_stop_events_endedAtMillis ON client_stop_events(endedAtMillis)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_client_stop_events_clientId ON client_stop_events(clientId)")
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
         MIGRATION_3_4,
         MIGRATION_4_5,
-        MIGRATION_5_6
+        MIGRATION_5_6,
+        MIGRATION_6_7
     )
 }

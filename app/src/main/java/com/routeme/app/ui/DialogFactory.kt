@@ -1,6 +1,7 @@
 package com.routeme.app.ui
 
 import android.app.AlertDialog
+import android.app.DatePickerDialog
 import android.content.Context
 import android.graphics.Typeface
 import android.view.View
@@ -10,6 +11,7 @@ import android.widget.TextView
 import com.google.android.material.button.MaterialButton
 import com.routeme.app.ClusterMember
 import com.routeme.app.R
+import java.util.Calendar
 
 object DialogFactory {
     fun showDailySummaryDialog(context: Context, summary: String) {
@@ -23,7 +25,9 @@ object DialogFactory {
     fun showRouteHistoryDialog(
         context: Context,
         event: MainEvent.ShowRouteHistory,
-        onNavigate: (dateMillis: Long, delta: Int) -> Unit
+        onNavigate: (dateMillis: Long, delta: Int) -> Unit,
+        onPickDate: (dateMillis: Long) -> Unit = {},
+        onWeekSummary: (dateMillis: Long) -> Unit = {}
     ) {
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -35,13 +39,16 @@ object DialogFactory {
             gravity = android.view.Gravity.CENTER_VERTICAL
         }
 
+        val olderGapLabel = if (event.gapDaysToOlder > 0) " (${event.gapDaysToOlder}d gap)" else ""
+        val newerGapLabel = if (event.gapDaysToNewer > 0) " (${event.gapDaysToNewer}d gap)" else ""
+
         val prevBtn = MaterialButton(
             context,
             null,
             com.google.android.material.R.attr.materialButtonOutlinedStyle
         ).apply {
-            text = "◀ Older"
-            textSize = 12f
+            text = "◀ Older$olderGapLabel"
+            textSize = 11f
             isAllCaps = false
             isEnabled = event.hasPrevDay
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -60,8 +67,8 @@ object DialogFactory {
             null,
             com.google.android.material.R.attr.materialButtonOutlinedStyle
         ).apply {
-            text = "Newer ▶"
-            textSize = 12f
+            text = "Newer$newerGapLabel ▶"
+            textSize = 11f
             isAllCaps = false
             isEnabled = event.hasNextDay
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -71,6 +78,46 @@ object DialogFactory {
         navRow.addView(dateLabel)
         navRow.addView(nextBtn)
         container.addView(navRow)
+
+        // Action row: Pick Date + Week Summary
+        val actionRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+        }
+
+        val pickDateBtn = MaterialButton(
+            context,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "\uD83D\uDCC5 Pick Date"
+            textSize = 11f
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = 8
+            }
+        }
+
+        val weekBtn = MaterialButton(
+            context,
+            null,
+            com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = "\uD83D\uDCC6 This Week"
+            textSize = 11f
+            isAllCaps = false
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = 8
+            }
+        }
+
+        actionRow.addView(pickDateBtn)
+        actionRow.addView(weekBtn)
+        container.addView(actionRow)
 
         container.addView(View(context).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -105,6 +152,37 @@ object DialogFactory {
             dialog.dismiss()
             onNavigate(event.dateMillis, -1)
         }
+
+        pickDateBtn.setOnClickListener {
+            dialog.dismiss()
+            val cal = Calendar.getInstance().apply { timeInMillis = event.dateMillis }
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val picked = Calendar.getInstance().apply {
+                        set(year, month, dayOfMonth, 0, 0, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }
+                    onPickDate(picked.timeInMillis)
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }
+
+        weekBtn.setOnClickListener {
+            dialog.dismiss()
+            onWeekSummary(event.dateMillis)
+        }
+    }
+
+    fun showWeekSummaryDialog(context: Context, summary: String) {
+        AlertDialog.Builder(context)
+            .setTitle("Week Summary")
+            .setMessage(summary)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     fun showEditNotesDialog(

@@ -26,6 +26,9 @@ interface ClientDao {
     @Insert
     suspend fun insertServiceRecord(record: ServiceRecordEntity)
 
+    @Insert
+    suspend fun insertClientStopEvent(event: ClientStopEventEntity)
+
     @Update
     suspend fun updateClient(client: ClientEntity)
 
@@ -67,6 +70,27 @@ interface ClientDao {
 
     @Query("SELECT DISTINCT (completedAtMillis / 86400000) * 86400000 AS dayMillis FROM service_records ORDER BY dayMillis DESC")
     suspend fun getDistinctServiceDates(): List<Long>
+
+    @Query(
+        """
+        SELECT cse.clientId AS clientId,
+               cse.clientName AS clientName,
+               cse.arrivedAtMillis AS arrivedAtMillis,
+               cse.endedAtMillis AS endedAtMillis,
+               cse.durationMinutes AS durationMinutes,
+               cse.status AS status,
+               cse.serviceTypes AS serviceTypes,
+               cse.cancelReason AS cancelReason,
+               cse.notes AS notes
+        FROM client_stop_events cse
+        WHERE cse.endedAtMillis >= :startMillis AND cse.endedAtMillis < :endMillis
+        ORDER BY cse.endedAtMillis
+        """
+    )
+    suspend fun getClientStopsForDateRange(startMillis: Long, endMillis: Long): List<ClientStopRow>
+
+    @Query("SELECT DISTINCT (endedAtMillis / 86400000) * 86400000 AS dayMillis FROM client_stop_events ORDER BY dayMillis DESC")
+    suspend fun getDistinctClientStopDates(): List<Long>
 
     @Query("SELECT id FROM clients")
     suspend fun getAllClientIds(): List<String>

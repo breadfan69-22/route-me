@@ -236,6 +236,10 @@ class MainActivity : AppCompatActivity() {
                 showRouteHistoryDialog(event)
             }
 
+            is MainEvent.ShowWeekSummary -> {
+                showWeekSummaryDialog(event.summary)
+            }
+
             MainEvent.ServiceConfirmed -> Unit
         }
     }
@@ -420,9 +424,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRouteHistoryDialog(event: MainEvent.ShowRouteHistory) {
-        DialogFactory.showRouteHistoryDialog(this, event) { dateMillis, delta ->
-            viewModel.navigateHistory(dateMillis, delta)
-        }
+        DialogFactory.showRouteHistoryDialog(
+            context = this,
+            event = event,
+            onNavigate = { dateMillis, delta ->
+                viewModel.navigateHistory(dateMillis, delta)
+            },
+            onPickDate = { dateMillis ->
+                viewModel.showRouteHistoryForDate(dateMillis)
+            },
+            onWeekSummary = { dateMillis ->
+                viewModel.showWeekSummary(dateMillis)
+            }
+        )
+    }
+
+    private fun showWeekSummaryDialog(summary: String) {
+        DialogFactory.showWeekSummaryDialog(this, summary)
     }
 
     private fun showEditNotesDialog(clientId: String, clientName: String, currentNotes: String) {
@@ -674,7 +692,14 @@ class MainActivity : AppCompatActivity() {
                 // Dismiss the arrival notification for this client
                 trackingUiController.dismissNotification(2000 + client.id.hashCode())
             }
-            .setNegativeButton(R.string.dialog_not_here, null)
+            .setNegativeButton(R.string.dialog_not_here) { _, _ ->
+                viewModel.recordCancelledClientStop(
+                    client = client,
+                    arrivedAtMillis = arrivedAtMillis,
+                    reason = "arrival_prompt_not_here",
+                    location = location
+                )
+            }
             .setCancelable(false)
             .show()
     }
@@ -698,7 +723,14 @@ class MainActivity : AppCompatActivity() {
                 // Dismiss the completion notification for this client
                 trackingUiController.dismissNotification(3000 + client.id.hashCode())
             }
-            .setNegativeButton(R.string.dialog_not_yet, null)
+            .setNegativeButton(R.string.dialog_not_yet) { _, _ ->
+                viewModel.recordCancelledClientStop(
+                    client = client,
+                    arrivedAtMillis = arrivedAtMillis,
+                    reason = "completion_prompt_not_yet",
+                    location = location
+                )
+            }
             .setCancelable(false)
             .show()
     }
