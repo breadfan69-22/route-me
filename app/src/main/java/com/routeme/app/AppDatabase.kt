@@ -11,14 +11,16 @@ import androidx.room.RoomDatabase
         ServiceRecordEntity::class,
         PendingWriteBackEntity::class,
         NonClientStopEntity::class,
-        ClientStopEventEntity::class
+        ClientStopEventEntity::class,
+        com.routeme.app.data.db.DailyWeatherEntity::class
     ],
-    version = 7,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun clientDao(): ClientDao
     abstract fun nonClientStopDao(): NonClientStopDao
+    abstract fun weatherDao(): com.routeme.app.data.db.WeatherDao
 
     companion object {
         @Volatile

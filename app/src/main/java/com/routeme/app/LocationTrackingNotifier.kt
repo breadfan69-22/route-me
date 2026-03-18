@@ -66,19 +66,49 @@ class LocationTrackingNotifier(
 
     fun postCompletionNotification(client: Client, minutesOnSite: Int, location: Location, arrivedAtMillis: Long) {
         val notifId = completeNotifBase + client.id.hashCode()
-        val requestCode = notifId
+        val manager = context.getSystemService(NotificationManager::class.java)
 
-        val openIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID, client.id)
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, minutesOnSite)
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_LAT, location.latitude)
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_LNG, location.longitude)
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_TIME, location.time)
-            putExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, arrivedAtMillis)
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            context, requestCode, openIntent,
+        manager.cancel(arrivalNotifBase + client.id.hashCode())
+
+        val openIntent = buildCompletionIntent(
+            client = client,
+            minutesOnSite = minutesOnSite,
+            location = location,
+            arrivedAtMillis = arrivedAtMillis,
+            completionAction = LocationTrackingService.COMPLETE_ACTION_PROMPT
+        )
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notifId,
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val doneIntent = buildCompletionIntent(
+            client = client,
+            minutesOnSite = minutesOnSite,
+            location = location,
+            arrivedAtMillis = arrivedAtMillis,
+            completionAction = LocationTrackingService.COMPLETE_ACTION_DONE
+        )
+        val donePendingIntent = PendingIntent.getActivity(
+            context,
+            notifId,
+            doneIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notYetIntent = buildCompletionIntent(
+            client = client,
+            minutesOnSite = minutesOnSite,
+            location = location,
+            arrivedAtMillis = arrivedAtMillis,
+            completionAction = LocationTrackingService.COMPLETE_ACTION_NOT_YET
+        )
+        val notYetPendingIntent = PendingIntent.getActivity(
+            context,
+            notifId,
+            notYetIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -89,20 +119,55 @@ class LocationTrackingNotifier(
             .setAutoCancel(false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(contentPendingIntent)
+            .addAction(
+                android.R.drawable.checkbox_on_background,
+                context.getString(R.string.notif_action_done),
+                donePendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                context.getString(R.string.notif_action_not_yet),
+                notYetPendingIntent
+            )
             .build()
 
-        context.getSystemService(NotificationManager::class.java).notify(notifId, notification)
+        manager.notify(notifId, notification)
+    }
+
+    private fun buildCompletionIntent(
+        client: Client,
+        minutesOnSite: Int,
+        location: Location,
+        arrivedAtMillis: Long,
+        completionAction: String
+    ): Intent {
+        return Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = "com.routeme.app.complete.$completionAction.${client.id}"
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID, client.id)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, minutesOnSite)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_LAT, location.latitude)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_LNG, location.longitude)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_TIME, location.time)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, arrivedAtMillis)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION, completionAction)
+        }
     }
 
     fun postClusterCompletionNotification(members: List<ClusterMember>): Int {
         val notifId = clusterNotifBase + members.hashCode()
         val requestCode = notifId
+        val manager = context.getSystemService(NotificationManager::class.java)
 
         val clientIds = members.map { it.client.id }.toTypedArray()
         val minutesArray = members.map { (it.timeOnSiteMillis / 60_000).toInt() }.toIntArray()
         val arrivedAtArray = members.map { it.arrivedAtMillis }.toLongArray()
         val names = members.joinToString(", ") { it.client.name }
+
+        members.forEach { member ->
+            manager.cancel(arrivalNotifBase + member.client.id.hashCode())
+        }
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -125,7 +190,7 @@ class LocationTrackingNotifier(
             .setContentIntent(pendingIntent)
             .build()
 
-        context.getSystemService(NotificationManager::class.java).notify(notifId, notification)
+        manager.notify(notifId, notification)
         return notifId
     }
 }

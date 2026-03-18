@@ -70,11 +70,13 @@ class ArrivalDispatchCoordinator(
             nowMillis = now
         )
 
-        for (clientId in evaluation.departedClientIds) {
+        val completable = evaluation.completionCandidates
+        val clientIdsToClearArrivalNotif = (evaluation.departedClientIds + completable.map { it.client.id }).distinct()
+
+        for (clientId in clientIdsToClearArrivalNotif) {
             cancelNotification(arrivalNotifBase + clientId.hashCode())
         }
 
-        val completable = evaluation.completionCandidates
         if (completable.size >= 2) {
             val members = completable.map { summary ->
                 ClusterMember(

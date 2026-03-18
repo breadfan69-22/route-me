@@ -9,6 +9,7 @@ import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WriteBackRetryQueue
+import com.routeme.app.domain.RouteHistoryUseCase
 import com.routeme.app.domain.RoutingEngine
 import com.routeme.app.network.SheetsWriteBack
 import io.mockk.coEvery
@@ -36,6 +37,7 @@ class MainViewModelTest {
     private lateinit var prefs: PreferencesRepository
     private lateinit var routingEngine: RoutingEngine
     private lateinit var retryQueue: WriteBackRetryQueue
+    private lateinit var routeHistoryUseCase: RouteHistoryUseCase
 
     @Before
     fun setup() {
@@ -43,6 +45,7 @@ class MainViewModelTest {
         prefs = mockk(relaxed = true)
         routingEngine = mockk(relaxed = true)
         retryQueue = mockk(relaxed = true)
+        routeHistoryUseCase = mockk(relaxed = true)
 
         every { prefs.sheetsReadUrl } returns ""
         every { prefs.sheetsWriteUrl } returns ""
@@ -55,7 +58,7 @@ class MainViewModelTest {
         coEvery { repository.loadAllClients() } returns listOf(client)
         every { routingEngine.buildClientDetails(any()) } returns "details"
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
 
         assertEquals(1, vm.uiState.value.clients.size)
@@ -65,7 +68,7 @@ class MainViewModelTest {
     @Test
     fun `toggleCuOverride flips value`() = runTest {
         coEvery { repository.loadAllClients() } returns emptyList()
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
 
         assertEquals(false, vm.uiState.value.cuOverrideEnabled)
@@ -91,7 +94,7 @@ class MainViewModelTest {
         every { routingEngine.buildClientDetails(client) } returns "client-details"
         coEvery { repository.fetchDrivingTimes(any(), any(), any()) } returns emptyList()
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
 
         vm.suggestNextClients(null)
@@ -121,7 +124,7 @@ class MainViewModelTest {
         coEvery { repository.fetchDrivingTimes(any(), any(), any()) } returns emptyList()
         coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
         vm.suggestNextClients(null)
         advanceUntilIdle()
@@ -155,7 +158,7 @@ class MainViewModelTest {
         every { routingEngine.rankClients(any(), any(), any(), any(), any(), any()) } returns suggestions
         every { routingEngine.buildClientDetails(any()) } returns "details"
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
         vm.suggestNextClients(null)
         advanceUntilIdle()
@@ -195,7 +198,7 @@ class MainViewModelTest {
         every { routingEngine.rankClients(any(), any(), any(), any(), any(), any()) } returns suggestions
         every { routingEngine.buildClientDetails(any()) } returns "details"
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
         vm.suggestNextClients(null)
         advanceUntilIdle()
@@ -223,7 +226,7 @@ class MainViewModelTest {
         every { routingEngine.rankClients(any(), any(), any(), any(), any(), any()) } returns suggestions
         every { routingEngine.buildClientDetails(any()) } returns "details"
 
-        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue)
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, routeHistoryUseCase)
         advanceUntilIdle()
         vm.toggleRouteDirection() // OUTWARD -> HOMEWARD
         vm.suggestNextClients(null)

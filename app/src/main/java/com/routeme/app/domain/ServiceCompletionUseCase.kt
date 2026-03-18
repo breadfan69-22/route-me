@@ -5,6 +5,7 @@ import com.routeme.app.ClientStopStatus
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.WeatherRepository
 import com.routeme.app.data.WriteBackRetryQueue
 import com.routeme.app.network.SheetsWriteBack
 import java.util.Calendar
@@ -12,6 +13,7 @@ import java.util.Calendar
 class ServiceCompletionUseCase(
     private val clientRepository: ClientRepository,
     private val retryQueue: WriteBackRetryQueue,
+    private val weatherRepository: WeatherRepository? = null,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     data class GeoPoint(
@@ -156,6 +158,12 @@ class ServiceCompletionUseCase(
         val stepsLabel = stepsToConfirm.joinToString("+") { it.label }
         val statusMsg = "Confirmed $stepsLabel for ${updatedClient.name} at ${DateUtilsBridge.formatTimestamp(finishedAt)} (${durationMinutes}m)"
 
+        val stopLat = request.arrivalLat ?: request.currentLocation?.latitude
+        val stopLng = request.arrivalLng ?: request.currentLocation?.longitude
+        val snapshot = if (stopLat != null && stopLng != null) {
+            runCatching { weatherRepository?.fetchCurrentSnapshot(stopLat, stopLng) }.getOrNull()
+        } else null
+
         runCatching {
             clientRepository.saveClientStopEvent(
                 clientId = updatedClient.id,
@@ -166,8 +174,11 @@ class ServiceCompletionUseCase(
                 status = ClientStopStatus.DONE,
                 serviceTypes = stepsToConfirm,
                 notes = trimmedNotes,
-                lat = request.arrivalLat ?: request.currentLocation?.latitude,
-                lng = request.arrivalLng ?: request.currentLocation?.longitude
+                lat = stopLat,
+                lng = stopLng,
+                weatherTempF = snapshot?.tempF,
+                weatherWindMph = snapshot?.windMph,
+                weatherDesc = snapshot?.description
             )
         }
 
@@ -258,6 +269,12 @@ class ServiceCompletionUseCase(
             }
 
             if (savedAnyRecord) {
+                val mLat = member.location.latitude
+                val mLng = member.location.longitude
+                val snapshot = runCatching {
+                    weatherRepository?.fetchCurrentSnapshot(mLat, mLng)
+                }.getOrNull()
+
                 runCatching {
                     clientRepository.saveClientStopEvent(
                         clientId = updatedClient.id,
@@ -267,8 +284,11 @@ class ServiceCompletionUseCase(
                         durationMinutes = durationMinutes,
                         status = ClientStopStatus.DONE,
                         serviceTypes = stepsForClient,
-                        lat = member.location.latitude,
-                        lng = member.location.longitude
+                        lat = mLat,
+                        lng = mLng,
+                        weatherTempF = snapshot?.tempF,
+                        weatherWindMph = snapshot?.windMph,
+                        weatherDesc = snapshot?.description
                     )
                 }
             }

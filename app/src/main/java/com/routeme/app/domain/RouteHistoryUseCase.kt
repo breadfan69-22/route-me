@@ -4,11 +4,16 @@ import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.DailyRecordRow
 import com.routeme.app.NonClientStop
+import com.routeme.app.SHOP_LAT
+import com.routeme.app.SHOP_LNG
 import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.WeatherRepository
+import com.routeme.app.model.DailyWeather
 import java.util.Calendar
 
 class RouteHistoryUseCase(
     private val clientRepository: ClientRepository,
+    private val weatherRepository: WeatherRepository,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     companion object {
@@ -24,13 +29,15 @@ class RouteHistoryUseCase(
         /** Calendar days between this day and next newer recorded day (0 if consecutive or no next). */
         val gapDaysToNewer: Int = 0,
         /** Calendar days between this day and next older recorded day (0 if consecutive or no prev). */
-        val gapDaysToOlder: Int = 0
+        val gapDaysToOlder: Int = 0,
+        val weather: DailyWeather? = null
     )
 
     sealed interface DailySummaryResult {
         data class Success(
             val rows: List<ClientStopRow>,
-            val nonClientStops: List<NonClientStop>
+            val nonClientStops: List<NonClientStop>,
+            val weather: DailyWeather? = null
         ) : DailySummaryResult
 
         data object Empty : DailySummaryResult
@@ -76,7 +83,9 @@ class RouteHistoryUseCase(
             if (rows.isEmpty() && nonClientStops.isEmpty()) {
                 DailySummaryResult.Empty
             } else {
-                DailySummaryResult.Success(rows, nonClientStops)
+                val (cLat, cLng) = stopsCentroid(rows, nonClientStops)
+                val weather = runCatching { weatherRepository.getWeatherForDay(startMillis, cLat, cLng) }.getOrNull()
+                DailySummaryResult.Success(rows, nonClientStops, weather)
             }
         } catch (e: Exception) {
             DailySummaryResult.Error("Summary failed: ${e.message ?: "Unknown error"}")
@@ -140,6 +149,9 @@ class RouteHistoryUseCase(
             return HistoryResult.NoRecordsForDate(dateMillis)
         }
 
+        val (cLat, cLng) = stopsCentroid(rows, nonClientStops)
+        val weather = runCatching { weatherRepository.getWeatherForDay(dateMillis, cLat, cLng) }.getOrNull()
+
         val hasPrev = index < historyDates.size - 1
         val hasNext = index > 0
 
@@ -159,7 +171,8 @@ class RouteHistoryUseCase(
                 hasPrevDay = hasPrev,
                 hasNextDay = hasNext,
                 gapDaysToNewer = gapToNewer.coerceAtLeast(0),
-                gapDaysToOlder = gapToOlder.coerceAtLeast(0)
+                gapDaysToOlder = gapToOlder.coerceAtLeast(0),
+                weather = weather
             )
         )
     }
@@ -234,5 +247,34 @@ class RouteHistoryUseCase(
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
         return cal.timeInMillis
+    }
+
+    /**
+     * Compute the geographic centroid from client stops and non-client stops.
+     * Falls back to [SHOP_LAT]/[SHOP_LNG] when no coordinates are available.
+     */
+    private fun stopsCentroid(
+        rows: List<ClientStopRow>,
+        nonClientStops: List<NonClientStop>
+    ): Pair<Double, Double> {
+        val lats = mutableListOf<Double>()
+        val lngs = mutableListOf<Double>()
+
+        rows.forEach { row ->
+            if (row.lat != null && row.lng != null) {
+                lats += row.lat
+                lngs += row.lng
+            }
+        }
+        nonClientStops.forEach { stop ->
+            lats += stop.lat
+            lngs += stop.lng
+        }
+
+        return if (lats.isNotEmpty()) {
+            lats.average() to lngs.average()
+        } else {
+            SHOP_LAT to SHOP_LNG
+        }
     }
 }

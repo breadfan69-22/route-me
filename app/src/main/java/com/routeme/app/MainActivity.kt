@@ -712,6 +712,8 @@ class MainActivity : AppCompatActivity() {
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
         val stepsLabel = getSelectedStepsLabel()
 
+        trackingUiController.dismissNotification(2000 + client.id.hashCode())
+
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_complete_title, client.name))
             .setMessage(getString(R.string.dialog_complete_message, client.address, minutesOnSite, stepsLabel))
@@ -730,6 +732,7 @@ class MainActivity : AppCompatActivity() {
                     reason = "completion_prompt_not_yet",
                     location = location
                 )
+                trackingUiController.dismissNotification(3000 + client.id.hashCode())
             }
             .setCancelable(false)
             .show()
@@ -787,6 +790,8 @@ class MainActivity : AppCompatActivity() {
         if (completeClientId != null) {
             val minutes = intent.getIntExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, 5)
             val arrivedAt = intent.getLongExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, System.currentTimeMillis() - minutes * 60_000L)
+            val completeAction = intent.getStringExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
+                ?: LocationTrackingService.COMPLETE_ACTION_PROMPT
             val client = clients.find { it.id == completeClientId } ?: return
             val location = locationFromIntent(
                 intent,
@@ -794,7 +799,32 @@ class MainActivity : AppCompatActivity() {
                 LocationTrackingService.EXTRA_COMPLETE_LNG,
                 LocationTrackingService.EXTRA_COMPLETE_TIME
             ) ?: trackingEventBus.latestLocation.value ?: getCurrentLocation() ?: return
-            showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
+
+            when (completeAction) {
+                LocationTrackingService.COMPLETE_ACTION_DONE -> {
+                    lastLocation = location
+                    viewModel.markArrivalForClient(client, location, arrivedAt)
+                    confirmSelectedClientService()
+                    trackingUiController.dismissNotification(2000 + client.id.hashCode())
+                    trackingUiController.dismissNotification(3000 + client.id.hashCode())
+                }
+
+                LocationTrackingService.COMPLETE_ACTION_NOT_YET -> {
+                    viewModel.recordCancelledClientStop(
+                        client = client,
+                        arrivedAtMillis = arrivedAt,
+                        reason = "completion_notification_not_yet",
+                        location = location
+                    )
+                    trackingUiController.dismissNotification(2000 + client.id.hashCode())
+                    trackingUiController.dismissNotification(3000 + client.id.hashCode())
+                }
+
+                else -> {
+                    showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
+                }
+            }
+
             // Clear extras only after successfully handling
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES)
@@ -802,6 +832,7 @@ class MainActivity : AppCompatActivity() {
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_LNG)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_TIME)
             intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT)
+            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
             return
         }
 

@@ -41,11 +41,11 @@ class MainViewModel(
     private val routingEngine: RoutingEngine,
     private val savedStateHandle: SavedStateHandle,
     private val retryQueue: com.routeme.app.data.WriteBackRetryQueue,
+    private val routeHistoryUseCase: RouteHistoryUseCase,
     private val suggestionUseCase: SuggestionUseCase = SuggestionUseCase(routingEngine),
     private val arrivalUseCase: ArrivalUseCase = ArrivalUseCase(routingEngine),
     private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue),
     private val destinationQueueUseCase: DestinationQueueUseCase = DestinationQueueUseCase(preferencesRepository, routingEngine),
-    private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
     private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue)
 ) : ViewModel() {
@@ -1208,14 +1208,18 @@ class MainViewModel(
                 }
 
                 is RouteHistoryUseCase.DailySummaryResult.Success -> {
-                    val summary = buildDailySummaryText(result.rows, result.nonClientStops)
+                    val summary = buildDailySummaryText(result.rows, result.nonClientStops, result.weather)
                     _events.emit(MainEvent.ShowDailySummary(summary))
                 }
             }
         }
     }
 
-    private fun buildDailySummaryText(rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
+    private fun buildDailySummaryText(
+        rows: List<ClientStopRow>,
+        nonClientStops: List<NonClientStop> = emptyList(),
+        weather: com.routeme.app.model.DailyWeather? = null
+    ): String {
         val sb = StringBuilder()
         val totalStops = rows.size
         val totalMinutes = rows.sumOf { it.durationMinutes }
@@ -1225,6 +1229,11 @@ class MainViewModel(
 
         sb.appendLine("Today's Route Summary")
         sb.appendLine("─────────────────────")
+
+        if (weather != null) {
+            sb.appendLine(weather.toSummaryLine())
+            sb.appendLine()
+        }
 
         // First/last stop clock window
         val firstArrival = rows.mapNotNull { it.arrivedAtMillis }.minOrNull()
@@ -1241,6 +1250,11 @@ class MainViewModel(
             sb.appendLine("${index + 1}. ${row.clientName}")
             sb.appendLine("   ${formatClientStopDetail(row)}")
             sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
+            row.weatherDesc?.let { desc ->
+                val temp = row.weatherTempF?.let { "${it}°F" } ?: ""
+                val wind = row.weatherWindMph?.let { " Wind ${it}mph" } ?: ""
+                sb.appendLine("   \uD83C\uDF24 $temp$wind $desc")
+            }
             if (row.notes.isNotBlank()) {
                 sb.appendLine("   \uD83D\uDCDD ${row.notes}")
             }
@@ -1303,7 +1317,7 @@ class MainViewModel(
     }
 
     private suspend fun emitRouteHistoryDay(dayData: RouteHistoryUseCase.DayData) {
-        val summary = buildHistorySummaryText(dayData.dateMillis, dayData.rows, dayData.nonClientStops)
+        val summary = buildHistorySummaryText(dayData.dateMillis, dayData.rows, dayData.nonClientStops, dayData.weather)
         val dateLabel = DateUtils.formatDateFull(dayData.dateMillis)
         _events.emit(
             MainEvent.ShowRouteHistory(
@@ -1318,13 +1332,23 @@ class MainViewModel(
         )
     }
 
-    private fun buildHistorySummaryText(@Suppress("UNUSED_PARAMETER") dateMillis: Long, rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
+    private fun buildHistorySummaryText(
+        @Suppress("UNUSED_PARAMETER") dateMillis: Long,
+        rows: List<ClientStopRow>,
+        nonClientStops: List<NonClientStop> = emptyList(),
+        weather: com.routeme.app.model.DailyWeather? = null
+    ): String {
         val sb = StringBuilder()
         val totalStops = rows.size
         val totalMinutes = rows.sumOf { it.durationMinutes }
         val hours = totalMinutes / 60
         val mins = totalMinutes % 60
         val durationLabel = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+
+        if (weather != null) {
+            sb.appendLine(weather.toSummaryLine())
+            sb.appendLine()
+        }
 
         sb.appendLine("$totalStops stops  •  $durationLabel total")
 
@@ -1348,6 +1372,11 @@ class MainViewModel(
             sb.appendLine("${index + 1}. ${row.clientName}")
             sb.appendLine("   ${formatClientStopDetail(row)}")
             sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
+            row.weatherDesc?.let { desc ->
+                val temp = row.weatherTempF?.let { "${it}°F" } ?: ""
+                val wind = row.weatherWindMph?.let { " Wind ${it}mph" } ?: ""
+                sb.appendLine("   \uD83C\uDF24 $temp$wind $desc")
+            }
             if (row.notes.isNotBlank()) {
                 sb.appendLine("   \uD83D\uDCDD ${row.notes}")
             }

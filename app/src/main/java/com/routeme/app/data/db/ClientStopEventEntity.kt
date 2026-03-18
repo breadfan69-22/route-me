@@ -23,5 +23,8 @@ data class ClientStopEventEntity(
     val cancelReason: String? = null,
     val notes: String = "",
     val lat: Double? = null,
-    val lng: Double? = null
+    val lng: Double? = null,
+    val weatherTempF: Int? = null,
+    val weatherWindMph: Int? = null,
+    val weatherDesc: String? = null
 )

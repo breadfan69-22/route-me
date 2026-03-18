@@ -57,7 +57,10 @@ class ClientRepository(
         cancelReason: String? = null,
         notes: String = "",
         lat: Double? = null,
-        lng: Double? = null
+        lng: Double? = null,
+        weatherTempF: Int? = null,
+        weatherWindMph: Int? = null,
+        weatherDesc: String? = null
     ) = withContext(Dispatchers.IO) {
         clientDao.insertClientStopEvent(
             ClientStopEventEntity(
@@ -71,7 +74,10 @@ class ClientRepository(
                 cancelReason = cancelReason,
                 notes = notes,
                 lat = lat,
-                lng = lng
+                lng = lng,
+                weatherTempF = weatherTempF,
+                weatherWindMph = weatherWindMph,
+                weatherDesc = weatherDesc
             )
         )
     }
