@@ -5,13 +5,13 @@ import com.routeme.app.Client
 import com.routeme.app.ClientDao
 import com.routeme.app.ClientEntity
 import com.routeme.app.ClientWithRecords
-import com.routeme.app.DistanceMatrixHelper
-import com.routeme.app.GoogleSheetsSync
 import com.routeme.app.NonClientStopDao
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceRecordEntity
 import com.routeme.app.ServiceType
-import com.routeme.app.SheetsWriteBack
+import com.routeme.app.network.DistanceMatrixHelper
+import com.routeme.app.network.GoogleSheetsSync
+import com.routeme.app.network.SheetsWriteBack
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every

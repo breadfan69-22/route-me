@@ -3,7 +3,8 @@ package com.routeme.app.data
 import android.util.Log
 import com.routeme.app.ClientDao
 import com.routeme.app.PendingWriteBackEntity
-import com.routeme.app.SheetsWriteBack
+import com.routeme.app.network.SheetsWriteBack
+import com.routeme.app.util.AppConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -13,14 +14,13 @@ import kotlinx.coroutines.withContext
  * Failed writes are persisted to Room, then retried on the next successful
  * write-back or when [drainQueue] is called explicitly (e.g. on app resume).
  *
- * Items with more than [MAX_RETRIES] attempts are dropped.
+ * Items with more than the configured max retry attempts are dropped.
  */
 class WriteBackRetryQueue(
     private val clientDao: ClientDao
 ) {
     companion object {
         private const val TAG = "WriteBackRetryQueue"
-        private const val MAX_RETRIES = 10
     }
 
     /** Enqueue a failed write-back for later retry. */
@@ -58,8 +58,11 @@ class WriteBackRetryQueue(
         var dropped = 0
 
         for (item in pending) {
-            if (item.retryCount >= MAX_RETRIES) {
-                Log.w(TAG, "Dropping write-back after $MAX_RETRIES retries: ${item.clientName}/${item.column}")
+            if (item.retryCount >= AppConfig.RetryQueue.MAX_WRITE_BACK_RETRIES) {
+                Log.w(
+                    TAG,
+                    "Dropping write-back after ${AppConfig.RetryQueue.MAX_WRITE_BACK_RETRIES} retries: ${item.clientName}/${item.column}"
+                )
                 clientDao.deletePendingWriteBack(item)
                 dropped++
                 continue

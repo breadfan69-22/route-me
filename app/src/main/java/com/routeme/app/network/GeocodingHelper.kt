@@ -1,8 +1,9 @@
-package com.routeme.app
+package com.routeme.app.network
 
 import android.content.Context
 import android.location.Geocoder
 import android.util.Log
+import com.routeme.app.Client
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -68,7 +69,8 @@ object GeocodingHelper {
         val geocodedCount: Int,
         val failedCount: Int,
         val alreadyHadCount: Int,
-        val message: String
+        val message: String,
+        val clients: List<Client>
     )
 
     private data class GoogleGeocodeResult(
@@ -140,7 +142,13 @@ object GeocodingHelper {
         val hasAndroidGeocoder = Geocoder.isPresent()
         val hasGoogleGeocoder = apiKey.isNotBlank()
         if (!hasAndroidGeocoder && !hasGoogleGeocoder) {
-            return GeocodingResult(0, 0, 0, "No geocoding provider available (Google API key missing and Android Geocoder unavailable).")
+            return GeocodingResult(
+                geocodedCount = 0,
+                failedCount = 0,
+                alreadyHadCount = 0,
+                message = "No geocoding provider available (Google API key missing and Android Geocoder unavailable).",
+                clients = clients
+            )
         }
 
         val geocoder = if (hasAndroidGeocoder) Geocoder(context, Locale.US) else null
@@ -149,15 +157,19 @@ object GeocodingHelper {
         var alreadyHad = 0
         var googleDisabledForBatch = false
         var googleDisableReason: String? = null
+        val updatedClients = mutableListOf<Client>()
 
         for (client in clients) {
+            var updatedClient = client
             if (client.latitude != null && client.longitude != null) {
                 alreadyHad++
+                updatedClients.add(updatedClient)
                 continue
             }
 
             if (client.address.isBlank()) {
                 failed++
+                updatedClients.add(updatedClient)
                 continue
             }
 
@@ -168,10 +180,13 @@ object GeocodingHelper {
                     val googleResult = geocodeWithGoogle(searchAddress)
                     val googleCoords = googleResult.coords
                     if (googleCoords != null) {
-                        client.latitude = googleCoords.first
-                        client.longitude = googleCoords.second
+                        updatedClient = client.copy(
+                            latitude = googleCoords.first,
+                            longitude = googleCoords.second
+                        )
                         geocoded++
-                        Log.d(TAG, "Geocoded ${client.name} via Google API: ${client.latitude}, ${client.longitude} ($searchAddress)")
+                        Log.d(TAG, "Geocoded ${client.name} via Google API: ${updatedClient.latitude}, ${updatedClient.longitude} ($searchAddress)")
+                        updatedClients.add(updatedClient)
                         Thread.sleep(80)
                         continue
                     }
@@ -189,10 +204,12 @@ object GeocodingHelper {
                     @Suppress("DEPRECATION")
                     val results = geocoder.getFromLocationName(searchAddress, 1)
                     if (!results.isNullOrEmpty()) {
-                        client.latitude = results[0].latitude
-                        client.longitude = results[0].longitude
+                        updatedClient = client.copy(
+                            latitude = results[0].latitude,
+                            longitude = results[0].longitude
+                        )
                         geocoded++
-                        Log.d(TAG, "Geocoded ${client.name} via Android Geocoder: ${client.latitude}, ${client.longitude} ($searchAddress)")
+                        Log.d(TAG, "Geocoded ${client.name} via Android Geocoder: ${updatedClient.latitude}, ${updatedClient.longitude} ($searchAddress)")
                     } else {
                         failed++
                         Log.w(TAG, "No results for ${client.name}: $searchAddress")
@@ -202,11 +219,14 @@ object GeocodingHelper {
                     Log.w(TAG, "Google geocoding failed and Android Geocoder unavailable for ${client.name}: $searchAddress")
                 }
 
+                updatedClients.add(updatedClient)
+
                 // Small delay to avoid hammering providers
                 Thread.sleep(80)
             } catch (e: Exception) {
                 failed++
                 Log.w(TAG, "Failed to geocode ${client.name}: ${e.message}")
+                updatedClients.add(updatedClient)
             }
         }
 
@@ -219,7 +239,13 @@ object GeocodingHelper {
                 append(" ⚠ $googleDisableReason")
             }
         }
-        return GeocodingResult(geocoded, failed, alreadyHad, message)
+        return GeocodingResult(
+            geocodedCount = geocoded,
+            failedCount = failed,
+            alreadyHadCount = alreadyHad,
+            message = message,
+            clients = updatedClients
+        )
     }
 
     private fun geocodeWithGoogle(address: String): GoogleGeocodeResult {

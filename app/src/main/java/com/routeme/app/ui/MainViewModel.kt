@@ -8,11 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.routeme.app.Client
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
-import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
-import com.routeme.app.SHOP_LAT
-import com.routeme.app.SHOP_LNG
-import com.routeme.app.SheetsWriteBack
 import com.routeme.app.DailyRecordRow
 import com.routeme.app.NonClientStop
 import com.routeme.app.suggestedStepsForDate
@@ -20,9 +16,15 @@ import com.routeme.app.TrackingEvent
 import com.routeme.app.TrackingEventBus
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
+import com.routeme.app.domain.ArrivalUseCase
+import com.routeme.app.domain.DestinationQueueUseCase
+import com.routeme.app.domain.MapsExportUseCase
+import com.routeme.app.domain.RouteHistoryUseCase
 import com.routeme.app.domain.RoutingEngine
+import com.routeme.app.domain.ServiceCompletionUseCase
+import com.routeme.app.domain.SuggestionUseCase
+import com.routeme.app.domain.SyncSettingsUseCase
 import com.routeme.app.util.DateUtils
-import java.util.Calendar
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,15 +33,20 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 
 class MainViewModel(
     private val clientRepository: ClientRepository,
     private val preferencesRepository: PreferencesRepository,
     private val routingEngine: RoutingEngine,
     private val savedStateHandle: SavedStateHandle,
-    private val retryQueue: com.routeme.app.data.WriteBackRetryQueue
+    private val retryQueue: com.routeme.app.data.WriteBackRetryQueue,
+    private val suggestionUseCase: SuggestionUseCase = SuggestionUseCase(routingEngine),
+    private val arrivalUseCase: ArrivalUseCase = ArrivalUseCase(routingEngine),
+    private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue),
+    private val destinationQueueUseCase: DestinationQueueUseCase = DestinationQueueUseCase(preferencesRepository, routingEngine),
+    private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
+    private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
+    private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue)
 ) : ViewModel() {
     companion object {
         private const val KEY_SERVICE_TYPE = "service_type"
@@ -55,16 +62,6 @@ class MainViewModel(
         private const val KEY_DEST_QUEUE = "dest_queue"
         private const val KEY_DEST_INDEX = "dest_index"
     }
-
-    private val pageSize = 5
-    private val routeExportTopN = 12
-    private val maxGoogleWaypoints = 8
-    private var lastSuggestionLocation: Location? = null
-    private var pendingActionAfterStaleResolve: (() -> Unit)? = null
-
-    /** Clients the user tapped "Skip Today" on — excluded from suggestions until midnight. */
-    private val skippedTodayIds = mutableSetOf<String>()
-    private var skipDateEpochDay: Long = System.currentTimeMillis() / 86_400_000L
 
     /**
      * Determine the initial step selection on startup:
@@ -141,27 +138,29 @@ class MainViewModel(
             setLoading(true)
             setStatus("Loading clients…", emitSnackbar = false)
             try {
-                val loaded = clientRepository.loadAllClients()
-                val restoredSelectedId = savedStateHandle.get<String>(KEY_SELECTED_CLIENT_ID)
-                val restoredSelectedClient = loaded.firstOrNull { it.id == restoredSelectedId }
-                _uiState.update {
-                    it.copy(
-                        clients = loaded,
-                        summaryText = buildSummaryText(loaded),
-                        completedSteps = computeCompletedSteps(loaded),
-                        selectedClient = restoredSelectedClient,
-                        selectedClientDetails = restoredSelectedClient?.let(routingEngine::buildClientDetails)
-                            ?: it.selectedClientDetails
-                    )
+                when (val result = syncSettingsUseCase.loadClients()) {
+                    is SyncSettingsUseCase.LoadClientsResult.Error -> {
+                        setStatus(result.message)
+                    }
+
+                    is SyncSettingsUseCase.LoadClientsResult.Success -> {
+                        val loaded = result.clients
+                        val restoredSelectedId = savedStateHandle.get<String>(KEY_SELECTED_CLIENT_ID)
+                        val restoredSelectedClient = loaded.firstOrNull { it.id == restoredSelectedId }
+                        _uiState.update {
+                            it.copy(
+                                clients = loaded,
+                                summaryText = buildSummaryText(loaded),
+                                completedSteps = computeCompletedSteps(loaded),
+                                selectedClient = restoredSelectedClient,
+                                selectedClientDetails = restoredSelectedClient?.let(routingEngine::buildClientDetails)
+                                    ?: it.selectedClientDetails
+                            )
+                        }
+                        persistCriticalState(_uiState.value)
+                        setStatus(result.statusMessage)
+                    }
                 }
-                persistCriticalState(_uiState.value)
-                if (loaded.isEmpty()) {
-                    setStatus("No clients found. Import or sync to begin.")
-                } else {
-                    setStatus("Loaded ${loaded.size} client(s).")
-                }
-            } catch (e: Exception) {
-                setStatus("Load failed: ${e.message ?: "Unknown error"}")
             } finally {
                 setLoading(false)
             }
@@ -172,21 +171,30 @@ class MainViewModel(
         viewModelScope.launch {
             setLoading(true)
             try {
-                val result = clientRepository.importFromUri(uri)
-                setStatus(result.message)
-                if (result.clients.isNotEmpty()) {
-                    val updated = _uiState.value.clients.toMutableList().apply { addAll(result.clients) }
-                    _uiState.update {
-                        it.copy(
-                            clients = updated,
-                            summaryText = buildSummaryText(updated),
-                            completedSteps = computeCompletedSteps(updated)
-                        )
+                when (
+                    val result = syncSettingsUseCase.importClients(
+                        existingClients = _uiState.value.clients,
+                        uri = uri
+                    )
+                ) {
+                    is SyncSettingsUseCase.ImportClientsResult.Error -> {
+                        setStatus(result.message)
                     }
-                    persistCriticalState(_uiState.value)
+
+                    is SyncSettingsUseCase.ImportClientsResult.Success -> {
+                        setStatus(result.statusMessage)
+                        if (result.didImportClients) {
+                            _uiState.update {
+                                it.copy(
+                                    clients = result.clients,
+                                    summaryText = buildSummaryText(result.clients),
+                                    completedSteps = computeCompletedSteps(result.clients)
+                                )
+                            }
+                            persistCriticalState(_uiState.value)
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                setStatus("Import failed: ${e.message ?: "Unknown error"}")
             } finally {
                 setLoading(false)
             }
@@ -198,29 +206,36 @@ class MainViewModel(
             setLoading(true)
             setStatus("Syncing from Google Sheets…", emitSnackbar = false)
             try {
-                val result = clientRepository.syncFromSheets(url)
-                setStatus(result.message)
-                if (result.clients.isNotEmpty()) {
-                    _uiState.update {
-                        it.copy(
-                            clients = result.clients,
-                            summaryText = buildSummaryText(result.clients),
-                            completedSteps = computeCompletedSteps(result.clients),
-                            suggestions = emptyList(),
-                            suggestionOffset = 0,
-                            selectedClient = null,
-                            selectedClientDetails = "",
-                            arrivalStartedAtMillis = null,
-                            arrivalLat = null,
-                            arrivalLng = null
-                        )
+                when (val result = syncSettingsUseCase.syncFromSheets(url)) {
+                    is SyncSettingsUseCase.SyncFromSheetsResult.Error -> {
+                        setStatus(result.message)
                     }
-                    persistCriticalState(_uiState.value)
-                    // Auto-geocode any clients missing coordinates after sync
-                    geocodeMissingClientCoordinates()
+
+                    is SyncSettingsUseCase.SyncFromSheetsResult.Success -> {
+                        setStatus(result.statusMessage)
+                        val syncedClients = result.syncedClients
+                        if (syncedClients != null) {
+                            _uiState.update {
+                                it.copy(
+                                    clients = syncedClients,
+                                    summaryText = buildSummaryText(syncedClients),
+                                    completedSteps = computeCompletedSteps(syncedClients),
+                                    suggestions = emptyList(),
+                                    suggestionOffset = 0,
+                                    selectedClient = null,
+                                    selectedClientDetails = "",
+                                    arrivalStartedAtMillis = null,
+                                    arrivalLat = null,
+                                    arrivalLng = null
+                                )
+                            }
+                            persistCriticalState(_uiState.value)
+                            if (result.shouldAutoGeocode) {
+                                geocodeMissingClientCoordinates()
+                            }
+                        }
+                    }
                 }
-            } catch (e: Exception) {
-                setStatus("Sync failed: ${e.message ?: "Unknown error"}")
             } finally {
                 setLoading(false)
             }
@@ -230,27 +245,36 @@ class MainViewModel(
     fun geocodeMissingClientCoordinates() {
         viewModelScope.launch {
             val clients = _uiState.value.clients
-            val withoutCoords = clients.filter { it.latitude == null || it.longitude == null }
-            if (withoutCoords.isEmpty()) {
+            val withoutCoordsCount = syncSettingsUseCase.missingCoordinatesCount(clients)
+            if (withoutCoordsCount == 0) {
                 setStatus("All clients already have coordinates.")
                 return@launch
             }
 
             setLoading(true)
-            setStatus("Geocoding ${withoutCoords.size} client(s)…", emitSnackbar = false)
+            setStatus("Geocoding ${withoutCoordsCount} client(s)…", emitSnackbar = false)
             try {
-                val result = clientRepository.geocodeClients(clients)
-                setStatus(result.message)
-                _uiState.update {
-                    it.copy(
-                        clients = clients,
-                        summaryText = buildSummaryText(clients),
-                        completedSteps = computeCompletedSteps(clients)
-                    )
+                when (val result = syncSettingsUseCase.geocodeMissingClientCoordinates(clients)) {
+                    is SyncSettingsUseCase.GeocodeResult.Error -> {
+                        setStatus(result.message)
+                    }
+
+                    is SyncSettingsUseCase.GeocodeResult.NoMissingCoordinates -> {
+                        setStatus(result.statusMessage)
+                    }
+
+                    is SyncSettingsUseCase.GeocodeResult.Success -> {
+                        setStatus(result.statusMessage)
+                        _uiState.update {
+                            it.copy(
+                                clients = result.clients,
+                                summaryText = buildSummaryText(result.clients),
+                                completedSteps = computeCompletedSteps(result.clients)
+                            )
+                        }
+                        persistCriticalState(_uiState.value)
+                    }
                 }
-                persistCriticalState(_uiState.value)
-            } catch (e: Exception) {
-                setStatus("Geocoding failed: ${e.message ?: "Unknown error"}")
             } finally {
                 setLoading(false)
             }
@@ -258,13 +282,11 @@ class MainViewModel(
     }
 
     fun updateSyncSettings(readUrl: String, writeUrl: String) {
-        preferencesRepository.sheetsReadUrl = readUrl
-        preferencesRepository.sheetsWriteUrl = writeUrl
-        SheetsWriteBack.webAppUrl = writeUrl
+        val settings = syncSettingsUseCase.updateSyncSettings(readUrl, writeUrl)
         _uiState.update {
             it.copy(
-                sheetsReadUrl = readUrl,
-                sheetsWriteUrl = writeUrl
+                sheetsReadUrl = settings.readUrl,
+                sheetsWriteUrl = settings.writeUrl
             )
         }
     }
@@ -313,190 +335,197 @@ class MainViewModel(
     // ─── Non-client stop logging settings ──────────────────────
 
     /** Whether non-client stop logging is currently enabled. */
-    fun isNonClientLoggingEnabled(): Boolean = preferencesRepository.nonClientLoggingEnabled
+    fun isNonClientLoggingEnabled(): Boolean = syncSettingsUseCase.isNonClientLoggingEnabled()
 
     fun toggleNonClientLogging() {
-        val newValue = !preferencesRepository.nonClientLoggingEnabled
-        preferencesRepository.nonClientLoggingEnabled = newValue
+        val result = syncSettingsUseCase.toggleNonClientLogging()
         viewModelScope.launch {
-            setStatus(if (newValue) "Non-client stop logging ON" else "Non-client stop logging OFF")
+            setStatus(result.statusMessage)
         }
     }
 
     /** Current threshold in minutes. */
-    fun getNonClientStopThreshold(): Int = preferencesRepository.nonClientStopThresholdMinutes
+    fun getNonClientStopThreshold(): Int = syncSettingsUseCase.getNonClientStopThreshold()
 
     fun setNonClientStopThreshold(minutes: Int) {
-        preferencesRepository.nonClientStopThresholdMinutes = minutes.coerceIn(1, 30)
+        val result = syncSettingsUseCase.setNonClientStopThreshold(minutes)
         viewModelScope.launch {
-            setStatus("Non-client stop threshold: ${minutes}min")
+            setStatus(result.statusMessage)
         }
     }
 
     // ─── Destination queue management ──────────────────────────
 
     private fun loadSavedDestinations() {
-        _uiState.update { it.copy(savedDestinations = preferencesRepository.savedDestinations) }
+        _uiState.update { it.copy(savedDestinations = destinationQueueUseCase.loadSavedDestinations()) }
     }
 
     fun addSavedDestination(dest: SavedDestination) {
-        val updated = preferencesRepository.savedDestinations + dest
-        preferencesRepository.savedDestinations = updated
+        val updated = destinationQueueUseCase.addSavedDestination(dest)
         _uiState.update { it.copy(savedDestinations = updated) }
     }
 
     fun removeSavedDestination(id: String) {
-        val updated = preferencesRepository.savedDestinations.filter { it.id != id }
-        preferencesRepository.savedDestinations = updated
+        val updated = destinationQueueUseCase.removeSavedDestination(id)
         _uiState.update { it.copy(savedDestinations = updated) }
     }
 
     fun addToDestinationQueue(dest: SavedDestination) {
-        _uiState.update { it.copy(destinationQueue = it.destinationQueue + dest) }
-        syncActiveDestinationToPrefs()
-        viewModelScope.launch { setStatus("Added ${dest.name} to destinations") }
+        val state = _uiState.value
+        val result = destinationQueueUseCase.addToDestinationQueue(
+            destinationQueue = state.destinationQueue,
+            activeDestinationIndex = state.activeDestinationIndex,
+            destination = dest
+        )
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
+        }
+        result.statusMessage?.let { message ->
+            viewModelScope.launch { setStatus(message) }
+        }
     }
 
     fun removeFromDestinationQueue(index: Int) {
-        _uiState.update { state ->
-            val queue = state.destinationQueue.toMutableList().apply { removeAt(index) }
-            val newIndex = when {
-                queue.isEmpty() -> 0
-                state.activeDestinationIndex >= queue.size -> queue.size - 1
-                index < state.activeDestinationIndex -> state.activeDestinationIndex - 1
-                else -> state.activeDestinationIndex
-            }
-            state.copy(destinationQueue = queue, activeDestinationIndex = newIndex)
+        val state = _uiState.value
+        val result = destinationQueueUseCase.removeFromDestinationQueue(
+            destinationQueue = state.destinationQueue,
+            activeDestinationIndex = state.activeDestinationIndex,
+            indexToRemove = index
+        )
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
         }
-        syncActiveDestinationToPrefs()
     }
 
     fun moveDestinationInQueue(fromIndex: Int, toIndex: Int) {
-        _uiState.update { state ->
-            val queue = state.destinationQueue.toMutableList()
-            val item = queue.removeAt(fromIndex)
-            queue.add(toIndex, item)
-            // Track where the active index moved
-            val oldActive = state.activeDestinationIndex
-            val newActive = when {
-                fromIndex == oldActive -> toIndex
-                fromIndex < oldActive && toIndex >= oldActive -> oldActive - 1
-                fromIndex > oldActive && toIndex <= oldActive -> oldActive + 1
-                else -> oldActive
-            }
-            state.copy(destinationQueue = queue, activeDestinationIndex = newActive)
+        val state = _uiState.value
+        val result = destinationQueueUseCase.moveDestinationInQueue(
+            destinationQueue = state.destinationQueue,
+            activeDestinationIndex = state.activeDestinationIndex,
+            fromIndex = fromIndex,
+            toIndex = toIndex
+        )
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
         }
-        syncActiveDestinationToPrefs()
     }
 
     fun clearDestinationQueue() {
-        _uiState.update { it.copy(destinationQueue = emptyList(), activeDestinationIndex = 0) }
-        preferencesRepository.activeDestination = null
-        viewModelScope.launch { setStatus("Destinations cleared") }
+        val result = destinationQueueUseCase.clearDestinationQueue()
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
+        }
+        result.statusMessage?.let { message ->
+            viewModelScope.launch { setStatus(message) }
+        }
     }
 
     fun skipDestination() {
-        advanceDestinationQueue()
+        val state = _uiState.value
+        val result = destinationQueueUseCase.skipDestination(
+            destinationQueue = state.destinationQueue,
+            activeDestinationIndex = state.activeDestinationIndex
+        )
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
+        }
     }
 
     fun optimizeDestinationQueue(currentLocation: Location?) {
         val state = _uiState.value
-        if (state.destinationQueue.size <= 1) return
-        val startLat = currentLocation?.latitude ?: SHOP_LAT
-        val startLng = currentLocation?.longitude ?: SHOP_LNG
-        val optimized = routingEngine.optimizeDestinationOrder(state.destinationQueue, startLat, startLng)
-        _uiState.update { it.copy(destinationQueue = optimized, activeDestinationIndex = 0) }
-        syncActiveDestinationToPrefs()
-        viewModelScope.launch { setStatus("Optimized ${optimized.size} destinations") }
+        val result = destinationQueueUseCase.optimizeDestinationQueue(
+            destinationQueue = state.destinationQueue,
+            currentLocation = currentLocation?.let {
+                DestinationQueueUseCase.GeoPoint(it.latitude, it.longitude)
+            }
+        ) ?: return
+
+        _uiState.update {
+            it.copy(
+                destinationQueue = result.destinationQueue,
+                activeDestinationIndex = result.activeDestinationIndex
+            )
+        }
+        result.statusMessage?.let { message ->
+            viewModelScope.launch { setStatus(message) }
+        }
     }
 
     /** Called when tracking detects arrival at the active destination. */
     fun onDestinationReached(destinationName: String) {
         viewModelScope.launch {
             val state = _uiState.value
-            val remaining = state.destinationQueue.size - state.activeDestinationIndex - 1
-            if (remaining > 0) {
-                val nextDest = state.destinationQueue.getOrNull(state.activeDestinationIndex + 1)
-                _events.emit(MainEvent.ShowSnackbar(
-                    "Arrived at $destinationName — next: ${nextDest?.name} ($remaining remaining)"
-                ))
-            } else {
-                _events.emit(MainEvent.ShowSnackbar(
-                    "Arrived at $destinationName — all destinations reached"
-                ))
-            }
-            advanceDestinationQueue()
-        }
-    }
-
-    private fun advanceDestinationQueue() {
-        _uiState.update { state ->
-            val nextIndex = state.activeDestinationIndex + 1
-            if (nextIndex >= state.destinationQueue.size) {
-                state.copy(destinationQueue = emptyList(), activeDestinationIndex = 0)
-            } else {
-                state.copy(activeDestinationIndex = nextIndex)
+            val result = destinationQueueUseCase.onDestinationReached(
+                destinationQueue = state.destinationQueue,
+                activeDestinationIndex = state.activeDestinationIndex,
+                destinationName = destinationName
+            )
+            _events.emit(MainEvent.ShowSnackbar(result.snackbarMessage))
+            _uiState.update {
+                it.copy(
+                    destinationQueue = result.destinationQueue,
+                    activeDestinationIndex = result.activeDestinationIndex
+                )
             }
         }
-        syncActiveDestinationToPrefs()
-    }
-
-    /** Push current active destination to SharedPrefs so the tracking service can read it. */
-    private fun syncActiveDestinationToPrefs() {
-        preferencesRepository.activeDestination = _uiState.value.activeDestination
     }
 
     fun suggestNextClients(currentLocation: Location?) {
         if (checkAndPromptStaleArrival { suggestNextClients(currentLocation) }) return
         viewModelScope.launch {
             val state = _uiState.value
-            val location = currentLocation ?: lastSuggestionLocation
-            lastSuggestionLocation = location
+            val result = suggestionUseCase.suggestNextClients(
+                clients = state.clients,
+                selectedServiceTypes = state.selectedServiceTypes,
+                minDays = state.minDays,
+                cuOverrideEnabled = state.cuOverrideEnabled,
+                routeDirection = state.routeDirection,
+                activeDestination = state.activeDestination,
+                currentLocation = currentLocation
+            )
 
-            // Auto-clear skip set on date rollover
-            val todayEpoch = System.currentTimeMillis() / 86_400_000L
-            if (todayEpoch != skipDateEpochDay) {
-                skippedTodayIds.clear()
-                skipDateEpochDay = todayEpoch
+            if (result.dateRolloverDetected) {
                 clearDestinationQueue()
             }
 
-            val ranked = routingEngine.rankClients(
-                clients = state.clients,
-                serviceTypes = state.selectedServiceTypes,
-                minDays = state.minDays,
-                lastLocation = location,
-                cuOverrideEnabled = state.cuOverrideEnabled,
-                routeDirection = state.routeDirection,
-                skippedClientIds = skippedTodayIds,
-                destination = state.activeDestination
-            )
-
-            if (ranked.isEmpty()) {
+            if (result.suggestions.isEmpty()) {
                 _uiState.update {
                     it.copy(
                         suggestions = emptyList(),
-                        suggestionOffset = 0,
+                        suggestionOffset = result.suggestionOffset,
                         selectedClient = null,
                         selectedClientDetails = ""
                     )
                 }
-                val stepsLabel = state.selectedServiceTypes.joinToString("+") { it.label }
-                setStatus("No eligible clients for $stepsLabel (min ${state.minDays} days).")
+                setStatus(result.statusMessage)
                 return@launch
             }
 
-            val first = ranked.first().client
             _uiState.update {
                 it.copy(
-                    suggestions = ranked,
-                    suggestionOffset = 0,
-                    selectedClient = first,
-                    selectedClientDetails = routingEngine.buildClientDetails(first)
+                    suggestions = result.suggestions,
+                    suggestionOffset = result.suggestionOffset,
+                    selectedClient = result.selectedClient,
+                    selectedClientDetails = result.selectedClientDetails
                 )
             }
             persistCriticalState(_uiState.value)
-            setStatus("Selected ${first.name}")
+            setStatus(result.statusMessage)
             fetchDrivingTimesForCurrentPage()
         }
     }
@@ -504,8 +533,10 @@ class MainViewModel(
     fun nextSuggestionPage() {
         val state = _uiState.value
         if (state.suggestions.isEmpty()) return
-        val nextOffset = state.suggestionOffset + pageSize
-        val wrapped = if (nextOffset >= state.suggestions.size) 0 else nextOffset
+        val wrapped = suggestionUseCase.nextSuggestionOffset(
+            currentOffset = state.suggestionOffset,
+            totalSuggestions = state.suggestions.size
+        )
         _uiState.update { it.copy(suggestionOffset = wrapped) }
         savedStateHandle[KEY_SUGGESTION_OFFSET] = wrapped
         viewModelScope.launch { fetchDrivingTimesForCurrentPage() }
@@ -514,7 +545,7 @@ class MainViewModel(
     fun previousSuggestionPage() {
         val state = _uiState.value
         if (state.suggestions.isEmpty()) return
-        val prevOffset = (state.suggestionOffset - pageSize).coerceAtLeast(0)
+        val prevOffset = suggestionUseCase.previousSuggestionOffset(state.suggestionOffset)
         _uiState.update { it.copy(suggestionOffset = prevOffset) }
         savedStateHandle[KEY_SUGGESTION_OFFSET] = prevOffset
         viewModelScope.launch { fetchDrivingTimesForCurrentPage() }
@@ -542,19 +573,20 @@ class MainViewModel(
      */
     fun skipSelectedClientToday() {
         val state = _uiState.value
-        val client = state.selectedClient ?: run {
+        val result = suggestionUseCase.skipSelectedClientToday(
+            selectedClient = state.selectedClient,
+            suggestions = state.suggestions
+        ) ?: run {
             viewModelScope.launch { setStatus("Pick a client first") }
             return
         }
-        skippedTodayIds.add(client.id)
-        val remaining = state.suggestions.filter { it.client.id != client.id }
-        val next = remaining.firstOrNull()
+
         _uiState.update {
             it.copy(
-                suggestions = remaining,
-                suggestionOffset = 0,
-                selectedClient = next?.client,
-                selectedClientDetails = next?.client?.let(routingEngine::buildClientDetails) ?: "",
+                suggestions = result.suggestions,
+                suggestionOffset = result.suggestionOffset,
+                selectedClient = result.selectedClient,
+                selectedClientDetails = result.selectedClientDetails,
                 arrivalStartedAtMillis = null,
                 arrivalLat = null,
                 arrivalLng = null
@@ -562,72 +594,96 @@ class MainViewModel(
         }
         persistCriticalState(_uiState.value)
         viewModelScope.launch {
-            setStatus("Skipped ${client.name} for today (${skippedTodayIds.size} skipped)")
+            setStatus(result.statusMessage)
         }
     }
 
     /** Returns number of clients currently skipped today. */
-    fun skippedCount(): Int = skippedTodayIds.size
+    fun skippedCount(): Int = suggestionUseCase.skippedCount()
 
     /** Clears all skip-today flags. */
     fun clearSkippedClients() {
-        skippedTodayIds.clear()
+        suggestionUseCase.clearSkippedClients()
         viewModelScope.launch { setStatus("Cleared all skips") }
     }
 
     fun exportTopRouteToMaps() {
         viewModelScope.launch {
             val state = _uiState.value
-            if (state.suggestions.isEmpty()) {
-                setStatus("Run suggestions first")
-                return@launch
-            }
+            when (
+                val result = mapsExportUseCase.exportTopRoute(
+                    suggestions = state.suggestions,
+                    routeDirection = state.routeDirection,
+                    activeDestination = state.activeDestination,
+                    originLocation = suggestionUseCase.lastSuggestionLocation()?.let {
+                        MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
+                    }
+                )
+            ) {
+                MapsExportUseCase.ExportResult.NoMappableClients -> {
+                    setStatus("No mappable clients in current suggestions")
+                }
 
-            val routeExport = buildTopRouteExportFromSuggestions(state)
+                MapsExportUseCase.ExportResult.NoSuggestions -> {
+                    setStatus("Run suggestions first")
+                }
 
-            if (routeExport == null) {
-                setStatus("No mappable clients in current suggestions")
-                return@launch
-            }
+                is MapsExportUseCase.ExportResult.Success -> {
+                    val routeExport = result.routeExport
+                    _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
 
-            _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
-
-            val clipped = routeExport.requestedStops - routeExport.includedStops
-            if (clipped > 0) {
-                setStatus("Opened Maps route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
-            } else {
-                setStatus("Opened Maps route with ${routeExport.includedStops} stops")
+                    val clipped = routeExport.requestedStops - routeExport.includedStops
+                    if (clipped > 0) {
+                        setStatus("Opened Maps route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
+                    } else {
+                        setStatus("Opened Maps route with ${routeExport.includedStops} stops")
+                    }
+                }
             }
         }
     }
 
     internal fun buildTopRouteExportForTests(): Pair<String, Int>? {
-        val routeExport = buildTopRouteExportFromSuggestions(_uiState.value) ?: return null
-        return routeExport.uri to routeExport.includedStops
+        val state = _uiState.value
+        val result = mapsExportUseCase.exportTopRoute(
+            suggestions = state.suggestions,
+            routeDirection = state.routeDirection,
+            activeDestination = state.activeDestination,
+            originLocation = suggestionUseCase.lastSuggestionLocation()?.let {
+                MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
+            }
+        )
+        return (result as? MapsExportUseCase.ExportResult.Success)
+            ?.routeExport
+            ?.let { it.uri to it.includedStops }
     }
 
     fun startArrivalForSelected(currentLocation: Location?) {
-        val state = _uiState.value
-        val client = state.selectedClient
-        if (client == null) {
-            viewModelScope.launch { setStatus("Pick a client first") }
-            return
+        when (val result = arrivalUseCase.startArrivalForSelected(
+            selectedClient = _uiState.value.selectedClient,
+            currentLocation = currentLocation?.let {
+                ArrivalUseCase.GeoPoint(it.latitude, it.longitude)
+            }
+        )) {
+            is ArrivalUseCase.StartArrivalResult.Error -> {
+                viewModelScope.launch { setStatus(result.message) }
+            }
+            is ArrivalUseCase.StartArrivalResult.Started -> {
+                val location = currentLocation ?: return
+                applyArrival(result.arrival, location)
+            }
         }
-        if (currentLocation == null) {
-            viewModelScope.launch { setStatus("Unable to get current location") }
-            return
-        }
-        markArrivalForClient(client, currentLocation, System.currentTimeMillis())
     }
 
     fun cancelArrival() {
         val state = _uiState.value
-        val started = state.arrivalStartedAtMillis
-        if (started == null) return
-        val name = state.selectedClient?.name ?: "client"
+        val statusMessage = arrivalUseCase.cancelArrival(
+            arrivalStartedAtMillis = state.arrivalStartedAtMillis,
+            selectedClientName = state.selectedClient?.name
+        ) ?: return
         _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
-        viewModelScope.launch { setStatus("Cancelled arrival for $name") }
+        viewModelScope.launch { setStatus(statusMessage) }
     }
 
     /**
@@ -635,13 +691,14 @@ class MainViewModel(
      * The [deferredAction] will run automatically after the user resolves the prompt.
      */
     private fun checkAndPromptStaleArrival(deferredAction: () -> Unit): Boolean {
-        val state = _uiState.value
-        val started = state.arrivalStartedAtMillis ?: return false
-        val clientName = state.selectedClient?.name ?: return false
-        val minutes = ((System.currentTimeMillis() - started) / 60_000L).coerceAtLeast(1)
-        pendingActionAfterStaleResolve = deferredAction
+        val prompt = arrivalUseCase.createStaleArrivalPrompt(
+            arrivalStartedAtMillis = _uiState.value.arrivalStartedAtMillis,
+            selectedClientName = _uiState.value.selectedClient?.name,
+            deferredAction = deferredAction
+        ) ?: return false
+
         viewModelScope.launch {
-            _events.emit(MainEvent.StaleArrivalPrompt(clientName, minutes))
+            _events.emit(MainEvent.StaleArrivalPrompt(prompt.clientName, prompt.minutesElapsed))
         }
         return true
     }
@@ -653,147 +710,145 @@ class MainViewModel(
      * If the user cancels the dialog, don't call this — the pending action is just dropped.
      */
     fun resolveStaleArrival(markComplete: Boolean, currentLocation: Location? = null, visitNotes: String = "") {
-        val action = pendingActionAfterStaleResolve
-        pendingActionAfterStaleResolve = null
-        if (markComplete) {
-            // Save the service record using the current confirm flow
-            confirmSelectedClientService(currentLocation, visitNotes)
-        } else {
-            // Discard — just clear arrival state
-            val name = _uiState.value.selectedClient?.name ?: "client"
-            _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
-            savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
-            viewModelScope.launch { setStatus("Discarded arrival for $name") }
+        when (val result = arrivalUseCase.resolveStaleArrival(
+            markComplete = markComplete,
+            selectedClientName = _uiState.value.selectedClient?.name
+        )) {
+            is ArrivalUseCase.ResolveStaleResult.ConfirmAndContinue -> {
+                confirmSelectedClientService(currentLocation, visitNotes)
+                result.deferredAction?.invoke()
+            }
+            is ArrivalUseCase.ResolveStaleResult.DiscardAndContinue -> {
+                _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
+                savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
+                viewModelScope.launch { setStatus(result.statusMessage) }
+                result.deferredAction?.invoke()
+            }
         }
-        // Run whatever the user was originally trying to do
-        action?.invoke()
     }
 
     fun dropPendingStaleAction() {
-        pendingActionAfterStaleResolve = null
+        arrivalUseCase.dropPendingStaleAction()
     }
 
     fun markArrivalForClient(client: Client, location: Location, startedAtMillis: Long = System.currentTimeMillis()) {
-        lastSuggestionLocation = location
+        val arrival = arrivalUseCase.markArrivalForClient(
+            client = client,
+            location = ArrivalUseCase.GeoPoint(location.latitude, location.longitude),
+            startedAtMillis = startedAtMillis
+        )
+        applyArrival(arrival, location)
+    }
+
+    private fun applyArrival(arrival: ArrivalUseCase.MarkArrivalResult, location: Location) {
+        suggestionUseCase.updateLastSuggestionLocation(location)
         _uiState.update {
             it.copy(
-                selectedClient = client,
-                selectedClientDetails = routingEngine.buildClientDetails(client),
-                arrivalStartedAtMillis = startedAtMillis,
-                arrivalLat = location.latitude,
-                arrivalLng = location.longitude
+                selectedClient = arrival.selectedClient,
+                selectedClientDetails = arrival.selectedClientDetails,
+                arrivalStartedAtMillis = arrival.arrivalStartedAtMillis,
+                arrivalLat = arrival.arrivalLat,
+                arrivalLng = arrival.arrivalLng
             )
         }
         persistCriticalState(_uiState.value)
         viewModelScope.launch {
-            setStatus("Arrival started for ${client.name} at ${DateUtils.formatTimestamp(startedAtMillis)}")
+            setStatus(
+                "Arrival started for ${arrival.selectedClient.name} at ${DateUtils.formatTimestamp(arrival.arrivalStartedAtMillis)}"
+            )
         }
     }
 
     fun currentPageSuggestions(): List<com.routeme.app.ClientSuggestion> {
         val state = _uiState.value
-        return state.suggestions.drop(state.suggestionOffset).take(pageSize)
+        return suggestionUseCase.currentPageSuggestions(
+            suggestions = state.suggestions,
+            suggestionOffset = state.suggestionOffset
+        )
     }
 
     fun canShowMoreSuggestions(): Boolean {
         val state = _uiState.value
-        return state.suggestionOffset + pageSize < state.suggestions.size
+        return suggestionUseCase.canShowMoreSuggestions(
+            suggestionOffset = state.suggestionOffset,
+            totalSuggestions = state.suggestions.size
+        )
     }
 
     fun canShowPreviousSuggestions(): Boolean {
-        return _uiState.value.suggestionOffset > 0
+        return suggestionUseCase.canShowPreviousSuggestions(_uiState.value.suggestionOffset)
     }
 
     fun remainingSuggestionCount(): Int {
         val state = _uiState.value
-        return (state.suggestions.size - state.suggestionOffset - pageSize).coerceAtLeast(0)
+        return suggestionUseCase.remainingSuggestionCount(
+            suggestionOffset = state.suggestionOffset,
+            totalSuggestions = state.suggestions.size
+        )
     }
 
     fun confirmSelectedClientService(currentLocation: Location?, visitNotes: String = "") {
         viewModelScope.launch {
             val state = _uiState.value
-            val client = state.selectedClient
-            if (client == null) {
-                setStatus("Pick a client first")
-                return@launch
-            }
-            val arrivalStartedAtMillis = state.arrivalStartedAtMillis
-            if (arrivalStartedAtMillis == null) {
-                setStatus("Tap Arrived first")
-                return@launch
-            }
+            val selectedSuggestionEligibleSteps = state.selectedClient
+                ?.let { client -> state.suggestions.find { it.client.id == client.id }?.eligibleSteps }
+                ?: emptySet()
 
-            val finishedAt = System.currentTimeMillis()
-            val durationMinutes = (((finishedAt - arrivalStartedAtMillis) / 60000.0).toLong()).coerceAtLeast(1)
-
-            // Determine which steps to confirm: use the suggestion's eligible steps if
-            // available, otherwise fall back to the first selected type.
-            val selectedSuggestion = state.suggestions.find { it.client.id == client.id }
-            val stepsToConfirm = if (selectedSuggestion != null && selectedSuggestion.eligibleSteps.isNotEmpty()) {
-                selectedSuggestion.eligibleSteps
-            } else {
-                // Fallback: first selected service type only
-                setOf(state.selectedServiceTypes.first())
-            }
-
-            for (serviceType in stepsToConfirm) {
-                val record = ServiceRecord(
-                    serviceType = serviceType,
-                    arrivedAtMillis = arrivalStartedAtMillis,
-                    completedAtMillis = finishedAt,
-                    durationMinutes = durationMinutes,
-                    lat = state.arrivalLat ?: currentLocation?.latitude,
-                    lng = state.arrivalLng ?: currentLocation?.longitude,
-                    notes = visitNotes.trim()
+            when (
+                val result = serviceCompletionUseCase.confirmSelectedClientService(
+                    ServiceCompletionUseCase.ConfirmSelectedRequest(
+                        clients = state.clients,
+                        selectedClient = state.selectedClient,
+                        arrivalStartedAtMillis = state.arrivalStartedAtMillis,
+                        arrivalLat = state.arrivalLat,
+                        arrivalLng = state.arrivalLng,
+                        selectedSuggestionEligibleSteps = selectedSuggestionEligibleSteps,
+                        selectedServiceTypes = state.selectedServiceTypes,
+                        currentLocation = currentLocation?.let {
+                            ServiceCompletionUseCase.GeoPoint(it.latitude, it.longitude)
+                        },
+                        visitNotes = visitNotes
+                    )
                 )
-
-                client.records.add(record)
-                try {
-                    clientRepository.saveServiceRecord(client.id, record)
-                } catch (e: Exception) {
-                    setStatus("Save record failed: ${e.message ?: "Unknown error"}")
-                    return@launch
+            ) {
+                is ServiceCompletionUseCase.ConfirmSelectedResult.Error -> {
+                    setStatus(result.message)
                 }
-            }
 
-            val updatedClients = state.clients.map { if (it.id == client.id) client else it }
-            _uiState.update {
-                it.copy(
-                    clients = updatedClients,
-                    summaryText = buildSummaryText(updatedClients),
-                    completedSteps = computeCompletedSteps(updatedClients),
-                    selectedClient = client,
-                    selectedClientDetails = routingEngine.buildClientDetails(client),
-                    arrivalStartedAtMillis = null,
-                    arrivalLat = null,
-                    arrivalLng = null
-                )
-            }
-            persistCriticalState(_uiState.value)
-
-            val stepsLabel = stepsToConfirm.joinToString("+") { it.label }
-            val statusMsg = "Confirmed $stepsLabel for ${client.name} at ${DateUtils.formatTimestamp(finishedAt)} (${durationMinutes}m)"
-            setStatus(statusMsg)
-            _events.emit(MainEvent.ServiceConfirmed)
-            _events.emit(MainEvent.UndoConfirmation(client.name, client.id, finishedAt))
-
-            if (SheetsWriteBack.webAppUrl.isNotBlank()) {
-                for (serviceType in stepsToConfirm) {
-                    try {
-                        val result = clientRepository.writeBackServiceCompletion(client.name, serviceType, finishedAt)
-                        if (result.success) {
-                            drainRetryQueueQuietly()
-                        } else {
-                            retryQueue.enqueue(client.name, serviceTypeToColumn(serviceType), "\u221A${formatCheckValue(finishedAt)}")
-                        }
-                    } catch (e: Exception) {
-                        retryQueue.enqueue(client.name, serviceTypeToColumn(serviceType), "\u221A${formatCheckValue(finishedAt)}")
+                is ServiceCompletionUseCase.ConfirmSelectedResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            clients = result.updatedClients,
+                            summaryText = buildSummaryText(result.updatedClients),
+                            completedSteps = computeCompletedSteps(result.updatedClients),
+                            selectedClient = result.selectedClient,
+                            selectedClientDetails = routingEngine.buildClientDetails(result.selectedClient),
+                            arrivalStartedAtMillis = null,
+                            arrivalLat = null,
+                            arrivalLng = null
+                        )
                     }
-                }
-                if (stepsToConfirm.size > 1) {
-                    _events.emit(MainEvent.ShowSnackbar("Sheet updated for ${stepsToConfirm.size} steps"))
-                } else {
-                    setStatus("Sheet updated. $statusMsg")
+                    persistCriticalState(_uiState.value)
+
+                    setStatus(result.statusMessage)
+                    if (result.retryDrainSucceeded > 0) {
+                        setStatus("Retried ${result.retryDrainSucceeded} queued sheet write(s)", emitSnackbar = false)
+                    }
+                    _events.emit(MainEvent.ServiceConfirmed)
+                    _events.emit(
+                        MainEvent.UndoConfirmation(
+                            result.selectedClient.name,
+                            result.selectedClient.id,
+                            result.finishedAt
+                        )
+                    )
+
+                    result.sheetSnackbarMessage?.let { message ->
+                        _events.emit(MainEvent.ShowSnackbar(message))
+                    }
+                    result.sheetStatusMessage?.let { message ->
+                        setStatus(message)
+                    }
                 }
             }
         }
@@ -806,82 +861,62 @@ class MainViewModel(
     fun confirmClusterService(selectedMembers: List<com.routeme.app.ClusterMember>) {
         viewModelScope.launch {
             val state = _uiState.value
-            val serviceTypes = state.selectedServiceTypes
-            val finishedAt = System.currentTimeMillis()
-            val confirmedNames = mutableListOf<String>()
-            var updatedClients = state.clients
+            val eligibleStepsByClientId = state.suggestions
+                .associate { suggestion -> suggestion.client.id to suggestion.eligibleSteps }
 
-            for (member in selectedMembers) {
-                val client = updatedClients.find { it.id == member.client.id } ?: continue
-                val arrivedAt = member.arrivedAtMillis
-                val durationMinutes = ((finishedAt - arrivedAt) / 60_000L).coerceAtLeast(1)
-
-                // Use matching suggestion's eligible steps if available
-                val suggestion = state.suggestions.find { it.client.id == client.id }
-                val stepsForClient = if (suggestion != null && suggestion.eligibleSteps.isNotEmpty()) {
-                    suggestion.eligibleSteps
-                } else {
-                    setOf(serviceTypes.first())
-                }
-
-                for (serviceType in stepsForClient) {
-                    val record = ServiceRecord(
-                        serviceType = serviceType,
-                        arrivedAtMillis = arrivedAt,
-                        completedAtMillis = finishedAt,
-                        durationMinutes = durationMinutes,
-                        lat = member.location.latitude,
-                        lng = member.location.longitude,
-                        notes = ""
-                    )
-
-                    client.records.add(record)
-                    try {
-                        clientRepository.saveServiceRecord(client.id, record)
-                    } catch (e: Exception) {
-                        setStatus("Save failed for ${client.name}: ${e.message ?: "Unknown"}")
-                        continue
-                    }
-
-                    // Sheet write-back
-                    if (SheetsWriteBack.webAppUrl.isNotBlank()) {
-                        try {
-                            val result = clientRepository.writeBackServiceCompletion(client.name, serviceType, finishedAt)
-                            if (!result.success) {
-                                retryQueue.enqueue(client.name, serviceTypeToColumn(serviceType), "\u221A${formatCheckValue(finishedAt)}")
-                            }
-                        } catch (_: Exception) {
-                            retryQueue.enqueue(client.name, serviceTypeToColumn(serviceType), "\u221A${formatCheckValue(finishedAt)}")
+            when (
+                val result = serviceCompletionUseCase.confirmClusterService(
+                    ServiceCompletionUseCase.ConfirmClusterRequest(
+                        clients = state.clients,
+                        selectedServiceTypes = state.selectedServiceTypes,
+                        suggestionEligibleStepsByClientId = eligibleStepsByClientId,
+                        selectedMembers = selectedMembers.map { member ->
+                            ServiceCompletionUseCase.ClusterMemberInput(
+                                clientId = member.client.id,
+                                clientName = member.client.name,
+                                arrivedAtMillis = member.arrivedAtMillis,
+                                location = ServiceCompletionUseCase.GeoPoint(
+                                    member.location.latitude,
+                                    member.location.longitude
+                                )
+                            )
                         }
-                    }
+                    )
+                )
+            ) {
+                is ServiceCompletionUseCase.ConfirmClusterResult.Error -> {
+                    setStatus(result.message)
                 }
 
-                confirmedNames.add(client.name)
-                updatedClients = updatedClients.map { if (it.id == client.id) client else it }
-            }
+                is ServiceCompletionUseCase.ConfirmClusterResult.Success -> {
+                    result.transientFailureMessages.forEach { message ->
+                        setStatus(message)
+                    }
 
-            _uiState.update {
-                it.copy(
-                    clients = updatedClients,
-                    summaryText = buildSummaryText(updatedClients),
-                    completedSteps = computeCompletedSteps(updatedClients),
-                    arrivalStartedAtMillis = null,
-                    arrivalLat = null,
-                    arrivalLng = null
-                )
-            }
-            persistCriticalState(_uiState.value)
+                    _uiState.update {
+                        it.copy(
+                            clients = result.updatedClients,
+                            summaryText = buildSummaryText(result.updatedClients),
+                            completedSteps = computeCompletedSteps(result.updatedClients),
+                            arrivalStartedAtMillis = null,
+                            arrivalLat = null,
+                            arrivalLng = null
+                        )
+                    }
+                    persistCriticalState(_uiState.value)
 
-            val confirmedIds = selectedMembers
-                .filter { m -> confirmedNames.contains(m.client.name) }
-                .map { it.client.id }
-
-            val stepsLabel = serviceTypes.joinToString("+") { it.label }
-            val msg = "Confirmed $stepsLabel for ${confirmedNames.joinToString(", ")} (${confirmedNames.size} stops)"
-            setStatus(msg)
-            _events.emit(MainEvent.ServiceConfirmed)
-            if (confirmedIds.isNotEmpty()) {
-                _events.emit(MainEvent.UndoClusterConfirmation(confirmedNames.toList(), confirmedIds, finishedAt))
+                    setStatus(result.statusMessage)
+                    _events.emit(MainEvent.ServiceConfirmed)
+                    if (result.confirmedIds.isNotEmpty()) {
+                        _events.emit(
+                            MainEvent.UndoClusterConfirmation(
+                                result.confirmedNames,
+                                result.confirmedIds,
+                                result.finishedAt
+                            )
+                        )
+                    }
+                }
             }
         }
     }
@@ -892,27 +927,30 @@ class MainViewModel(
      */
     fun undoLastConfirmation(clientId: String, completedAtMillis: Long) {
         viewModelScope.launch {
-            try {
-                clientRepository.deleteServiceRecord(clientId, completedAtMillis)
+            when (
+                val result = serviceCompletionUseCase.undoLastConfirmation(
+                    clients = _uiState.value.clients,
+                    clientId = clientId,
+                    completedAtMillis = completedAtMillis
+                )
+            ) {
+                is ServiceCompletionUseCase.UndoLastResult.Error -> {
+                    setStatus(result.message)
+                }
 
-                // Remove from in-memory records
-                val state = _uiState.value
-                val client = state.clients.find { it.id == clientId }
-                if (client != null) {
-                    client.records.removeAll { it.completedAtMillis == completedAtMillis }
+                is ServiceCompletionUseCase.UndoLastResult.Success -> {
+                    val state = _uiState.value
                     _uiState.update {
                         it.copy(
-                            clients = state.clients,
-                            summaryText = buildSummaryText(state.clients),
-                            completedSteps = computeCompletedSteps(state.clients),
-                            selectedClientDetails = if (state.selectedClient?.id == clientId)
-                                routingEngine.buildClientDetails(client) else it.selectedClientDetails
+                            clients = result.updatedClients,
+                            summaryText = buildSummaryText(result.updatedClients),
+                            completedSteps = computeCompletedSteps(result.updatedClients),
+                            selectedClientDetails = if (state.selectedClient?.id == clientId && result.updatedClient != null)
+                                routingEngine.buildClientDetails(result.updatedClient) else it.selectedClientDetails
                         )
                     }
+                    setStatus("Undone — record removed")
                 }
-                setStatus("Undone — record removed")
-            } catch (e: Exception) {
-                setStatus("Undo failed: ${e.message ?: "Unknown error"}")
             }
         }
     }
@@ -922,23 +960,27 @@ class MainViewModel(
      */
     fun undoClusterConfirmation(clientIds: List<String>, completedAtMillis: Long) {
         viewModelScope.launch {
-            try {
-                val state = _uiState.value
-                for (clientId in clientIds) {
-                    clientRepository.deleteServiceRecord(clientId, completedAtMillis)
-                    val client = state.clients.find { it.id == clientId }
-                    client?.records?.removeAll { it.completedAtMillis == completedAtMillis }
+            when (
+                val result = serviceCompletionUseCase.undoClusterConfirmation(
+                    clients = _uiState.value.clients,
+                    clientIds = clientIds,
+                    completedAtMillis = completedAtMillis
+                )
+            ) {
+                is ServiceCompletionUseCase.UndoClusterResult.Error -> {
+                    setStatus(result.message)
                 }
-                _uiState.update {
-                    it.copy(
-                        clients = state.clients,
-                        summaryText = buildSummaryText(state.clients),
-                        completedSteps = computeCompletedSteps(state.clients)
-                    )
+
+                is ServiceCompletionUseCase.UndoClusterResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            clients = result.updatedClients,
+                            summaryText = buildSummaryText(result.updatedClients),
+                            completedSteps = computeCompletedSteps(result.updatedClients)
+                        )
+                    }
+                    setStatus("Undone — ${clientIds.size} records removed")
                 }
-                setStatus("Undone — ${clientIds.size} records removed")
-            } catch (e: Exception) {
-                setStatus("Undo failed: ${e.message ?: "Unknown error"}")
             }
         }
     }
@@ -947,12 +989,22 @@ class MainViewModel(
      * Opens the edit-notes dialog for the currently selected client.
      */
     fun editSelectedClientNotes() {
-        val client = _uiState.value.selectedClient ?: run {
-            viewModelScope.launch { setStatus("Pick a client first") }
-            return
-        }
         viewModelScope.launch {
-            _events.emit(MainEvent.EditClientNotes(client.id, client.name, client.notes))
+            when (val result = serviceCompletionUseCase.editSelectedClientNotes(_uiState.value.selectedClient)) {
+                is ServiceCompletionUseCase.EditNotesResult.Error -> {
+                    setStatus(result.message)
+                }
+
+                is ServiceCompletionUseCase.EditNotesResult.OpenEditor -> {
+                    _events.emit(
+                        MainEvent.EditClientNotes(
+                            result.clientId,
+                            result.clientName,
+                            result.currentNotes
+                        )
+                    )
+                }
+            }
         }
     }
 
@@ -961,49 +1013,49 @@ class MainViewModel(
      */
     fun saveClientNotes(clientId: String, notes: String) {
         viewModelScope.launch {
-            try {
-                clientRepository.updateClientNotes(clientId, notes.trim())
-
-                // Update in-memory model
-                val state = _uiState.value
-                val updatedClients = state.clients.map { c ->
-                    if (c.id == clientId) c.copy(notes = notes.trim()) else c
-                }
-                // If we changed the data class, update the mutable list reference too
-                val client = updatedClients.find { it.id == clientId }
-                _uiState.update {
-                    it.copy(
-                        clients = updatedClients,
-                        selectedClient = if (it.selectedClient?.id == clientId) client else it.selectedClient,
-                        selectedClientDetails = if (it.selectedClient?.id == clientId && client != null)
-                            routingEngine.buildClientDetails(client) else it.selectedClientDetails
+            when (
+                val result = serviceCompletionUseCase.saveClientNotes(
+                    ServiceCompletionUseCase.SaveNotesRequest(
+                        clients = _uiState.value.clients,
+                        currentSelectedClientId = _uiState.value.selectedClient?.id,
+                        clientId = clientId,
+                        notes = notes
                     )
+                )
+            ) {
+                is ServiceCompletionUseCase.SaveNotesResult.Error -> {
+                    setStatus(result.message)
                 }
-                setStatus("Notes saved for ${client?.name ?: "client"}")
 
-                // Write back to sheet if configured
-                if (SheetsWriteBack.webAppUrl.isNotBlank() && client != null) {
-                    try {
-                        val result = clientRepository.writeBackClientNotes(client.name, notes.trim())
-                        if (result.success) {
-                            setStatus("Notes synced to sheet for ${client.name}")
-                            drainRetryQueueQuietly()
-                        } else {
-                            retryQueue.enqueue(client.name, "Notes", notes.trim())
-                        }
-                    } catch (_: Exception) {
-                        retryQueue.enqueue(client.name, "Notes", notes.trim())
+                is ServiceCompletionUseCase.SaveNotesResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            clients = result.updatedClients,
+                            selectedClient = result.updatedSelectedClient ?: it.selectedClient,
+                            selectedClientDetails = if (result.updatedSelectedClient != null)
+                                routingEngine.buildClientDetails(result.updatedSelectedClient) else it.selectedClientDetails
+                        )
+                    }
+
+                    setStatus(result.savedStatusMessage)
+                    result.syncedStatusMessage?.let { message ->
+                        setStatus(message)
+                    }
+                    if (result.retryDrainSucceeded > 0) {
+                        setStatus("Retried ${result.retryDrainSucceeded} queued sheet write(s)", emitSnackbar = false)
                     }
                 }
-            } catch (e: Exception) {
-                setStatus("Save notes failed: ${e.message ?: "Unknown error"}")
             }
         }
     }
 
     private suspend fun fetchDrivingTimesForCurrentPage() {
-        val location = lastSuggestionLocation ?: return
-        val page = currentPageSuggestions()
+        val location = suggestionUseCase.lastSuggestionLocation() ?: return
+        val state = _uiState.value
+        val page = suggestionUseCase.currentPageSuggestions(
+            suggestions = state.suggestions,
+            suggestionOffset = state.suggestionOffset
+        )
         if (page.isEmpty()) return
         if (page.none { it.drivingTime == null }) return
 
@@ -1030,116 +1082,13 @@ class MainViewModel(
     }
 
     private fun loadSyncSettings() {
-        val readUrl = preferencesRepository.sheetsReadUrl
-        val writeUrl = preferencesRepository.sheetsWriteUrl
-        SheetsWriteBack.webAppUrl = writeUrl
+        val settings = syncSettingsUseCase.loadSyncSettings()
         _uiState.update {
             it.copy(
-                sheetsReadUrl = readUrl,
-                sheetsWriteUrl = writeUrl
+                sheetsReadUrl = settings.readUrl,
+                sheetsWriteUrl = settings.writeUrl
             )
         }
-    }
-
-    private data class RouteExportResult(
-        val uri: String,
-        val includedStops: Int,
-        val requestedStops: Int
-    )
-
-    private fun buildTopRouteExportFromSuggestions(state: MainUiState): RouteExportResult? {
-        val mappableClients = state.suggestions
-            .map { it.client }
-            .filter { (it.latitude != null && it.longitude != null) || it.address.isNotBlank() }
-
-        if (mappableClients.isEmpty()) return null
-
-        val requestedStops = minOf(routeExportTopN, mappableClients.size)
-        val topStops = mappableClients.take(requestedStops)
-        return buildMapsRouteExport(topStops, state.routeDirection, state.activeDestination)
-    }
-
-    private fun buildMapsRouteExport(
-        clients: List<Client>,
-        routeDirection: RouteDirection,
-        activeDestination: SavedDestination? = null
-    ): RouteExportResult? {
-        if (clients.isEmpty()) return null
-
-        val origin = lastSuggestionLocation?.let { "${it.latitude},${it.longitude}" } ?: "$SHOP_LAT,$SHOP_LNG"
-
-        // When navigating toward a destination, always end at that destination
-        if (activeDestination != null) {
-            val usableStops = clients.take(maxGoogleWaypoints)
-            val destination = "${activeDestination.lat},${activeDestination.lng}"
-            val waypoints = usableStops.mapNotNull { locationToken(it) }
-            val uri = buildMapsDirectionsUrl(
-                origin = origin,
-                destination = destination,
-                waypoints = waypoints
-            )
-            return RouteExportResult(uri, usableStops.size, clients.size)
-        }
-
-        return when (routeDirection) {
-            RouteDirection.OUTWARD -> {
-                val usableStops = clients.take(maxGoogleWaypoints + 1)
-                if (usableStops.isEmpty()) return null
-
-                val destination = locationToken(usableStops.last()) ?: return null
-                val waypoints = usableStops.dropLast(1).mapNotNull { locationToken(it) }
-                val uri = buildMapsDirectionsUrl(
-                    origin = origin,
-                    destination = destination,
-                    waypoints = waypoints
-                )
-
-                RouteExportResult(uri, usableStops.size, clients.size)
-            }
-
-            RouteDirection.HOMEWARD -> {
-                val usableStops = clients.take(maxGoogleWaypoints)
-                val destination = "$SHOP_LAT,$SHOP_LNG"
-                val waypoints = usableStops.mapNotNull { locationToken(it) }
-                val uri = buildMapsDirectionsUrl(
-                    origin = origin,
-                    destination = destination,
-                    waypoints = waypoints
-                )
-
-                RouteExportResult(uri, usableStops.size, clients.size)
-            }
-        }
-    }
-
-    private fun buildMapsDirectionsUrl(
-        origin: String,
-        destination: String,
-        waypoints: List<String>
-    ): String {
-        val base = StringBuilder("https://www.google.com/maps/dir/?api=1")
-        base.append("&travelmode=driving")
-        base.append("&origin=").append(encodeQueryParam(origin))
-        base.append("&destination=").append(encodeQueryParam(destination))
-        if (waypoints.isNotEmpty()) {
-            base.append("&waypoints=").append(encodeQueryParam(waypoints.joinToString("|")))
-        }
-        return base.toString()
-    }
-
-    private fun encodeQueryParam(value: String): String {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8.toString())
-    }
-
-    private fun locationToken(client: Client): String? {
-        val lat = client.latitude
-        val lng = client.longitude
-        if (lat != null && lng != null) {
-            return "$lat,$lng"
-        }
-
-        val address = client.address.trim()
-        return address.takeIf { it.isNotBlank() }
     }
 
     private suspend fun setStatus(message: String, emitSnackbar: Boolean = true) {
@@ -1186,25 +1135,19 @@ class MainViewModel(
 
     fun showDailySummary() {
         viewModelScope.launch {
-            val cal = Calendar.getInstance()
-            cal.set(Calendar.HOUR_OF_DAY, 0)
-            cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0)
-            cal.set(Calendar.MILLISECOND, 0)
-            val startMillis = cal.timeInMillis
-            val endMillis = startMillis + 86_400_000L
-
-            try {
-                val rows = clientRepository.getDailyRecords(startMillis, endMillis)
-                val nonClientStops = clientRepository.getNonClientStops(startMillis, endMillis)
-                if (rows.isEmpty() && nonClientStops.isEmpty()) {
+            when (val result = routeHistoryUseCase.loadDailySummary()) {
+                is RouteHistoryUseCase.DailySummaryResult.Empty -> {
                     setStatus("No completed services today")
-                    return@launch
                 }
-                val summary = buildDailySummaryText(rows, nonClientStops)
-                _events.emit(MainEvent.ShowDailySummary(summary))
-            } catch (e: Exception) {
-                setStatus("Summary failed: ${e.message ?: "Unknown error"}")
+
+                is RouteHistoryUseCase.DailySummaryResult.Error -> {
+                    setStatus(result.message)
+                }
+
+                is RouteHistoryUseCase.DailySummaryResult.Success -> {
+                    val summary = buildDailySummaryText(result.rows, result.nonClientStops)
+                    _events.emit(MainEvent.ShowDailySummary(summary))
+                }
             }
         }
     }
@@ -1240,76 +1183,65 @@ class MainViewModel(
 
     // ─── Route History ─────────────────────────────────────────
 
-    /** Cached ordered list of days that have at least one service record (newest first). */
-    private var historyDates: List<Long> = emptyList()
-
     /** Show route history starting at today (or the most recent recorded day). */
     fun showRouteHistory() {
         viewModelScope.launch {
-            try {
-                val serviceDates = clientRepository.getDistinctServiceDates()
-                val stopDates = clientRepository.getDistinctNonClientStopDates()
-                historyDates = (serviceDates + stopDates).distinct().sortedDescending()
-                if (historyDates.isEmpty()) {
-                    setStatus("No service history yet")
-                    return@launch
-                }
-                // Start on the most recent day (index 0 = newest)
-                showHistoryForIndex(0)
-            } catch (e: Exception) {
-                setStatus("History failed: ${e.message ?: "Unknown error"}")
-            }
+            handleRouteHistoryResult(routeHistoryUseCase.loadRouteHistoryStart())
         }
     }
 
     /** Navigate to a specific day in route history by its epoch millis. */
     fun showRouteHistoryForDate(dateMillis: Long) {
         viewModelScope.launch {
-            try {
-                // Refresh the list in case new records were added
-                historyDates = clientRepository.getDistinctServiceDates()
-                val index = historyDates.indexOf(dateMillis)
-                if (index == -1) {
-                    setStatus("No records for that date")
-                    return@launch
-                }
-                showHistoryForIndex(index)
-            } catch (e: Exception) {
-                setStatus("History failed: ${e.message ?: "Unknown error"}")
-            }
+            handleRouteHistoryResult(routeHistoryUseCase.loadRouteHistoryForDate(dateMillis))
         }
     }
 
     /** Navigate forward or backward in history. delta = -1 (newer), +1 (older). */
     fun navigateHistory(currentDateMillis: Long, delta: Int) {
         viewModelScope.launch {
-            val currentIndex = historyDates.indexOf(currentDateMillis)
-            if (currentIndex == -1) return@launch
-            val newIndex = currentIndex + delta
-            if (newIndex !in historyDates.indices) return@launch
-            showHistoryForIndex(newIndex)
+            val result = routeHistoryUseCase.navigateHistory(currentDateMillis, delta)
+            if (result is RouteHistoryUseCase.HistoryResult.NavigationUnavailable) return@launch
+            handleRouteHistoryResult(result)
         }
     }
 
-    private suspend fun showHistoryForIndex(index: Int) {
-        val dateMillis = historyDates[index]
-        val startMillis = dateMillis
-        val endMillis = dateMillis + 86_400_000L
-        val rows = clientRepository.getDailyRecords(startMillis, endMillis)
-        val nonClientStops = clientRepository.getNonClientStops(startMillis, endMillis)
-        if (rows.isEmpty() && nonClientStops.isEmpty()) {
-            setStatus("No records for ${DateUtils.formatDate(dateMillis)}")
-            return
+    private suspend fun handleRouteHistoryResult(result: RouteHistoryUseCase.HistoryResult) {
+        when (result) {
+            is RouteHistoryUseCase.HistoryResult.Success -> {
+                emitRouteHistoryDay(result.dayData)
+            }
+
+            is RouteHistoryUseCase.HistoryResult.Error -> {
+                setStatus(result.message)
+            }
+
+            is RouteHistoryUseCase.HistoryResult.NoRecordsForDate -> {
+                setStatus("No records for ${DateUtils.formatDate(result.dateMillis)}")
+            }
+
+            RouteHistoryUseCase.HistoryResult.NoHistory -> {
+                setStatus("No service history yet")
+            }
+
+            RouteHistoryUseCase.HistoryResult.NoRecordsForRequestedDate -> {
+                setStatus("No records for that date")
+            }
+
+            RouteHistoryUseCase.HistoryResult.NavigationUnavailable -> Unit
         }
-        val summary = buildHistorySummaryText(dateMillis, rows, nonClientStops)
-        val dateLabel = DateUtils.formatDateFull(dateMillis)
+    }
+
+    private suspend fun emitRouteHistoryDay(dayData: RouteHistoryUseCase.DayData) {
+        val summary = buildHistorySummaryText(dayData.dateMillis, dayData.rows, dayData.nonClientStops)
+        val dateLabel = DateUtils.formatDateFull(dayData.dateMillis)
         _events.emit(
             MainEvent.ShowRouteHistory(
                 summary = summary,
                 dateLabel = dateLabel,
-                dateMillis = dateMillis,
-                hasPrevDay = index < historyDates.size - 1,  // older day exists
-                hasNextDay = index > 0                        // newer day exists
+                dateMillis = dayData.dateMillis,
+                hasPrevDay = dayData.hasPrevDay,
+                hasNextDay = dayData.hasNextDay
             )
         )
     }
@@ -1409,41 +1341,13 @@ class MainViewModel(
 
     // ─── Retry-queue helpers ───────────────────────────────────
 
-    /** Map ServiceType to the column header the Apps Script expects. */
-    private fun serviceTypeToColumn(type: ServiceType): String = when (type) {
-        ServiceType.ROUND_1 -> "Step 1"
-        ServiceType.ROUND_2 -> "Step 2"
-        ServiceType.ROUND_3 -> "Step 3"
-        ServiceType.ROUND_4 -> "Step 4"
-        ServiceType.ROUND_5 -> "Step 5"
-        ServiceType.ROUND_6 -> "Step 6"
-        ServiceType.GRUB    -> "Grub"
-        ServiceType.INCIDENTAL -> "Incidental"
-    }
-
-    /** Format millis to √M.D check-value. */
-    private fun formatCheckValue(dateMillis: Long): String {
-        val cal = Calendar.getInstance().apply { timeInMillis = dateMillis }
-        val month = cal.get(Calendar.MONTH) + 1
-        val day = cal.get(Calendar.DAY_OF_MONTH)
-        return "$month.$day"
-    }
-
-    /** Silently attempt to drain the retry queue after a successful write. */
-    private fun drainRetryQueueQuietly() {
-        viewModelScope.launch {
-            try {
-                val result = retryQueue.drainQueue()
-                if (result.succeeded > 0) {
-                    setStatus("Retried ${result.succeeded} queued sheet write(s)", emitSnackbar = false)
-                }
-            } catch (_: Exception) { /* best effort */ }
-        }
-    }
-
     /** Called on init and resume to flush any backed-up writes. */
     fun retryPendingWrites() {
-        if (SheetsWriteBack.webAppUrl.isBlank()) return
-        drainRetryQueueQuietly()
+        viewModelScope.launch {
+            val result = syncSettingsUseCase.retryPendingWrites()
+            if (result.succeeded > 0) {
+                setStatus("Retried ${result.succeeded} queued sheet write(s)", emitSnackbar = false)
+            }
+        }
     }
 }

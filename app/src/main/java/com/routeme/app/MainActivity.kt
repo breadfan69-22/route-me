@@ -3,42 +3,53 @@ package com.routeme.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.snackbar.Snackbar
 import androidx.appcompat.app.AppCompatActivity
-import android.content.res.ColorStateList
-import androidx.core.content.ContextCompat
 import android.app.AlertDialog
-import android.widget.EditText as AndroidEditText
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.routeme.app.databinding.ActivityMainBinding
+import com.routeme.app.databinding.SectionStatusNotesBinding
+import com.routeme.app.databinding.SectionStepControlsBinding
+import com.routeme.app.databinding.SectionSuggestionsBinding
+import com.routeme.app.databinding.SectionTrackingActionsBinding
+import com.routeme.app.network.DistanceMatrixHelper
+import com.routeme.app.network.GeocodingHelper
+import com.routeme.app.network.SheetsWriteBack
+import com.routeme.app.ui.DestinationInputController
+import com.routeme.app.ui.DialogFactory
+import com.routeme.app.ui.EventObserver
 import com.routeme.app.ui.MainEvent
 import com.routeme.app.ui.MainViewModel
+import com.routeme.app.ui.SuggestionUiController
+import com.routeme.app.ui.TrackingUiController
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
-import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private var clients = mutableListOf<Client>()
     private var selectedClient: Client? = null
     private var lastLocation: Location? = null
     private lateinit var binding: ActivityMainBinding
+    private lateinit var stepControlsBinding: SectionStepControlsBinding
+    private lateinit var trackingActionsBinding: SectionTrackingActionsBinding
+    private lateinit var suggestionsBinding: SectionSuggestionsBinding
+    private lateinit var statusNotesBinding: SectionStatusNotesBinding
+    private lateinit var suggestionUiController: SuggestionUiController
+    private lateinit var trackingUiController: TrackingUiController
+    private lateinit var destinationInputController: DestinationInputController
+    private lateinit var eventObserver: EventObserver
 
     private val viewModel: MainViewModel by viewModel()
     private val trackingEventBus: TrackingEventBus by inject()
@@ -48,9 +59,6 @@ class MainActivity : AppCompatActivity() {
     /** Tracks which client IDs we already showed an arrival dialog for this session
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
     private val arrivedClientIds = mutableSetOf<String>()
-
-    /** Holds the open destination dialog so async geocode can refresh it. */
-    private var destinationDialog: AlertDialog? = null
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
@@ -65,29 +73,19 @@ class MainActivity : AppCompatActivity() {
 
     // ─── Destination input launchers ───────────────────────────
 
-    /** Pending callback for geocoded results from voice/paste/camera input. */
-    private var pendingDestinationCallback: ((SavedDestination) -> Unit)? = null
-    private var pendingCameraImageUri: Uri? = null
-
     private val voiceInputLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            val spoken = result.data
-                ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-            if (!spoken.isNullOrBlank()) {
-                geocodeAndAddDestination(spoken)
-            }
+        if (::destinationInputController.isInitialized) {
+            destinationInputController.onVoiceInputResult(result.resultCode, result.data)
         }
     }
 
     private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
-        if (success) {
-            val uri = pendingCameraImageUri ?: return@registerForActivityResult
-            runOcrOnImage(uri)
+        if (::destinationInputController.isInitialized) {
+            destinationInputController.onCameraCaptureResult(success)
         }
     }
 
@@ -95,12 +93,42 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        stepControlsBinding = SectionStepControlsBinding.bind(binding.root)
+        trackingActionsBinding = SectionTrackingActionsBinding.bind(binding.root)
+        suggestionsBinding = SectionSuggestionsBinding.bind(binding.root)
+        statusNotesBinding = SectionStatusNotesBinding.bind(binding.root)
+        suggestionUiController = SuggestionUiController(suggestionsBinding, viewModel)
+        trackingUiController = TrackingUiController(
+            activity = this,
+            viewModel = viewModel,
+            trackingEventBus = trackingEventBus,
+            onTrackingSessionReset = { arrivedClientIds.clear() }
+        )
+        destinationInputController = DestinationInputController(
+            activity = this,
+            binding = binding,
+            viewModel = viewModel,
+            lifecycleScope = lifecycleScope,
+            launchVoiceRecognizer = { intent -> voiceInputLauncher.launch(intent) },
+            launchCameraCapture = { uri -> cameraLauncher.launch(uri) },
+            getLastLocation = { lastLocation },
+            rerunSuggestionsIfVisible = ::rerunSuggestionsIfVisible
+        )
+        eventObserver = EventObserver(
+            lifecycleOwner = this,
+            lifecycleScope = lifecycleScope,
+            viewModel = viewModel,
+            trackingEventBus = trackingEventBus,
+            onMainEvent = ::handleMainEvent,
+            onTrackingEvent = ::handleTrackingEvent
+        )
 
         setSupportActionBar(binding.topToolbar)
 
         setupStepToggle()
         setupActions()
         observeViewModel()
+        eventObserver.start()
         handleArrivalIntent(intent)
 
         // Set up Distance Matrix API key
@@ -125,29 +153,26 @@ class MainActivity : AppCompatActivity() {
                             binding.summaryText.text = state.summaryText
                         }
                         if (state.statusText.isNotBlank()) {
-                            binding.statusText.text = state.statusText
+                            statusNotesBinding.statusText.text = state.statusText
                         }
                         if (state.selectedClientDetails.isNotBlank()) {
-                            binding.clientDetailsText.text = state.selectedClientDetails
+                            statusNotesBinding.clientDetailsText.text = state.selectedClientDetails
                         }
-                        binding.trackingButton.text = if (state.isTracking) {
+                        trackingActionsBinding.trackingButton.text = if (state.isTracking) {
                             getString(R.string.stop_tracking)
                         } else {
                             getString(R.string.start_tracking)
                         }
-                        binding.arrivedButton.text = if (state.arrivalStartedAtMillis != null) {
+                        statusNotesBinding.arrivedButton.text = if (state.arrivalStartedAtMillis != null) {
                             getString(R.string.btn_cancel)
                         } else {
                             getString(R.string.btn_arrived)
                         }
-                        // Show/hide visit notes field based on arrival state
-                        binding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
+                        statusNotesBinding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
                         if (state.arrivalStartedAtMillis == null) {
-                            binding.visitNotesInput.text?.clear()
+                            statusNotesBinding.visitNotesInput.text?.clear()
                         }
-                        // Grey out toggle buttons for fully completed steps
                         updateStepToggleEnabled(state.completedSteps)
-                        // Active destination banner
                         val activeDest = state.activeDestination
                         if (activeDest != null) {
                             binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDest.name}"
@@ -158,65 +183,82 @@ class MainActivity : AppCompatActivity() {
                         showCurrentPage()
                     }
                 }
-                launch {
-                    viewModel.events.collect { event ->
-                        when (event) {
-                            is MainEvent.ShowSnackbar -> {
-                                Snackbar.make(binding.root, event.message, Snackbar.LENGTH_SHORT).show()
-                            }
-                            is MainEvent.OpenMapsRoute -> {
-                                openMapsUri(Uri.parse(event.uri))
-                            }
-                            is MainEvent.ShowDailySummary -> {
-                                showDailySummaryDialog(event.summary)
-                            }
-                            is MainEvent.StaleArrivalPrompt -> {
-                                showStaleArrivalDialog(event.clientName, event.minutesElapsed)
-                            }
-                            is MainEvent.ClusterCompletePrompt -> {
-                                showClusterCompletionDialog(event.members)
-                            }
-                            is MainEvent.UndoConfirmation -> {
-                                Snackbar.make(binding.root, "Confirmed ${event.clientName}", Snackbar.LENGTH_LONG)
-                                    .setDuration(8000)
-                                    .setAction("UNDO") {
-                                        viewModel.undoLastConfirmation(event.clientId, event.recordCompletedAtMillis)
-                                    }
-                                    .show()
-                            }
-                            is MainEvent.UndoClusterConfirmation -> {
-                                val label = "Confirmed ${event.clientNames.size} stops"
-                                Snackbar.make(binding.root, label, Snackbar.LENGTH_LONG)
-                                    .setDuration(8000)
-                                    .setAction("UNDO") {
-                                        viewModel.undoClusterConfirmation(event.clientIds, event.recordCompletedAtMillis)
-                                    }
-                                    .show()
-                            }
-                            is MainEvent.EditClientNotes -> {
-                                showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
-                            }
-                            is MainEvent.ShowRouteHistory -> {
-                                showRouteHistoryDialog(event)
-                            }
-                            MainEvent.ServiceConfirmed -> Unit
-                        }
-                    }
-                }
-                launch {
-                    trackingEventBus.events.collect { event ->
-                        when (event) {
-                            is TrackingEvent.ClientArrival -> showArrivalDialog(event.client, event.arrivedAtMillis, event.location)
-                            is TrackingEvent.JobComplete -> showCompletionDialog(event.client, event.timeOnSiteMillis, event.arrivedAtMillis, event.location)
-                            is TrackingEvent.ClusterComplete -> showClusterCompletionDialog(event.members)
-                            is TrackingEvent.DestinationReached -> {
-                                viewModel.onDestinationReached(event.destinationName)
-                            }
-                            is TrackingEvent.LocationUpdated -> Unit
-                        }
-                    }
-                }
             }
+        }
+    }
+
+    private fun handleMainEvent(event: MainEvent) {
+        when (event) {
+            is MainEvent.ShowSnackbar -> {
+                Snackbar.make(binding.root, event.message, Snackbar.LENGTH_SHORT).show()
+            }
+
+            is MainEvent.OpenMapsRoute -> {
+                openMapsUri(Uri.parse(event.uri))
+            }
+
+            is MainEvent.ShowDailySummary -> {
+                showDailySummaryDialog(event.summary)
+            }
+
+            is MainEvent.StaleArrivalPrompt -> {
+                showStaleArrivalDialog(event.clientName, event.minutesElapsed)
+            }
+
+            is MainEvent.ClusterCompletePrompt -> {
+                showClusterCompletionDialog(event.members)
+            }
+
+            is MainEvent.UndoConfirmation -> {
+                Snackbar.make(binding.root, "Confirmed ${event.clientName}", Snackbar.LENGTH_LONG)
+                    .setDuration(8000)
+                    .setAction("UNDO") {
+                        viewModel.undoLastConfirmation(event.clientId, event.recordCompletedAtMillis)
+                    }
+                    .show()
+            }
+
+            is MainEvent.UndoClusterConfirmation -> {
+                val label = "Confirmed ${event.clientNames.size} stops"
+                Snackbar.make(binding.root, label, Snackbar.LENGTH_LONG)
+                    .setDuration(8000)
+                    .setAction("UNDO") {
+                        viewModel.undoClusterConfirmation(event.clientIds, event.recordCompletedAtMillis)
+                    }
+                    .show()
+            }
+
+            is MainEvent.EditClientNotes -> {
+                showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
+            }
+
+            is MainEvent.ShowRouteHistory -> {
+                showRouteHistoryDialog(event)
+            }
+
+            MainEvent.ServiceConfirmed -> Unit
+        }
+    }
+
+    private fun handleTrackingEvent(event: TrackingEvent) {
+        when (event) {
+            is TrackingEvent.ClientArrival -> {
+                showArrivalDialog(event.client, event.arrivedAtMillis, event.location)
+            }
+
+            is TrackingEvent.JobComplete -> {
+                showCompletionDialog(event.client, event.timeOnSiteMillis, event.arrivedAtMillis, event.location)
+            }
+
+            is TrackingEvent.ClusterComplete -> {
+                showClusterCompletionDialog(event.members)
+            }
+
+            is TrackingEvent.DestinationReached -> {
+                viewModel.onDestinationReached(event.destinationName)
+            }
+
+            is TrackingEvent.LocationUpdated -> Unit
         }
     }
 
@@ -229,7 +271,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         // Sync tracking button state from actual service state
-        syncTrackingState()
+        trackingUiController.syncTrackingState()
         // Handle any pending notification tap (e.g. app was killed and relaunched)
         handleArrivalIntent(intent)
         // Flush any backed-up sheet writes
@@ -261,7 +303,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Read which service types are currently toggled on. */
     private fun getSelectedServiceTypes(): Set<ServiceType> {
-        val checked = binding.stepToggleGroup.checkedButtonIds
+        val checked = stepControlsBinding.stepToggleGroup.checkedButtonIds
         val types = checked.mapNotNull { toggleButtonToServiceType[it] }.toSet()
         return types.ifEmpty { setOf(ServiceType.ROUND_1) } // fallback
     }
@@ -277,9 +319,9 @@ class MainActivity : AppCompatActivity() {
         // Restore selection from ViewModel (which resolves from savedState / prefs / date windows)
         val savedTypes = viewModel.uiState.value.selectedServiceTypes
         // Clear all first, then check the right ones
-        binding.stepToggleGroup.clearChecked()
+        stepControlsBinding.stepToggleGroup.clearChecked()
         for (type in savedTypes) {
-            serviceTypeToButtonId[type]?.let { binding.stepToggleGroup.check(it) }
+            serviceTypeToButtonId[type]?.let { stepControlsBinding.stepToggleGroup.check(it) }
         }
     }
 
@@ -294,30 +336,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupActions() {
-        binding.trackingButton.setOnClickListener {
-            toggleTracking()
+        suggestionUiController.bindPaginationActions()
+
+        trackingActionsBinding.trackingButton.setOnClickListener {
+            trackingUiController.toggleTracking()
         }
 
-        binding.suggestButton.setOnClickListener {
+        trackingActionsBinding.suggestButton.setOnClickListener {
             viewModel.setServiceTypes(getSelectedServiceTypes())
             suggestNextClients()
         }
 
-        binding.moreSuggestionsButton.setOnClickListener {
-            viewModel.nextSuggestionPage()
-            showCurrentPage()
-        }
-
-        binding.prevSuggestionsButton.setOnClickListener {
-            viewModel.previousSuggestionPage()
-            showCurrentPage()
-        }
-
-        binding.mapsButton.setOnClickListener {
+        statusNotesBinding.mapsButton.setOnClickListener {
             openSelectedInMaps()
         }
 
-        binding.arrivedButton.setOnClickListener {
+        statusNotesBinding.arrivedButton.setOnClickListener {
             if (viewModel.uiState.value.arrivalStartedAtMillis != null) {
                 viewModel.cancelArrival()
                 return@setOnClickListener
@@ -327,11 +361,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.startArrivalForSelected(lastLocation)
         }
 
-        binding.confirmButton.setOnClickListener {
+        statusNotesBinding.confirmButton.setOnClickListener {
             confirmSelectedClientService()
         }
 
-        binding.skipButton.setOnClickListener {
+        statusNotesBinding.skipButton.setOnClickListener {
             viewModel.skipSelectedClientToday()
         }
     }
@@ -343,106 +377,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCurrentPage() {
-        binding.suggestionsContainer.removeAllViews()
-
-        val state = viewModel.uiState.value
-        val page = viewModel.currentPageSuggestions()
-        if (page.isEmpty()) {
-            binding.paginationRow.visibility = View.GONE
-            return
-        }
-
-        // Header
-        val stepsLabel = state.selectedServiceTypes.joinToString("+") { it.label }
-        val header = TextView(this).apply {
-            text = getString(
-                R.string.suggestion_header,
-                stepsLabel,
-                state.minDays,
-                state.suggestionOffset + 1,
-                state.suggestionOffset + page.size,
-                state.suggestions.size
-            )
-            setTypeface(null, Typeface.BOLD)
-            textSize = 13f
-        }
-        binding.suggestionsContainer.addView(header)
-
-        // Add a tappable row for each suggestion
-        page.forEachIndexed { i, suggestion ->
-            val globalIndex = state.suggestionOffset + i
-            val row = buildSuggestionRow(suggestion, globalIndex)
-            binding.suggestionsContainer.addView(row)
-        }
-
-        // Show/hide pagination row
-        val hasMore = viewModel.canShowMoreSuggestions()
-        val hasPrev = viewModel.canShowPreviousSuggestions()
-        binding.paginationRow.visibility = if (hasMore || hasPrev) View.VISIBLE else View.GONE
-        binding.prevSuggestionsButton.isEnabled = hasPrev
-        binding.moreSuggestionsButton.isEnabled = hasMore
-    }
-
-    private fun buildSuggestionRow(suggestion: ClientSuggestion, index: Int): MaterialButton {
-        val daysText = suggestion.daysSinceLast?.toString() ?: "Never"
-        val driveText = suggestion.drivingTime
-        val distText = when {
-            driveText != null -> "${suggestion.drivingDistance} (${driveText})"
-            suggestion.distanceMiles != null -> String.format(Locale.US, "%.1f mi", suggestion.distanceMiles)
-            else -> ""
-        }
-        val mowText = if (suggestion.mowWindowPreferred) " \u2713mow" else ""
-        val cuText = if (suggestion.requiresCuOverride) " \u26a0CU" else ""
-        // Show step tag when in combo mode (e.g. [S1] or [S1+2])
-        val stepTag = if (suggestion.eligibleSteps.size == 1 &&
-            viewModel.uiState.value.selectedServiceTypes.size == 1
-        ) {
-            "" // Single-step mode: no tag needed
-        } else {
-            val nums = suggestion.eligibleSteps
-                .filter { it.stepNumber > 0 }
-                .map { it.stepNumber }
-                .sorted()
-            if (nums.isNotEmpty()) "[S${nums.joinToString("+")}] " else ""
-        }
-        val label = "${index + 1}. $stepTag${suggestion.client.name}  \u2022  ${daysText}d  \u2022  $distText$mowText$cuText".trim()
-
-        val isSelected = selectedClient?.id == suggestion.client.id
-
-        return MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = label
-            textSize = 13f
-            isAllCaps = false
-            textAlignment = View.TEXT_ALIGNMENT_TEXT_START
-
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.topMargin = (4 * resources.displayMetrics.density).toInt()
-            layoutParams = lp
-
-            if (isSelected) {
-                // Filled-tonal look for the active selection
-                setBackgroundColor(ContextCompat.getColor(context, R.color.suggestion_selected_bg))
-                setTextColor(ContextCompat.getColor(context, R.color.md_theme_dark_onPrimaryContainer))
-                strokeColor = ColorStateList.valueOf(ContextCompat.getColor(context, R.color.suggestion_selected_stroke))
-                strokeWidth = (2 * resources.displayMetrics.density).toInt()
-                setTypeface(null, Typeface.BOLD)
-            } else {
-                strokeWidth = (1 * resources.displayMetrics.density).toInt()
-            }
-
-            setOnClickListener {
-                selectSuggestion(suggestion)
-                showCurrentPage()
-            }
-        }
-    }
-
-    private fun selectSuggestion(suggestion: ClientSuggestion) {
-        viewModel.selectSuggestion(suggestion.client.id)
-        selectedClient = suggestion.client
+        suggestionUiController.showCurrentPage()
     }
 
     private fun openSelectedInMaps() {
@@ -476,133 +411,48 @@ class MainActivity : AppCompatActivity() {
         val current = getCurrentLocation()
         lastLocation = current
         viewModel.setServiceTypes(getSelectedServiceTypes())
-        val notes = binding.visitNotesInput.text?.toString().orEmpty()
+        val notes = statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
         viewModel.confirmSelectedClientService(current, notes)
     }
 
     private fun showDailySummaryDialog(summary: String) {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_daily_summary_title))
-            .setMessage(summary)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+        DialogFactory.showDailySummaryDialog(this, summary)
     }
 
     private fun showRouteHistoryDialog(event: MainEvent.ShowRouteHistory) {
-        // Build a custom layout with prev/next navigation
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 0)
-        }
-
-        // Nav row: < Prev | date label | Next >
-        val navRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-
-        val prevBtn = com.google.android.material.button.MaterialButton(
-            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = "\u25C0 Older"
-            textSize = 12f
-            isAllCaps = false
-            isEnabled = event.hasPrevDay
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val dateLabel = TextView(this).apply {
-            text = event.dateLabel
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            gravity = android.view.Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f)
-        }
-
-        val nextBtn = com.google.android.material.button.MaterialButton(
-            this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
-        ).apply {
-            text = "Newer \u25B6"
-            textSize = 12f
-            isAllCaps = false
-            isEnabled = event.hasNextDay
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        navRow.addView(prevBtn)
-        navRow.addView(dateLabel)
-        navRow.addView(nextBtn)
-        container.addView(navRow)
-
-        // Separator
-        container.addView(View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 1
-            ).apply { topMargin = 12; bottomMargin = 12 }
-            setBackgroundColor(0x33FFFFFF)
-        })
-
-        // Summary text
-        val summaryView = TextView(this).apply {
-            text = event.summary
-            textSize = 13f
-            setLineSpacing(0f, 1.2f)
-        }
-        container.addView(summaryView)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_route_history_title))
-            .setView(container)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
-
-        // Wire up navigation — dismiss and show next/prev
-        prevBtn.setOnClickListener {
-            dialog.dismiss()
-            viewModel.navigateHistory(event.dateMillis, 1)  // +1 = older
-        }
-        nextBtn.setOnClickListener {
-            dialog.dismiss()
-            viewModel.navigateHistory(event.dateMillis, -1) // -1 = newer
+        DialogFactory.showRouteHistoryDialog(this, event) { dateMillis, delta ->
+            viewModel.navigateHistory(dateMillis, delta)
         }
     }
 
     private fun showEditNotesDialog(clientId: String, clientName: String, currentNotes: String) {
-        val editText = AndroidEditText(this).apply {
-            setText(currentNotes)
-            hint = "Notes for $clientName"
-            setPadding(48, 24, 48, 24)
-            minLines = 2
-            maxLines = 6
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Edit Notes – $clientName")
-            .setView(editText)
-            .setPositiveButton("Save") { _, _ ->
-                viewModel.saveClientNotes(clientId, editText.text.toString())
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        DialogFactory.showEditNotesDialog(
+            context = this,
+            clientId = clientId,
+            clientName = clientName,
+            currentNotes = currentNotes,
+            onSave = { id, notes -> viewModel.saveClientNotes(id, notes) }
+        )
     }
 
     private fun showStaleArrivalDialog(clientName: String, minutesElapsed: Long) {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_stale_arrival_title))
-            .setMessage(getString(R.string.dialog_stale_arrival_message, clientName, minutesElapsed))
-            .setPositiveButton(getString(R.string.dialog_stale_mark_complete)) { _, _ ->
+        DialogFactory.showStaleArrivalDialog(
+            context = this,
+            clientName = clientName,
+            minutesElapsed = minutesElapsed,
+            onMarkComplete = {
                 val location = getCurrentLocation()
                 lastLocation = location
-                val notes = binding.visitNotesInput.text?.toString().orEmpty()
+                val notes = statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
                 viewModel.resolveStaleArrival(markComplete = true, currentLocation = location, visitNotes = notes)
-            }
-            .setNegativeButton(getString(R.string.dialog_stale_discard)) { _, _ ->
+            },
+            onDiscard = {
                 viewModel.resolveStaleArrival(markComplete = false)
-            }
-            .setNeutralButton(getString(R.string.dialog_stale_go_back)) { _, _ ->
+            },
+            onGoBack = {
                 viewModel.dropPendingStaleAction()
             }
-            .setCancelable(false)
-            .show()
+        )
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -674,7 +524,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             R.id.action_destinations -> {
-                showDestinationDialog()
+                destinationInputController.showDestinationDialog()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -690,51 +540,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun showBreakThresholdDialog() {
         val current = viewModel.getNonClientStopThreshold()
-        val input = AndroidEditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(current.toString())
-            hint = "Minutes (1–30)"
+        DialogFactory.showBreakThresholdDialog(this, current) { mins ->
+            viewModel.setNonClientStopThreshold(mins)
         }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, 0)
-            addView(input)
-        }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_break_threshold_title))
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val mins = input.text.toString().toIntOrNull() ?: current
-                viewModel.setNonClientStopThreshold(mins)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun showMinDaysDialog() {
         val current = viewModel.uiState.value.minDays
-        val input = AndroidEditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-            setText(current.toString())
-            hint = "Days (1–90)"
+        DialogFactory.showMinDaysDialog(this, current) { days ->
+            viewModel.setMinDays(days)
+            rerunSuggestionsIfVisible()
         }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, 0)
-            addView(input)
-        }
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_min_days_title))
-            .setView(container)
-            .setPositiveButton("Save") { _, _ ->
-                val days = input.text.toString().toIntOrNull() ?: current
-                viewModel.setMinDays(days)
-                rerunSuggestionsIfVisible()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun rerunSuggestionsIfVisible() {
@@ -769,33 +585,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSheetsUrlDialog() {
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 0)
-        }
-
-        val syncInput = AndroidEditText(this).apply {
-            hint = getString(R.string.dialog_sheets_read_hint)
-            if (sheetsUrl.isNotBlank()) setText(sheetsUrl)
-            textSize = 13f
-        }
-        layout.addView(syncInput)
-
-        val writeInput = AndroidEditText(this).apply {
-            hint = getString(R.string.dialog_sheets_write_hint)
-            if (SheetsWriteBack.webAppUrl.isNotBlank()) setText(SheetsWriteBack.webAppUrl)
-            textSize = 13f
-        }
-        layout.addView(writeInput)
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.dialog_sheets_title)
-            .setMessage(R.string.dialog_sheets_message)
-            .setView(layout)
-            .setPositiveButton(R.string.dialog_sync_now) { _, _ ->
-                val enteredReadUrl = syncInput.text.toString().trim()
-                val enteredWriteUrl = writeInput.text.toString().trim()
-
+        DialogFactory.showSheetsUrlDialog(
+            context = this,
+            currentReadUrl = sheetsUrl,
+            currentWriteUrl = SheetsWriteBack.webAppUrl,
+            onSyncNow = { enteredReadUrl, enteredWriteUrl ->
                 if (enteredReadUrl.isNotBlank()) {
                     sheetsUrl = enteredReadUrl
                 }
@@ -810,8 +604,7 @@ class MainActivity : AppCompatActivity() {
                     viewModel.postStatus(getString(R.string.status_saved_write_url))
                 }
             }
-            .setNegativeButton(R.string.btn_cancel, null)
-            .show()
+        )
     }
 
     private fun saveSyncSettings() {
@@ -830,59 +623,6 @@ class MainActivity : AppCompatActivity() {
 
     // ── Location tracking & arrival detection ─────────────────
 
-    private fun toggleTracking() {
-        if (viewModel.uiState.value.isTracking) {
-            stopTracking()
-        } else {
-            startTracking()
-        }
-    }
-
-    private fun startTracking() {
-        // Check / request fine location
-        val hasFine = ActivityCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (!hasFine) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                ),
-                102
-            )
-            return
-        }
-
-        // On Android 13+ request notification permission
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val hasNotif = ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!hasNotif) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    103
-                )
-                // Continue anyway — notification just won't show
-            }
-        }
-
-        val intent = Intent(this, LocationTrackingService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-
-        viewModel.setTrackingActive(true)
-        arrivedClientIds.clear()
-        viewModel.postStatus(getString(R.string.status_tracking_started))
-    }
-
     private fun getBestSuggestionLocation(): Location? {
         val now = System.currentTimeMillis()
         val serviceLocation = trackingEventBus.latestLocation.value
@@ -898,18 +638,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         return serviceLocation ?: lastLocation
-    }
-
-    private fun stopTracking() {
-        stopService(Intent(this, LocationTrackingService::class.java))
-        viewModel.setTrackingActive(false)
-        arrivedClientIds.clear()
-        viewModel.postStatus(getString(R.string.status_tracking_stopped))
-    }
-
-    /** Sync tracking state from service (e.g. after app restart) */
-    private fun syncTrackingState() {
-        viewModel.setTrackingActive(trackingEventBus.isTracking.value)
     }
 
     private fun locationFromIntent(
@@ -944,7 +672,7 @@ class MainActivity : AppCompatActivity() {
                 lastLocation = location
                 viewModel.markArrivalForClient(client, location, arrivedAtMillis)
                 // Dismiss the arrival notification for this client
-                dismissNotification(2000 + client.id.hashCode())
+                trackingUiController.dismissNotification(2000 + client.id.hashCode())
             }
             .setNegativeButton(R.string.dialog_not_here, null)
             .setCancelable(false)
@@ -968,7 +696,7 @@ class MainActivity : AppCompatActivity() {
                 viewModel.markArrivalForClient(client, location, arrivedAtMillis)
                 confirmSelectedClientService()
                 // Dismiss the completion notification for this client
-                dismissNotification(3000 + client.id.hashCode())
+                trackingUiController.dismissNotification(3000 + client.id.hashCode())
             }
             .setNegativeButton(R.string.dialog_not_yet, null)
             .setCancelable(false)
@@ -981,32 +709,19 @@ class MainActivity : AppCompatActivity() {
      * they didn't actually service.
      */
     private fun showClusterCompletionDialog(members: List<ClusterMember>) {
-        val names = members.map { m ->
-            val mins = (m.timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
-            "${m.client.name} (${mins}m)"
-        }.toTypedArray()
-        val checked = BooleanArray(members.size) { true }  // all pre-checked
-
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_cluster_title))
-            .setMessage(getString(R.string.dialog_cluster_message, members.size))
-            .setMultiChoiceItems(names, checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton(R.string.dialog_cluster_confirm) { _, _ ->
-                val selected = members.filterIndexed { i, _ -> checked[i] }
+        DialogFactory.showClusterCompletionDialog(
+            context = this,
+            members = members,
+            onConfirmSelection = { selected ->
                 if (selected.isNotEmpty()) {
                     viewModel.confirmClusterService(selected)
                 }
-                // Dismiss all completion/cluster notifications for these clients
                 for (member in members) {
-                    dismissNotification(3000 + member.client.id.hashCode())
+                    trackingUiController.dismissNotification(3000 + member.client.id.hashCode())
                 }
-                dismissNotification(4000 + members.hashCode())
+                trackingUiController.dismissNotification(4000 + members.hashCode())
             }
-            .setNegativeButton(R.string.dialog_cluster_cancel, null)
-            .setCancelable(false)
-            .show()
+        )
     }
 
     private fun handleArrivalIntent(intent: Intent?) {
@@ -1086,288 +801,4 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ─── Destination Queue Dialog ────────────────────────────
-
-    private fun showDestinationDialog() {
-        destinationDialog?.dismiss()
-        val state = viewModel.uiState.value
-        val queue = state.destinationQueue
-        val activeIdx = state.activeDestinationIndex
-
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 24, 48, 8)
-        }
-
-        // Active destination header
-        val activeDest = state.activeDestination
-        if (activeDest != null) {
-            container.addView(TextView(this).apply {
-                text = getString(R.string.dialog_dest_active, activeDest.name)
-                setTypeface(null, Typeface.BOLD)
-                textSize = 14f
-                setPadding(0, 0, 0, 16)
-            })
-        }
-
-        // Queue list
-        if (queue.isEmpty()) {
-            container.addView(TextView(this).apply {
-                text = getString(R.string.dialog_dest_empty)
-                setPadding(0, 8, 0, 16)
-            })
-        } else {
-            queue.forEachIndexed { index, dest ->
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    setPadding(0, 4, 0, 4)
-                }
-                val prefix = if (index == activeIdx) "\u25B6 " else "${index + 1}. "
-                row.addView(TextView(this).apply {
-                    text = "$prefix${dest.name}"
-                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                    if (index == activeIdx) setTypeface(null, Typeface.BOLD)
-                })
-                row.addView(TextView(this).apply {
-                    text = "\u2716"
-                    textSize = 18f
-                    setPadding(16, 0, 0, 0)
-                    setOnClickListener {
-                        viewModel.removeFromDestinationQueue(index)
-                        showDestinationDialog() // refresh
-                    }
-                })
-                container.addView(row)
-            }
-        }
-
-        // Address input
-        val addressInput = AndroidEditText(this).apply {
-            hint = getString(R.string.dialog_dest_add_hint)
-            inputType = android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
-            setPadding(0, 24, 0, 8)
-        }
-        container.addView(addressInput)
-
-        // Input method buttons row
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 8, 0, 8)
-        }
-
-        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = getString(R.string.dialog_dest_add)
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = 4
-            }
-            setOnClickListener {
-                val address = addressInput.text.toString().trim()
-                if (address.isNotBlank()) {
-                    geocodeAndAddDestination(address)
-                }
-            }
-        })
-
-        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = getString(R.string.dialog_dest_voice)
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 4
-                marginEnd = 4
-            }
-            setOnClickListener { launchVoiceInput() }
-        })
-
-        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = getString(R.string.dialog_dest_paste)
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 4
-                marginEnd = 4
-            }
-            setOnClickListener { pasteDestinations() }
-        })
-
-        buttonRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = getString(R.string.dialog_dest_camera)
-            textSize = 11f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = 4
-            }
-            setOnClickListener { launchCameraForOcr() }
-        })
-        container.addView(buttonRow)
-
-        // Action buttons row (optimize, clear)
-        if (queue.size >= 2) {
-            val actionRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 8, 0, 0)
-            }
-            actionRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                text = getString(R.string.dialog_dest_optimize)
-                textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = 4
-                }
-                setOnClickListener {
-                    viewModel.optimizeDestinationQueue(lastLocation)
-                    showDestinationDialog() // refresh
-                }
-            })
-            actionRow.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                text = getString(R.string.dialog_dest_clear)
-                textSize = 11f
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = 4
-                }
-                setOnClickListener {
-                    viewModel.clearDestinationQueue()
-                    showDestinationDialog() // refresh
-                }
-            })
-            container.addView(actionRow)
-        }
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_destinations_title))
-            .setView(container)
-            .setPositiveButton("Done", null)
-            .create()
-
-        // If there's an active destination, add Skip button
-        if (queue.isNotEmpty() && activeIdx < queue.size) {
-            dialog.setButton(AlertDialog.BUTTON_NEUTRAL, "Skip") { _, _ ->
-                viewModel.skipDestination()
-                rerunSuggestionsIfVisible()
-            }
-        }
-
-        destinationDialog = dialog
-        dialog.show()
-    }
-
-    // ─── Destination Input Methods ─────────────────────────────
-
-    private fun geocodeAndAddDestination(address: String) {
-        Snackbar.make(binding.root, getString(R.string.dialog_dest_geocoding), Snackbar.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            val coords = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                GeocodingHelper.geocodeAddress(address)
-            }
-            if (coords != null) {
-                val dest = SavedDestination(
-                    id = java.util.UUID.randomUUID().toString(),
-                    name = address,
-                    address = address,
-                    lat = coords.first,
-                    lng = coords.second
-                )
-                viewModel.addToDestinationQueue(dest)
-                showDestinationDialog()
-                rerunSuggestionsIfVisible()
-            } else {
-                Snackbar.make(
-                    binding.root,
-                    getString(R.string.dialog_dest_geocode_failed, address),
-                    Snackbar.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
-
-    private fun launchVoiceInput() {
-        val intent = Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
-            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say an address or place name")
-        }
-        try {
-            voiceInputLauncher.launch(intent)
-        } catch (_: Exception) {
-            Snackbar.make(binding.root, "Voice input not available", Snackbar.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun pasteDestinations() {
-        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val text = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-        if (text.isNullOrBlank()) {
-            Snackbar.make(binding.root, "Clipboard is empty", Snackbar.LENGTH_SHORT).show()
-            return
-        }
-        val lines = text.split("\n").map { it.trim() }.filter { it.isNotBlank() }
-        if (lines.isEmpty()) return
-
-        if (lines.size == 1) {
-            geocodeAndAddDestination(lines.first())
-        } else {
-            showLinePickerDialog(lines)
-        }
-    }
-
-    private fun launchCameraForOcr() {
-        try {
-            val imageFile = java.io.File(cacheDir, "dest_ocr_${System.currentTimeMillis()}.jpg")
-            pendingCameraImageUri = androidx.core.content.FileProvider.getUriForFile(
-                this, "$packageName.fileprovider", imageFile
-            )
-            cameraLauncher.launch(pendingCameraImageUri)
-        } catch (e: Exception) {
-            Snackbar.make(binding.root, "Camera not available: ${e.message}", Snackbar.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun runOcrOnImage(uri: Uri) {
-        lifecycleScope.launch {
-            try {
-                val image = com.google.mlkit.vision.common.InputImage.fromFilePath(this@MainActivity, uri)
-                val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(
-                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
-                )
-                val visionText = kotlin.coroutines.suspendCoroutine<com.google.mlkit.vision.text.Text> { cont ->
-                    recognizer.process(image)
-                        .addOnSuccessListener { cont.resumeWith(Result.success(it)) }
-                        .addOnFailureListener { cont.resumeWith(Result.failure(it)) }
-                }
-                val lines = visionText.textBlocks
-                    .flatMap { block -> block.lines }
-                    .map { line -> line.text.trim() }
-                    .filter { text -> text.isNotBlank() }
-
-                if (lines.isEmpty()) {
-                    Snackbar.make(binding.root, getString(R.string.dialog_dest_no_text), Snackbar.LENGTH_SHORT).show()
-                } else {
-                    showLinePickerDialog(lines)
-                }
-            } catch (e: Exception) {
-                Snackbar.make(binding.root, "OCR failed: ${e.message}", Snackbar.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /** Show a multi-choice dialog for the user to pick which lines are addresses to geocode. */
-    private fun showLinePickerDialog(lines: List<String>) {
-        val checked = BooleanArray(lines.size) { true }
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.dialog_dest_select_lines))
-            .setMultiChoiceItems(lines.toTypedArray(), checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton("Add Selected") { _, _ ->
-                lines.forEachIndexed { i, line ->
-                    if (checked[i]) geocodeAndAddDestination(line)
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun dismissNotification(notifId: Int) {
-        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.cancel(notifId)
-    }
 }

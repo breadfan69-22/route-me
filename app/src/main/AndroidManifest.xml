@@ -18,6 +18,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.RouteMe">
         <activity
+            android:name=".UpcomingEventsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SyncSheetActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".DestinationsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

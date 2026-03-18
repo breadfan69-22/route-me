@@ -6,15 +6,15 @@ import com.routeme.app.Client
 import com.routeme.app.ClientDao
 import com.routeme.app.ClientImportParser
 import com.routeme.app.DailyRecordRow
-import com.routeme.app.DistanceMatrixHelper
-import com.routeme.app.GeocodingHelper
-import com.routeme.app.GoogleSheetsSync
 import com.routeme.app.ImportResult
 import com.routeme.app.NonClientStop
 import com.routeme.app.NonClientStopDao
 import com.routeme.app.NonClientStopEntity
 import com.routeme.app.ServiceRecord
-import com.routeme.app.SheetsWriteBack
+import com.routeme.app.network.DistanceMatrixHelper
+import com.routeme.app.network.GeocodingHelper
+import com.routeme.app.network.GoogleSheetsSync
+import com.routeme.app.network.SheetsWriteBack
 import com.routeme.app.toDomain
 import com.routeme.app.toEntity
 import kotlinx.coroutines.Dispatchers
@@ -54,21 +54,28 @@ class ClientRepository(
                 entity.name.lowercase() to Pair(entity.latitude, entity.longitude)
             }
 
-            clientDao.deleteAllClients()
-            for (client in result.clients) {
-                // Carry over previously geocoded coordinates if the sheet doesn't supply them
+            val mergedClients = result.clients.map { client ->
                 if (client.latitude == null || client.longitude == null) {
                     val saved = existingCoords[client.name.lowercase()]
                     if (saved != null) {
-                        client.latitude = saved.first
-                        client.longitude = saved.second
+                        client.copy(latitude = saved.first, longitude = saved.second)
+                    } else {
+                        client
                     }
+                } else {
+                    client
                 }
+            }
+
+            clientDao.deleteAllClients()
+            for (client in mergedClients) {
                 clientDao.insertClient(client.toEntity())
                 for (record in client.records) {
                     clientDao.insertServiceRecord(record.toEntity(client.id))
                 }
             }
+
+            return@withContext result.copy(clients = mergedClients)
         }
         result
     }
@@ -91,7 +98,7 @@ class ClientRepository(
 
     suspend fun geocodeClients(clients: List<Client>): GeocodingHelper.GeocodingResult = withContext(Dispatchers.IO) {
         val result = GeocodingHelper.geocodeClients(appContext, clients)
-        for (client in clients) {
+        for (client in result.clients) {
             val lat = client.latitude
             val lng = client.longitude
             if (lat != null && lng != null) {

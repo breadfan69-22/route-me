@@ -8,7 +8,6 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.Calendar
 import java.util.Locale
-import java.util.UUID
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -18,6 +17,46 @@ data class ImportResult(
 )
 
 object ClientImportParser {
+    private val XLSX_CLIENT_BUILD_CONFIG = CsvParsingUtils.ClientBuildConfig(
+        idPrefix = "IMP",
+        useSourceId = false,
+        nameKeys = listOf("name"),
+        addressKeys = listOf("address"),
+        zoneKeys = listOf("zone"),
+        notesKeys = listOf("notes"),
+        mowKeys = listOf("mow"),
+        latitudeKeys = emptyList(),
+        longitudeKeys = emptyList(),
+        lawnSizeKeys = emptyList(),
+        sunShadeKeys = emptyList(),
+        terrainKeys = emptyList(),
+        windExposureKeys = emptyList(),
+        requireNonBlankName = true,
+        requireNonBlankAddress = true,
+        parseEmbeddedStepDate = false,
+        skipStatusKeywordsInStepDate = false
+    )
+
+    private val IMPORT_CLIENT_BUILD_CONFIG = CsvParsingUtils.ClientBuildConfig(
+        idPrefix = "IMP",
+        useSourceId = true,
+        nameKeys = listOf("name", "client"),
+        addressKeys = listOf("address"),
+        zoneKeys = listOf("zone", "county"),
+        notesKeys = listOf("notes"),
+        mowKeys = listOf("mow", "mowday", "mow_day"),
+        latitudeKeys = listOf("lat", "latitude"),
+        longitudeKeys = listOf("lng", "longitude"),
+        lawnSizeKeys = listOf("lawnsize", "lawn_size"),
+        sunShadeKeys = listOf("sunshade", "sun_shade"),
+        terrainKeys = listOf("terrain"),
+        windExposureKeys = listOf("windexposure", "wind_exposure"),
+        requireNonBlankName = false,
+        requireNonBlankAddress = false,
+        parseEmbeddedStepDate = false,
+        skipStatusKeywordsInStepDate = false
+    )
+
     fun parse(context: Context, uri: Uri): ImportResult {
         val fileName = getDisplayName(context, uri).lowercase(Locale.US)
         return when {
@@ -140,56 +179,14 @@ object ClientImportParser {
                     }
                 }
 
-                val name = map["name"]?.takeIf { it.isNotBlank() }?.take(100) ?: continue
-                val address = map["address"]?.takeIf { it.isNotBlank() }?.take(200) ?: continue
-
-                val subscribedSteps = mutableSetOf<Int>()
-                val records = mutableListOf<ServiceRecord>()
-
-                for (step in 1..6) {
-                    val cellValue = map["step $step"] ?: ""
-                    if (cellValue.isNotBlank()) {
-                        val lower = cellValue.lowercase(Locale.US)
-                        if (lower.contains("sold") || lower.contains("deceased") || lower.contains("cancel")) continue
-                        // Subscribed: checkmarks (√/✓), checkboxes (TRUE/FALSE), or dates
-                        subscribedSteps.add(step)
-                        val completionDate = parseStepDate(cellValue, yearForDates)
-                        if (completionDate != null) {
-                            val serviceType = ServiceType.forStep(step)
-                            if (serviceType != null) {
-                                records.add(ServiceRecord(serviceType = serviceType, completedAtMillis = completionDate, durationMinutes = 0, lat = null, lng = null))
-                            }
-                        }
-                    }
+                val client = CsvParsingUtils.createClientFromMap(
+                    map = map,
+                    yearForDates = yearForDates,
+                    config = XLSX_CLIENT_BUILD_CONFIG
+                )
+                if (client != null) {
+                    clients.add(client)
                 }
-
-                val grubValue = map["grub"] ?: ""
-                val hasGrub = grubValue.isNotBlank()
-                if (hasGrub) {
-                    val grubDate = parseStepDate(grubValue, yearForDates)
-                    if (grubDate != null) {
-                        records.add(ServiceRecord(serviceType = ServiceType.GRUB, completedAtMillis = grubDate, durationMinutes = 0, lat = null, lng = null))
-                    }
-                }
-
-                val mowDay = parseDayOfWeek(map["mow"] ?: "")
-                val zone = (map["zone"] ?: "").take(50)
-                val notes = (map["notes"] ?: "").take(500)
-                val cuSpringPending = isCuPending(map["cu spring"] ?: map["cu_spring"] ?: map["cuspring"] ?: "")
-                val cuFallPending = isCuPending(map["cu fall"] ?: map["cu_fall"] ?: map["cufall"] ?: "")
-
-                clients.add(Client(
-                    id = "IMP-${UUID.randomUUID().toString().take(8)}",
-                    name = name, address = address,
-                    zone = zone, notes = notes,
-                    subscribedSteps = subscribedSteps, hasGrub = hasGrub,
-                    mowDayOfWeek = mowDay,
-                    lawnSizeSqFt = 0, sunShade = "", terrain = "", windExposure = "",
-                    cuSpringPending = cuSpringPending,
-                    cuFallPending = cuFallPending,
-                    latitude = null, longitude = null,
-                    records = records
-                ))
             }
 
             ImportResult(clients, "Imported ${clients.size} client(s) from XLSX.")
@@ -209,38 +206,6 @@ object ClientImportParser {
         return col - 1
     }
 
-    /**
-     * Parses step cell values like:
-     *   "√"        -> subscribed only, no date
-     *   "√6.12"    -> completed June 12
-     *   "√xx"      -> subscribed, skipped/cancelled, no date
-     *   "√10.3"    -> completed October 3
-     */
-    private fun parseStepDate(cellValue: String, year: Int): Long? {
-        val cleaned = cellValue
-            .replace("√", "")
-            .replace("✓", "")
-            .trim()
-
-        if (cleaned.isBlank() || cleaned.equals("xx", ignoreCase = true)) {
-            return null
-        }
-
-        // Expected format: M.D  (e.g. 6.12 = June 12, 10.3 = October 3)
-        val parts = cleaned.split(".")
-        if (parts.size == 2) {
-            val month = parts[0].trim().toIntOrNull()
-            val day = parts[1].trim().toIntOrNull()
-            if (month != null && day != null && month in 1..12 && day in 1..31) {
-                val cal = Calendar.getInstance()
-                cal.set(year, month - 1, day, 12, 0, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                return cal.timeInMillis
-            }
-        }
-        return null
-    }
-
     // ── CSV import ───────────────────────────────────────────────────────
 
     private fun parseCsv(context: Context, uri: Uri): ImportResult {
@@ -252,18 +217,21 @@ object ClientImportParser {
             return ImportResult(emptyList(), "CSV is empty.")
         }
 
-        val headers = lines.first().split(",").map { it.trim().removePrefix("√").trim().lowercase(Locale.US) }
+        val csvRecords = CsvParsingUtils.reassembleCsvRecords(lines)
+        val headers = CsvParsingUtils.parseCsvLine(csvRecords.first())
+            .map { it.trim().removePrefix("√").trim().lowercase(Locale.US) }
+        val yearForDates = Calendar.getInstance().get(Calendar.YEAR)
         val clients = mutableListOf<Client>()
 
-        lines.drop(1).forEach { line ->
-            if (line.isBlank()) return@forEach
+        csvRecords.drop(1).forEach { record ->
+            if (record.isBlank()) return@forEach
 
-            val cols = line.split(",").map { it.trim() }
+            val cols = CsvParsingUtils.parseCsvLine(record).map { it.trim() }
             val map = headers.mapIndexedNotNull { index, header ->
                 if (index < cols.size) header to cols[index] else null
             }.toMap()
 
-            val client = createClientFromMap(map)
+            val client = CsvParsingUtils.createClientFromMap(map, yearForDates, IMPORT_CLIENT_BUILD_CONFIG)
             if (client != null) clients.add(client)
         }
 
@@ -286,6 +254,7 @@ object ClientImportParser {
             ?.map { it.text().trim().removePrefix("√").trim().lowercase(Locale.US) }
             ?: return ImportResult(emptyList(), "No header row found.")
 
+        val yearForDates = Calendar.getInstance().get(Calendar.YEAR)
         val clients = mutableListOf<Client>()
 
         rows.drop(1).forEach { row ->
@@ -296,96 +265,11 @@ object ClientImportParser {
                 if (index < cells.size) header to cells[index].text().trim() else null
             }.toMap()
 
-            val client = createClientFromMap(map)
+            val client = CsvParsingUtils.createClientFromMap(map, yearForDates, IMPORT_CLIENT_BUILD_CONFIG)
             if (client != null) clients.add(client)
         }
 
         return ImportResult(clients, "Imported ${clients.size} client(s) from HTML table.")
-    }
-
-    // ── Shared helpers ───────────────────────────────────────────────────
-
-    private fun createClientFromMap(map: Map<String, String>): Client? {
-        val name = (map["name"] ?: map["client"])?.take(100) ?: return null
-        val address = map["address"]?.take(200) ?: return null
-
-        val yearForDates = Calendar.getInstance().get(Calendar.YEAR)
-
-        val subscribedSteps = mutableSetOf<Int>()
-        val records = mutableListOf<ServiceRecord>()
-
-        for (step in 1..6) {
-            val cellValue = map["step $step"] ?: ""
-            if (cellValue.isNotBlank()) {
-                val lower = cellValue.lowercase(Locale.US)
-                if (lower.contains("sold") || lower.contains("deceased") || lower.contains("cancel")) continue
-                // Subscribed: checkmarks (√/✓), checkboxes (TRUE/FALSE), or dates
-                subscribedSteps.add(step)
-                val completionDate = parseStepDate(cellValue, yearForDates)
-                if (completionDate != null) {
-                    val serviceType = ServiceType.forStep(step)
-                    if (serviceType != null) {
-                        records.add(ServiceRecord(serviceType = serviceType, completedAtMillis = completionDate, durationMinutes = 0, lat = null, lng = null))
-                    }
-                }
-            }
-        }
-
-        val grubValue = map["grub"] ?: ""
-        val hasGrub = grubValue.isNotBlank()
-        if (hasGrub) {
-            val grubDate = parseStepDate(grubValue, yearForDates)
-            if (grubDate != null) {
-                records.add(ServiceRecord(serviceType = ServiceType.GRUB, completedAtMillis = grubDate, durationMinutes = 0, lat = null, lng = null))
-            }
-        }
-
-        val mowDay = parseDayOfWeek(map["mow"] ?: map["mowday"] ?: map["mow_day"] ?: "")
-        val lat = (map["lat"]?.toDoubleOrNull() ?: map["latitude"]?.toDoubleOrNull())?.takeIf { it in -90.0..90.0 }
-        val lng = (map["lng"]?.toDoubleOrNull() ?: map["longitude"]?.toDoubleOrNull())?.takeIf { it in -180.0..180.0 }
-        val cuSpringPending = isCuPending(map["cu spring"] ?: map["cu_spring"] ?: map["cuspring"] ?: "")
-        val cuFallPending = isCuPending(map["cu fall"] ?: map["cu_fall"] ?: map["cufall"] ?: "")
-
-        return Client(
-            id = map["id"] ?: "IMP-${UUID.randomUUID().toString().take(8)}",
-            name = name,
-            address = address,
-            zone = (map["zone"] ?: map["county"] ?: "").take(50),
-            notes = (map["notes"] ?: "").take(500),
-            subscribedSteps = subscribedSteps,
-            hasGrub = hasGrub,
-            mowDayOfWeek = mowDay,
-            lawnSizeSqFt = map["lawnsize"]?.toIntOrNull() ?: map["lawn_size"]?.toIntOrNull() ?: 0,
-            sunShade = map["sunshade"] ?: map["sun_shade"] ?: "",
-            terrain = map["terrain"] ?: "",
-            windExposure = map["windexposure"] ?: map["wind_exposure"] ?: "",
-            cuSpringPending = cuSpringPending,
-            cuFallPending = cuFallPending,
-            latitude = lat,
-            longitude = lng,
-            records = records
-        )
-    }
-
-    private fun isCuPending(value: String): Boolean {
-        val text = value.trim()
-        if (text.isBlank() || !text.contains("*")) return false
-        val withoutAsterisk = text.replace("*", "").trim()
-        val hasDate = Regex("\\b\\d{1,2}[./-]\\d{1,2}([./-]\\d{2,4})?\\b").containsMatchIn(withoutAsterisk)
-        return !hasDate
-    }
-
-    private fun parseDayOfWeek(value: String): Int {
-        return when (value.trim().lowercase(Locale.US)) {
-            "sun", "sunday" -> Calendar.SUNDAY
-            "mon", "monday" -> Calendar.MONDAY
-            "tue", "tues", "tuesday" -> Calendar.TUESDAY
-            "wed", "wednesday" -> Calendar.WEDNESDAY
-            "thu", "thur", "thurs", "thursday" -> Calendar.THURSDAY
-            "fri", "friday" -> Calendar.FRIDAY
-            "sat", "saturday" -> Calendar.SATURDAY
-            else -> 0 // unknown / not specified
-        }
     }
 
     private fun getDisplayName(context: Context, uri: Uri): String {

@@ -138,4 +138,10 @@
     <string name="dialog_dest_select_lines">Select lines to add as destinations:</string>
     <string name="dialog_dest_no_text">No text found in image</string>
     <string name="toast_dest_arrived">Arrived at %s</string>
+
+    <!-- Placeholder screens -->
+    <string name="screen_upcoming_events_title">Upcoming Events</string>
+    <string name="screen_sync_sheet_title">Sync Sheet</string>
+    <string name="screen_destinations_title">Destinations</string>
+    <string name="screen_placeholder_coming_soon">Coming soon</string>
 </resources>

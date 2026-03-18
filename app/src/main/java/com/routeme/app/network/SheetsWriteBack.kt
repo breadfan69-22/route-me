@@ -1,6 +1,8 @@
-package com.routeme.app
+package com.routeme.app.network
 
 import android.util.Log
+import com.routeme.app.ServiceType
+import com.routeme.app.util.AppConfig
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -18,9 +20,6 @@ import java.util.Calendar
 object SheetsWriteBack {
 
     private const val TAG = "SheetsWriteBack"
-    private const val CONNECT_TIMEOUT_MS = 15_000
-    private const val READ_TIMEOUT_MS = 15_000
-    private const val MAX_REDIRECTS = 5
 
     /** Set this to the deployed Apps Script web app URL */
     var webAppUrl: String = ""
@@ -158,15 +157,15 @@ object SheetsWriteBack {
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
         conn.doOutput = true
-        conn.connectTimeout = CONNECT_TIMEOUT_MS
-        conn.readTimeout = READ_TIMEOUT_MS
+        conn.connectTimeout = AppConfig.SheetsWriteBack.CONNECT_TIMEOUT_MS
+        conn.readTimeout = AppConfig.SheetsWriteBack.READ_TIMEOUT_MS
         conn.instanceFollowRedirects = false
         conn.outputStream.use { it.write(jsonBytes) }
 
         var code = conn.responseCode
         Log.d(TAG, "Initial POST response: $code")
 
-        var remaining = MAX_REDIRECTS
+        var remaining = AppConfig.SheetsWriteBack.MAX_REDIRECTS
         while (code in 301..303 || code == 307 || code == 308) {
             val location = conn.getHeaderField("Location")
             conn.disconnect()
@@ -178,8 +177,8 @@ object SheetsWriteBack {
             Log.d(TAG, "Following redirect ($code) -> $location")
             conn = URL(location).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = CONNECT_TIMEOUT_MS
-            conn.readTimeout = READ_TIMEOUT_MS
+            conn.connectTimeout = AppConfig.SheetsWriteBack.CONNECT_TIMEOUT_MS
+            conn.readTimeout = AppConfig.SheetsWriteBack.READ_TIMEOUT_MS
             conn.instanceFollowRedirects = false
             code = conn.responseCode
         }

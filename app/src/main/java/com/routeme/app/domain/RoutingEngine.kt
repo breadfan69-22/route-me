@@ -3,12 +3,13 @@ package com.routeme.app.domain
 import android.location.Location
 import com.routeme.app.Client
 import com.routeme.app.ClientSuggestion
-import com.routeme.app.GeocodingHelper
 import com.routeme.app.RouteDirection
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
+import com.routeme.app.network.GeocodingHelper
+import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
 import java.util.Calendar
 import java.util.Locale
@@ -56,7 +57,9 @@ class RoutingEngine {
 
                 val distance = distanceMiles(client, lastLocation)
                 val distanceToShopMiles = if (client.latitude != null && client.longitude != null) {
-                    distanceMilesBetween(client.latitude!!, client.longitude!!, destLat, destLng)
+                    val lat = client.latitude
+                    val lng = client.longitude
+                    distanceMilesBetween(lat, lng, destLat, destLng)
                 } else {
                     null
                 }
@@ -138,7 +141,7 @@ class RoutingEngine {
                 val lng = candidate.suggestion.client.longitude ?: return@maxByOrNull Double.NEGATIVE_INFINITY
 
                 val hopMiles = distanceMilesBetween(currentLat, currentLng, lat, lng)
-                val hopPenalty = hopMiles * 14.0
+                val hopPenalty = hopMiles * AppConfig.Routing.ORDER_HOP_PENALTY_PER_MILE
 
                 val candidateDistToShop = candidate.suggestion.distanceToShopMiles
                     ?: distanceMilesBetween(lat, lng, destLat, destLng)
@@ -147,28 +150,29 @@ class RoutingEngine {
                 val directionAdjustment = if (destination != null) {
                     // When a destination is active, always score toward it
                     when {
-                        delta < -0.2 -> 28.0
-                        delta > 0.8 -> -35.0
-                        else -> -8.0
+                        delta < AppConfig.Routing.DESTINATION_DELTA_BETTER_THRESHOLD_MILES -> AppConfig.Routing.DESTINATION_BETTER_BONUS
+                        delta > AppConfig.Routing.DESTINATION_DELTA_WORSE_THRESHOLD_MILES -> AppConfig.Routing.DESTINATION_WORSE_PENALTY
+                        else -> AppConfig.Routing.DESTINATION_NEUTRAL_ADJUSTMENT
                     }
                 } else {
                     when (routeDirection) {
                         RouteDirection.OUTWARD -> when {
-                            delta > 0.2 -> 28.0
-                            delta < -0.8 -> -35.0
-                            else -> -8.0
+                            delta > AppConfig.Routing.OUTWARD_DELTA_BETTER_THRESHOLD_MILES -> AppConfig.Routing.OUTWARD_BETTER_BONUS
+                            delta < AppConfig.Routing.OUTWARD_DELTA_WORSE_THRESHOLD_MILES -> AppConfig.Routing.OUTWARD_WORSE_PENALTY
+                            else -> AppConfig.Routing.OUTWARD_NEUTRAL_ADJUSTMENT
                         }
                         RouteDirection.HOMEWARD -> when {
-                            delta < -0.2 -> 28.0
-                            delta > 0.8 -> -35.0
-                            else -> -8.0
+                            delta < AppConfig.Routing.HOMEWARD_DELTA_BETTER_THRESHOLD_MILES -> AppConfig.Routing.HOMEWARD_BETTER_BONUS
+                            delta > AppConfig.Routing.HOMEWARD_DELTA_WORSE_THRESHOLD_MILES -> AppConfig.Routing.HOMEWARD_WORSE_PENALTY
+                            else -> AppConfig.Routing.HOMEWARD_NEUTRAL_ADJUSTMENT
                         }
                     }
                 }
 
-                val overdueBonus = ((candidate.suggestion.daysSinceLast ?: 0) / 10.0).coerceAtMost(15.0)
+                val overdueBonus = ((candidate.suggestion.daysSinceLast ?: 0) / AppConfig.Routing.ORDER_OVERDUE_DIVISOR_DAYS)
+                    .coerceAtMost(AppConfig.Routing.ORDER_OVERDUE_BONUS_MAX)
 
-                (candidate.score * 0.65) - hopPenalty + directionAdjustment + overdueBonus
+                (candidate.score * AppConfig.Routing.ORDER_BASE_SCORE_WEIGHT) - hopPenalty + directionAdjustment + overdueBonus
             } ?: break
 
             ordered.add(next)
@@ -210,44 +214,47 @@ class RoutingEngine {
         val distance = suggestion.distanceMiles
         if (distance != null) {
             score += when {
-                distance < 0.5 -> 220.0
-                distance < 1.0 -> 160.0
-                distance < 2.0 -> 100.0
-                distance < 3.0 -> 55.0
-                distance < 5.0 -> 20.0
-                distance < 8.0 -> -20.0
-                distance < 12.0 -> -60.0
-                else -> -120.0
+                distance < AppConfig.Routing.DISTANCE_LT_0_5_MILES -> AppConfig.Routing.DISTANCE_LT_0_5_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_1_MILES -> AppConfig.Routing.DISTANCE_LT_1_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_2_MILES -> AppConfig.Routing.DISTANCE_LT_2_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_3_MILES -> AppConfig.Routing.DISTANCE_LT_3_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_5_MILES -> AppConfig.Routing.DISTANCE_LT_5_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_8_MILES -> AppConfig.Routing.DISTANCE_LT_8_SCORE
+                distance < AppConfig.Routing.DISTANCE_LT_12_MILES -> AppConfig.Routing.DISTANCE_LT_12_SCORE
+                else -> AppConfig.Routing.DISTANCE_FAR_SCORE
             }
-            score -= distance * 8.0
+            score -= distance * AppConfig.Routing.DISTANCE_PENALTY_PER_MILE
         } else {
             val distanceToShop = suggestion.distanceToShopMiles
             if (distanceToShop != null) {
-                score += (40.0 - (distanceToShop * 3.0)).coerceAtLeast(-50.0)
+                score += (
+                    AppConfig.Routing.NO_DISTANCE_BASE_SCORE -
+                        (distanceToShop * AppConfig.Routing.NO_DISTANCE_DISTANCE_MULTIPLIER)
+                    ).coerceAtLeast(AppConfig.Routing.NO_DISTANCE_MIN_SCORE)
             }
         }
 
         val clientDistanceToShopMiles = suggestion.distanceToShopMiles
         if (clientDistanceToShopMiles != null && userDistanceToShopMiles != null) {
             val delta = clientDistanceToShopMiles - userDistanceToShopMiles
-            if (kotlin.math.abs(delta) <= 0.75) {
-                score += 30.0
+            if (kotlin.math.abs(delta) <= AppConfig.Routing.DIRECTION_DELTA_NEAR_ZERO_MILES) {
+                score += AppConfig.Routing.DIRECTION_NEAR_ZERO_BONUS
             } else {
                 when (routeDirection) {
                     RouteDirection.OUTWARD -> {
                         score += when {
-                            delta in 0.75..4.0 -> 60.0
-                            delta > 4.0 -> 20.0
-                            delta < -1.0 -> -55.0
-                            else -> -15.0
+                            delta in AppConfig.Routing.OUTWARD_DELTA_RANGE_MIN_MILES..AppConfig.Routing.OUTWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.OUTWARD_RANGE_BONUS
+                            delta > AppConfig.Routing.OUTWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.OUTWARD_FAR_BONUS
+                            delta < AppConfig.Routing.OUTWARD_REVERSE_THRESHOLD_MILES -> AppConfig.Routing.OUTWARD_REVERSE_PENALTY
+                            else -> AppConfig.Routing.OUTWARD_DEFAULT_ADJUSTMENT
                         }
                     }
                     RouteDirection.HOMEWARD -> {
                         score += when {
-                            delta in -4.0..-0.75 -> 60.0
-                            delta < -4.0 -> 20.0
-                            delta > 1.0 -> -55.0
-                            else -> -15.0
+                            delta in AppConfig.Routing.HOMEWARD_DELTA_RANGE_MIN_MILES..AppConfig.Routing.HOMEWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.HOMEWARD_RANGE_BONUS
+                            delta < AppConfig.Routing.HOMEWARD_DELTA_RANGE_MIN_MILES -> AppConfig.Routing.HOMEWARD_FAR_BONUS
+                            delta > AppConfig.Routing.HOMEWARD_REVERSE_THRESHOLD_MILES -> AppConfig.Routing.HOMEWARD_REVERSE_PENALTY
+                            else -> AppConfig.Routing.HOMEWARD_DEFAULT_ADJUSTMENT
                         }
                     }
                 }
@@ -256,20 +263,21 @@ class RoutingEngine {
 
         val days = suggestion.daysSinceLast
         if (days == null) {
-            score += 35.0
+            score += AppConfig.Routing.NEVER_SERVED_BONUS
         } else if (days >= minDays) {
             val daysOverdue = days - minDays
-            score += 10.0 + (daysOverdue * 0.8)
-            if (days >= 60) {
-                score += 10.0
+            score += AppConfig.Routing.OVERDUE_BASE_BONUS +
+                (daysOverdue * AppConfig.Routing.OVERDUE_PER_DAY_BONUS)
+            if (days >= AppConfig.Routing.OVERDUE_60_DAY_THRESHOLD) {
+                score += AppConfig.Routing.OVERDUE_60_DAY_BONUS
             }
-            if (days >= 90) {
-                score += 15.0
+            if (days >= AppConfig.Routing.OVERDUE_90_DAY_THRESHOLD) {
+                score += AppConfig.Routing.OVERDUE_90_DAY_BONUS
             }
         }
 
         if (suggestion.requiresCuOverride) {
-            score -= 40.0
+            score -= AppConfig.Routing.CU_OVERRIDE_PENALTY
         }
 
         return score
@@ -282,10 +290,10 @@ class RoutingEngine {
         val daysSinceMow = (today - mowDay + 7) % 7
 
         return when {
-            daysUntilMow == 0 -> -180.0
-            daysUntilMow == 1 || daysSinceMow == 1 -> -120.0
-            daysUntilMow in 2..3 -> 15.0
-            else -> 5.0
+            daysUntilMow == 0 -> AppConfig.Routing.MOW_SAME_DAY_PENALTY
+            daysUntilMow == 1 || daysSinceMow == 1 -> AppConfig.Routing.MOW_ADJACENT_DAY_PENALTY
+            daysUntilMow in 2..3 -> AppConfig.Routing.MOW_NEAR_TERM_BONUS
+            else -> AppConfig.Routing.MOW_DEFAULT_BONUS
         }
     }
 
@@ -306,7 +314,7 @@ class RoutingEngine {
             ?: return null
 
         val diff = System.currentTimeMillis() - last.completedAtMillis
-        return (diff / (24L * 60L * 60L * 1000L)).toInt()
+        return (diff / AppConfig.Routing.MILLIS_PER_DAY).toInt()
     }
 
     fun distanceMiles(client: Client, lastLocation: Location?): Double? {
@@ -318,7 +326,6 @@ class RoutingEngine {
     }
 
     fun distanceMilesBetween(startLat: Double, startLng: Double, endLat: Double, endLng: Double): Double {
-        val earthRadiusMiles = 3958.7613
         val dLat = Math.toRadians(endLat - startLat)
         val dLng = Math.toRadians(endLng - startLng)
         val lat1 = Math.toRadians(startLat)
@@ -328,7 +335,7 @@ class RoutingEngine {
             kotlin.math.sin(dLng / 2) * kotlin.math.sin(dLng / 2) *
             kotlin.math.cos(lat1) * kotlin.math.cos(lat2)
         val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        return earthRadiusMiles * c
+        return AppConfig.Routing.EARTH_RADIUS_MILES * c
     }
 
     fun buildClientDetails(client: Client): String {
@@ -391,14 +398,14 @@ class RoutingEngine {
 
         var improved = true
         var passes = 0
-        while (improved && passes < 50) {
+        while (improved && passes < AppConfig.Routing.TWO_OPT_MAX_PASSES) {
             improved = false
             passes++
             for (i in 1 until n - 1) {
                 for (j in i + 1 until n) {
                     val oldDist = segDist(i - 1, i) + if (j + 1 < n) segDist(j, j + 1) else 0.0
                     val newDist = segDist(i - 1, j) + if (j + 1 < n) segDist(i, j + 1) else 0.0
-                    if (newDist < oldDist - 0.01) {
+                    if (newDist < oldDist - AppConfig.Routing.TWO_OPT_IMPROVEMENT_EPSILON) {
                         // Reverse the segment between i and j
                         var left = i; var right = j
                         while (left < right) {

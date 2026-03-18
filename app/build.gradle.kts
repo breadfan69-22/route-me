@@ -63,6 +63,12 @@ detekt {
     config.setFrom("$rootDir/detekt.yml")
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.incremental", "true")
+    arg("room.generateKotlin", "true")
+}
+
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")
     implementation("androidx.core:core-ktx:1.13.1")

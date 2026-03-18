@@ -115,7 +115,7 @@ class RoutingEngineTest {
         longitude: Double? = -85.5640,
         cuSpringPending: Boolean = false,
         cuFallPending: Boolean = false,
-        records: MutableList<ServiceRecord> = mutableListOf()
+        records: List<ServiceRecord> = emptyList()
     ): Client {
         return Client(
             id = id,
