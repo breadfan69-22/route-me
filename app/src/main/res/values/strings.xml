@@ -86,7 +86,8 @@
 
     <!-- Dialog -->
     <string name="dialog_sheets_title">Google Sheets Setup</string>
-    <string name="dialog_sheets_message">Read URL: paste any Google Sheets link (share with \"Anyone with link\")\nWrite URL: Apps Script web app URL</string>
+    <string name="dialog_sheets_message">Choose a season sheet or enter a custom URL.</string>
+    <string name="sheet_preset_custom">Enter custom URL…</string>
     <string name="dialog_sheets_read_hint">Any Google Sheets URL (paste from browser)</string>
     <string name="dialog_sheets_write_hint">Apps Script URL (for writing back)</string>
     <string name="dialog_sync_now">Sync Now</string>

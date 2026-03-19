@@ -5,12 +5,16 @@ import android.app.DatePickerDialog
 import android.content.Context
 import android.graphics.Typeface
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 import com.google.android.material.button.MaterialButton
 import com.routeme.app.ClusterMember
 import com.routeme.app.R
+import com.routeme.app.data.PreferencesRepository
 import java.util.Calendar
 
 object DialogFactory {
@@ -338,34 +342,76 @@ object DialogFactory {
         currentWriteUrl: String,
         onSyncNow: (enteredReadUrl: String, enteredWriteUrl: String) -> Unit
     ) {
+        val presets = PreferencesRepository.SHEET_PRESETS
+        val customLabel = context.getString(R.string.sheet_preset_custom)
+        val spinnerItems = presets.map { it.label } + customLabel
+
+        // Determine initial selection
+        val matchedPreset = PreferencesRepository.findMatchingPreset(currentReadUrl)
+        val initialIndex = if (matchedPreset != null) presets.indexOf(matchedPreset) else spinnerItems.lastIndex
+
         val layout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 24, 48, 0)
         }
 
+        val spinner = Spinner(context).apply {
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, spinnerItems)
+        }
+        layout.addView(spinner)
+
         val syncInput = EditText(context).apply {
             hint = context.getString(R.string.dialog_sheets_read_hint)
-            if (currentReadUrl.isNotBlank()) setText(currentReadUrl)
             textSize = 13f
         }
         layout.addView(syncInput)
 
         val writeInput = EditText(context).apply {
             hint = context.getString(R.string.dialog_sheets_write_hint)
-            if (currentWriteUrl.isNotBlank()) setText(currentWriteUrl)
             textSize = 13f
         }
         layout.addView(writeInput)
+
+        fun setCustomFieldsVisible(visible: Boolean) {
+            val vis = if (visible) View.VISIBLE else View.GONE
+            syncInput.visibility = vis
+            writeInput.visibility = vis
+        }
+
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (pos < presets.size) {
+                    setCustomFieldsVisible(false)
+                } else {
+                    setCustomFieldsVisible(true)
+                    if (syncInput.text.isBlank() && matchedPreset == null && currentReadUrl.isNotBlank()) {
+                        syncInput.setText(currentReadUrl)
+                    }
+                    if (writeInput.text.isBlank() && matchedPreset == null && currentWriteUrl.isNotBlank()) {
+                        writeInput.setText(currentWriteUrl)
+                    }
+                }
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        spinner.setSelection(initialIndex)
 
         AlertDialog.Builder(context)
             .setTitle(R.string.dialog_sheets_title)
             .setMessage(R.string.dialog_sheets_message)
             .setView(layout)
             .setPositiveButton(R.string.dialog_sync_now) { _, _ ->
-                onSyncNow(
-                    syncInput.text.toString().trim(),
-                    writeInput.text.toString().trim()
-                )
+                val pos = spinner.selectedItemPosition
+                if (pos < presets.size) {
+                    val selected = presets[pos]
+                    onSyncNow(selected.readUrl, selected.writeUrl)
+                } else {
+                    onSyncNow(
+                        syncInput.text.toString().trim(),
+                        writeInput.text.toString().trim()
+                    )
+                }
             }
             .setNegativeButton(R.string.btn_cancel, null)
             .show()

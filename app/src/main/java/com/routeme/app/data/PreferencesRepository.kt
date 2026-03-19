@@ -11,11 +11,7 @@ class PreferencesRepository(context: Context) {
     var sheetsReadUrl: String
         get() {
             val configured = prefs.getString(PREF_SHEETS_READ_URL, null)?.trim().orEmpty()
-            return when {
-                configured.isBlank() -> DEFAULT_READ_URL
-                configured.contains(LEGACY_2025_SHEET_ID) -> DEFAULT_READ_URL
-                else -> configured
-            }
+            return if (configured.isBlank()) DEFAULT_READ_URL else configured
         }
         set(value) = prefs.edit().putString(PREF_SHEETS_READ_URL, value).apply()
 
@@ -119,8 +115,7 @@ class PreferencesRepository(context: Context) {
         private const val PREFS_NAME = "routeme_prefs"
         private const val PREF_SHEETS_READ_URL = "sheets_read_url"
         private const val PREF_SHEETS_WRITE_URL = "sheets_write_url"
-        private const val LEGACY_2025_SHEET_ID = "1Oi7YpqdKwIqQKrl_StnOzCBCPDror28lS3a-gKxRx6g"
-        private const val DEFAULT_READ_URL = "https://docs.google.com/spreadsheets/d/1yHe6BUUVBV-5PEEXwZolPK-d-kW6x6ZGrcnDfhR-zOY/edit"
+        private const val DEFAULT_READ_URL = "https://docs.google.com/spreadsheets/d/1yHe6BUUVBV-5PEEXwZolPK-d-kW6x6ZGrcnDfhR-zOY/edit?usp=sharing"
         private const val DEFAULT_WRITE_URL = "https://script.google.com/macros/s/AKfycbwqJDDeurHB6fW7wiAbm6YvtLY3nsTJHenlj0rIfBStWSGcinIxWOOKh8oEqdvTquT_/exec"
         private const val PREF_NON_CLIENT_LOGGING = "non_client_logging_enabled"
         private const val PREF_NON_CLIENT_THRESHOLD = "non_client_stop_threshold_min"
@@ -128,6 +123,29 @@ class PreferencesRepository(context: Context) {
         private const val PREF_SELECTED_STEPS_DATE = "selected_steps_date"
         private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
         private const val PREF_ACTIVE_DESTINATION = "active_destination"
+
+        data class SheetPreset(val label: String, val readUrl: String, val writeUrl: String)
+
+        val SHEET_PRESETS = listOf(
+            SheetPreset(
+                label = "2026 Season",
+                readUrl = "https://docs.google.com/spreadsheets/d/1yHe6BUUVBV-5PEEXwZolPK-d-kW6x6ZGrcnDfhR-zOY/edit?usp=sharing",
+                writeUrl = "https://script.google.com/macros/s/AKfycbwqJDDeurHB6fW7wiAbm6YvtLY3nsTJHenlj0rIfBStWSGcinIxWOOKh8oEqdvTquT_/exec"
+            ),
+            SheetPreset(
+                label = "2025 Season",
+                readUrl = "https://docs.google.com/spreadsheets/d/1Oi7YpqdKwIqQKrl_StnOzCBCPDror28lS3a-gKxRx6g/edit?usp=sharing",
+                writeUrl = "https://script.google.com/macros/s/AKfycbyZ3KBiS1eS48eBdNhPDnGz8wZNFryvPYFRVKO-Z2LV6DBhxPFthdzKXTFAb-jrE2oK/exec"
+            )
+        )
+
+        /** Match a read URL to a preset by spreadsheet ID substring. */
+        fun findMatchingPreset(readUrl: String): SheetPreset? {
+            return SHEET_PRESETS.firstOrNull { preset ->
+                val id = preset.readUrl.substringAfter("/d/").substringBefore("/")
+                readUrl.contains(id)
+            }
+        }
         const val DEFAULT_NON_CLIENT_THRESHOLD = 5
     }
 }
