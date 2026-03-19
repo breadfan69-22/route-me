@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.Log
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
+import com.routeme.app.data.WeatherRepository
 import com.routeme.app.tracking.ArrivalDispatchCoordinator
 import com.routeme.app.tracking.DestinationArrivalCoordinator
 import com.routeme.app.tracking.DestinationDwellDetector
@@ -66,6 +67,9 @@ class LocationTrackingService : Service(), KoinComponent {
         const val EXTRA_CLUSTER_CLIENT_IDS = "cluster_client_ids"
         const val EXTRA_CLUSTER_MINUTES = "cluster_minutes"
         const val EXTRA_CLUSTER_ARRIVED_AT = "cluster_arrived_at"
+        const val EXTRA_CLUSTER_WEATHER_TEMP_F = "cluster_weather_temp_f"
+        const val EXTRA_CLUSTER_WEATHER_WIND_MPH = "cluster_weather_wind_mph"
+        const val EXTRA_CLUSTER_WEATHER_DESC = "cluster_weather_desc"
     }
 
     private var locationDispatcher: LocationDispatcher? = null
@@ -85,6 +89,7 @@ class LocationTrackingService : Service(), KoinComponent {
     private val trackingEventBus: TrackingEventBus by inject()
     private val preferencesRepository: PreferencesRepository by inject()
     private val nonClientStopDao: NonClientStopDao by inject()
+    private val weatherRepository: WeatherRepository by inject()
 
     private val trackingNotifier by lazy {
         LocationTrackingNotifier(
@@ -114,7 +119,7 @@ class LocationTrackingService : Service(), KoinComponent {
                 android.os.Handler(mainLooper).post { block() }
             },
             emitEvent = { event ->
-                trackingEventBus.tryEmit(event)
+                onTrackingEventFromArrivalCoordinator(event)
             }
         )
     }
@@ -234,6 +239,31 @@ class LocationTrackingService : Service(), KoinComponent {
             }
         )
         locationDispatcher?.startLocationUpdates()
+    }
+
+    private fun onTrackingEventFromArrivalCoordinator(event: TrackingEvent) {
+        trackingEventBus.tryEmit(event)
+
+        if (event is TrackingEvent.ClientArrival) {
+            val lat = event.location.latitude
+            val lng = event.location.longitude
+            val clientId = event.client.id
+            val arrivedAtMillis = event.arrivedAtMillis
+
+            serviceScope.launch {
+                val snapshot = runCatching {
+                    weatherRepository.fetchCurrentSnapshot(lat, lng)
+                }.getOrNull()
+
+                arrivalDispatchCoordinator.recordArrivalWeather(
+                    clientId = clientId,
+                    arrivedAtMillis = arrivedAtMillis,
+                    tempF = snapshot?.tempF,
+                    windMph = snapshot?.windMph,
+                    desc = snapshot?.description
+                )
+            }
+        }
     }
 
     /**

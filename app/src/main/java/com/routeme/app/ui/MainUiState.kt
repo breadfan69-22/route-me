@@ -21,6 +21,9 @@ data class MainUiState(
     val arrivalStartedAtMillis: Long? = null,
     val arrivalLat: Double? = null,
     val arrivalLng: Double? = null,
+    val arrivalWeatherTempF: Int? = null,
+    val arrivalWeatherWindMph: Int? = null,
+    val arrivalWeatherDesc: String? = null,
     val selectedServiceTypes: Set<ServiceType> = setOf(ServiceType.ROUND_1),
     /** Steps where every subscribed client has already been serviced. */
     val completedSteps: Set<ServiceType> = emptySet(),

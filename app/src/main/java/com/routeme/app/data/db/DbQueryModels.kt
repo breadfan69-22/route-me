@@ -31,5 +31,8 @@ data class ClientStopRow(
     val status: String,
     val serviceTypes: String,
     val cancelReason: String?,
-    val notes: String
+    val notes: String,
+    val weatherTempF: Int? = null,
+    val weatherWindMph: Int? = null,
+    val weatherDesc: String? = null
 )

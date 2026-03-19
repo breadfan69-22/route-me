@@ -846,17 +846,32 @@ class MainActivity : AppCompatActivity() {
         if (clusterClientIds != null && clusterClientIds.size >= 2) {
             val minutesArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES) ?: IntArray(clusterClientIds.size) { 5 }
             val arrivedAtArray = intent.getLongArrayExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
+            val weatherTempArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
+            val weatherWindArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
+            val weatherDescArray = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
             val location = trackingEventBus.latestLocation.value ?: getCurrentLocation()
             val now = System.currentTimeMillis()
             val members = clusterClientIds.mapIndexedNotNull { i, id ->
                 val client = clients.find { it.id == id } ?: return@mapIndexedNotNull null
                 val mins = minutesArray.getOrElse(i) { 5 }
                 val arrivedAt = arrivedAtArray?.getOrElse(i) { now - mins * 60_000L } ?: (now - mins * 60_000L)
+                val weatherTemp = weatherTempArray
+                    ?.getOrElse(i) { Int.MIN_VALUE }
+                    ?.takeUnless { it == Int.MIN_VALUE }
+                val weatherWind = weatherWindArray
+                    ?.getOrElse(i) { Int.MIN_VALUE }
+                    ?.takeUnless { it == Int.MIN_VALUE }
+                val weatherDesc = weatherDescArray
+                    ?.getOrElse(i) { "" }
+                    ?.takeIf { it.isNotBlank() }
                 ClusterMember(
                     client = client,
                     timeOnSiteMillis = mins * 60_000L,
                     arrivedAtMillis = arrivedAt,
-                    location = location ?: Location("notification")
+                    location = location ?: Location("notification"),
+                    weatherTempF = weatherTemp,
+                    weatherWindMph = weatherWind,
+                    weatherDesc = weatherDesc
                 )
             }
             if (members.size >= 2) {
@@ -865,6 +880,9 @@ class MainActivity : AppCompatActivity() {
             intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS)
             intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES)
             intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
+            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
+            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
+            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
             return
         }
     }

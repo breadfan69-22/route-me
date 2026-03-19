@@ -40,5 +40,5 @@ val appModule = module {
     factory { ServiceCompletionUseCase(get(), get(), get()) }
     factory { SyncSettingsUseCase(get(), get(), get()) }
 
-    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }

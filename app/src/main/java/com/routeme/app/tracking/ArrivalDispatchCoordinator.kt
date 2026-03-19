@@ -7,6 +7,7 @@ import com.routeme.app.Client
 import com.routeme.app.ClusterMember
 import com.routeme.app.LocationTrackingNotifier
 import com.routeme.app.TrackingEvent
+import java.util.concurrent.ConcurrentHashMap
 
 class ArrivalDispatchCoordinator(
     private val tag: String,
@@ -25,6 +26,15 @@ class ArrivalDispatchCoordinator(
     private val emitEvent: (TrackingEvent) -> Unit,
     private val logDebug: (String) -> Unit = { message -> Log.d(tag, message) }
 ) {
+    private data class ArrivalWeatherSnapshot(
+        val arrivedAtMillis: Long,
+        val tempF: Int?,
+        val windMph: Int?,
+        val desc: String?
+    )
+
+    private val arrivalWeatherByClientId = ConcurrentHashMap<String, ArrivalWeatherSnapshot>()
+
 
     fun onLocationTick(location: Location, trackedClients: List<Client>) {
         checkForClientArrival(location, trackedClients)
@@ -35,8 +45,24 @@ class ArrivalDispatchCoordinator(
         return arrivalDepartureEngine.hasActiveArrivals()
     }
 
+    fun recordArrivalWeather(
+        clientId: String,
+        arrivedAtMillis: Long,
+        tempF: Int?,
+        windMph: Int?,
+        desc: String?
+    ) {
+        arrivalWeatherByClientId[clientId] = ArrivalWeatherSnapshot(
+            arrivedAtMillis = arrivedAtMillis,
+            tempF = tempF,
+            windMph = windMph,
+            desc = desc
+        )
+    }
+
     fun reset() {
         arrivalDepartureEngine.reset()
+        arrivalWeatherByClientId.clear()
     }
 
     private fun checkForClientArrival(location: Location, trackedClients: List<Client>) {
@@ -75,15 +101,21 @@ class ArrivalDispatchCoordinator(
 
         for (clientId in clientIdsToClearArrivalNotif) {
             cancelNotification(arrivalNotifBase + clientId.hashCode())
+            arrivalWeatherByClientId.remove(clientId)
         }
 
         if (completable.size >= 2) {
             val members = completable.map { summary ->
+                val weather = arrivalWeatherByClientId[summary.client.id]
+                    ?.takeIf { it.arrivedAtMillis == summary.arrivedAtMillis }
                 ClusterMember(
                     client = summary.client,
                     timeOnSiteMillis = summary.timeOnSiteMillis,
                     arrivedAtMillis = summary.arrivedAtMillis,
-                    location = summary.location
+                    location = summary.location,
+                    weatherTempF = weather?.tempF,
+                    weatherWindMph = weather?.windMph,
+                    weatherDesc = weather?.desc
                 )
             }
             val names = members.joinToString(", ") { it.client.name }

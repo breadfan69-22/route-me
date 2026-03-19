@@ -18,6 +18,7 @@ import com.routeme.app.TrackingEventBus
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.domain.ArrivalUseCase
+import com.routeme.app.data.WeatherRepository
 import com.routeme.app.domain.DestinationQueueUseCase
 import com.routeme.app.domain.MapsExportUseCase
 import com.routeme.app.domain.RouteHistoryUseCase
@@ -51,6 +52,7 @@ class MainViewModel(
     private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
     private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue),
+    private val weatherRepository: WeatherRepository? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
     companion object {
@@ -63,6 +65,9 @@ class MainViewModel(
         private const val KEY_ARRIVAL_STARTED_AT = "arrival_started_at"
         private const val KEY_ARRIVAL_LAT = "arrival_lat"
         private const val KEY_ARRIVAL_LNG = "arrival_lng"
+        private const val KEY_ARRIVAL_WEATHER_TEMP_F = "arrival_weather_temp_f"
+        private const val KEY_ARRIVAL_WEATHER_WIND_MPH = "arrival_weather_wind_mph"
+        private const val KEY_ARRIVAL_WEATHER_DESC = "arrival_weather_desc"
         private const val KEY_IS_TRACKING = "is_tracking"
         private const val KEY_DEST_QUEUE = "dest_queue"
         private const val KEY_DEST_INDEX = "dest_index"
@@ -112,6 +117,9 @@ class MainViewModel(
             arrivalStartedAtMillis = savedStateHandle.get<Long?>(KEY_ARRIVAL_STARTED_AT),
             arrivalLat = savedStateHandle.get<Double?>(KEY_ARRIVAL_LAT),
             arrivalLng = savedStateHandle.get<Double?>(KEY_ARRIVAL_LNG),
+            arrivalWeatherTempF = savedStateHandle.get<Int?>(KEY_ARRIVAL_WEATHER_TEMP_F),
+            arrivalWeatherWindMph = savedStateHandle.get<Int?>(KEY_ARRIVAL_WEATHER_WIND_MPH),
+            arrivalWeatherDesc = savedStateHandle.get<String?>(KEY_ARRIVAL_WEATHER_DESC),
             isTracking = savedStateHandle.get<Boolean>(KEY_IS_TRACKING) ?: false,
             destinationQueue = savedStateHandle.get<String>(KEY_DEST_QUEUE)
                 ?.takeIf { it.isNotBlank() }
@@ -231,7 +239,10 @@ class MainViewModel(
                                     selectedClientDetails = "",
                                     arrivalStartedAtMillis = null,
                                     arrivalLat = null,
-                                    arrivalLng = null
+                                    arrivalLng = null,
+                                    arrivalWeatherTempF = null,
+                                    arrivalWeatherWindMph = null,
+                                    arrivalWeatherDesc = null
                                 )
                             }
                             persistCriticalState(_uiState.value)
@@ -588,7 +599,10 @@ class MainViewModel(
                 selectedClientDetails = routingEngine.buildClientDetails(suggestion.client),
                 arrivalStartedAtMillis = null,
                 arrivalLat = null,
-                arrivalLng = null
+                arrivalLng = null,
+                arrivalWeatherTempF = null,
+                arrivalWeatherWindMph = null,
+                arrivalWeatherDesc = null
             )
         }
         persistCriticalState(_uiState.value)
@@ -617,7 +631,10 @@ class MainViewModel(
                 selectedClientDetails = result.selectedClientDetails,
                 arrivalStartedAtMillis = null,
                 arrivalLat = null,
-                arrivalLng = null
+                arrivalLng = null,
+                arrivalWeatherTempF = null,
+                arrivalWeatherWindMph = null,
+                arrivalWeatherDesc = null
             )
         }
         persistCriticalState(_uiState.value)
@@ -724,12 +741,29 @@ class MainViewModel(
                             longitude = lng
                         }
                     }
-                }
+                },
+                weatherTempF = state.arrivalWeatherTempF,
+                weatherWindMph = state.arrivalWeatherWindMph,
+                weatherDesc = state.arrivalWeatherDesc
             )
         }
 
-        _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
+        _uiState.update {
+            it.copy(
+                arrivalStartedAtMillis = null,
+                arrivalLat = null,
+                arrivalLng = null,
+                arrivalWeatherTempF = null,
+                arrivalWeatherWindMph = null,
+                arrivalWeatherDesc = null
+            )
+        }
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
+        savedStateHandle[KEY_ARRIVAL_LAT] = null
+        savedStateHandle[KEY_ARRIVAL_LNG] = null
+        savedStateHandle[KEY_ARRIVAL_WEATHER_TEMP_F] = null
+        savedStateHandle[KEY_ARRIVAL_WEATHER_WIND_MPH] = null
+        savedStateHandle[KEY_ARRIVAL_WEATHER_DESC] = null
         arrivalUseCase.resetStaleArrivalSuppression()
         viewModelScope.launch { setStatus(statusMessage) }
     }
@@ -781,11 +815,28 @@ class MainViewModel(
                                     longitude = lng
                                 }
                             }
-                        }
+                        },
+                        weatherTempF = state.arrivalWeatherTempF,
+                        weatherWindMph = state.arrivalWeatherWindMph,
+                        weatherDesc = state.arrivalWeatherDesc
                     )
                 }
-                _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
+                _uiState.update {
+                    it.copy(
+                        arrivalStartedAtMillis = null,
+                        arrivalLat = null,
+                        arrivalLng = null,
+                        arrivalWeatherTempF = null,
+                        arrivalWeatherWindMph = null,
+                        arrivalWeatherDesc = null
+                    )
+                }
                 savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
+                savedStateHandle[KEY_ARRIVAL_LAT] = null
+                savedStateHandle[KEY_ARRIVAL_LNG] = null
+                savedStateHandle[KEY_ARRIVAL_WEATHER_TEMP_F] = null
+                savedStateHandle[KEY_ARRIVAL_WEATHER_WIND_MPH] = null
+                savedStateHandle[KEY_ARRIVAL_WEATHER_DESC] = null
                 viewModelScope.launch { setStatus(result.statusMessage) }
                 result.deferredAction?.invoke()
             }
@@ -801,7 +852,10 @@ class MainViewModel(
         client: Client,
         arrivedAtMillis: Long,
         reason: String,
-        location: Location? = null
+        location: Location? = null,
+        weatherTempF: Int? = null,
+        weatherWindMph: Int? = null,
+        weatherDesc: String? = null
     ) {
         viewModelScope.launch {
             val endedAtMillis = System.currentTimeMillis()
@@ -818,7 +872,10 @@ class MainViewModel(
                     status = ClientStopStatus.CANCELLED,
                     cancelReason = reason,
                     lat = location?.latitude,
-                    lng = location?.longitude
+                    lng = location?.longitude,
+                    weatherTempF = weatherTempF,
+                    weatherWindMph = weatherWindMph,
+                    weatherDesc = weatherDesc
                 )
             }
         }
@@ -845,14 +902,50 @@ class MainViewModel(
                 selectedClientDetails = arrival.selectedClientDetails,
                 arrivalStartedAtMillis = arrival.arrivalStartedAtMillis,
                 arrivalLat = arrival.arrivalLat,
-                arrivalLng = arrival.arrivalLng
+                arrivalLng = arrival.arrivalLng,
+                arrivalWeatherTempF = null,
+                arrivalWeatherWindMph = null,
+                arrivalWeatherDesc = null
             )
         }
         persistCriticalState(_uiState.value)
+        captureArrivalWeatherSnapshot(arrival)
         viewModelScope.launch {
             setStatus(
                 "Arrival started for ${arrival.selectedClient.name} at ${DateUtils.formatTimestamp(arrival.arrivalStartedAtMillis)}"
             )
+        }
+    }
+
+    private fun captureArrivalWeatherSnapshot(arrival: ArrivalUseCase.MarkArrivalResult) {
+        val weatherRepo = weatherRepository ?: return
+        val clientId = arrival.selectedClient.id
+        val startedAt = arrival.arrivalStartedAtMillis
+
+        viewModelScope.launch {
+            val snapshot = withContext(ioDispatcher) {
+                runCatching {
+                    weatherRepo.fetchCurrentSnapshot(arrival.arrivalLat, arrival.arrivalLng)
+                }.getOrNull()
+            } ?: return@launch
+
+            var updated = false
+            _uiState.update { state ->
+                if (state.selectedClient?.id != clientId || state.arrivalStartedAtMillis != startedAt) {
+                    state
+                } else {
+                    updated = true
+                    state.copy(
+                        arrivalWeatherTempF = snapshot.tempF,
+                        arrivalWeatherWindMph = snapshot.windMph,
+                        arrivalWeatherDesc = snapshot.description
+                    )
+                }
+            }
+
+            if (updated) {
+                persistCriticalState(_uiState.value)
+            }
         }
     }
 
@@ -903,6 +996,9 @@ class MainViewModel(
                         arrivalStartedAtMillis = state.arrivalStartedAtMillis,
                         arrivalLat = state.arrivalLat,
                         arrivalLng = state.arrivalLng,
+                        weatherTempF = state.arrivalWeatherTempF,
+                        weatherWindMph = state.arrivalWeatherWindMph,
+                        weatherDesc = state.arrivalWeatherDesc,
                         selectedSuggestionEligibleSteps = selectedSuggestionEligibleSteps,
                         selectedServiceTypes = state.selectedServiceTypes,
                         currentLocation = currentLocation?.let {
@@ -926,7 +1022,10 @@ class MainViewModel(
                             selectedClientDetails = routingEngine.buildClientDetails(result.selectedClient),
                             arrivalStartedAtMillis = null,
                             arrivalLat = null,
-                            arrivalLng = null
+                            arrivalLng = null,
+                            arrivalWeatherTempF = null,
+                            arrivalWeatherWindMph = null,
+                            arrivalWeatherDesc = null
                         )
                     }
                     persistCriticalState(_uiState.value)
@@ -981,7 +1080,10 @@ class MainViewModel(
                                 location = ServiceCompletionUseCase.GeoPoint(
                                     member.location.latitude,
                                     member.location.longitude
-                                )
+                                ),
+                                weatherTempF = member.weatherTempF,
+                                weatherWindMph = member.weatherWindMph,
+                                weatherDesc = member.weatherDesc
                             )
                         }
                     )
@@ -1003,7 +1105,10 @@ class MainViewModel(
                             completedSteps = computeCompletedSteps(result.updatedClients),
                             arrivalStartedAtMillis = null,
                             arrivalLat = null,
-                            arrivalLng = null
+                            arrivalLng = null,
+                            arrivalWeatherTempF = null,
+                            arrivalWeatherWindMph = null,
+                            arrivalWeatherDesc = null
                         )
                     }
                     persistCriticalState(_uiState.value)
@@ -1387,6 +1492,9 @@ class MainViewModel(
             val endStr = DateUtils.formatTime(row.endedAtMillis)
             sb.appendLine("${index + 1}. ${row.clientName}")
             sb.appendLine("   ${formatClientStopDetail(row)}")
+            formatHistoryWeatherDetail(row)?.let { weatherLine ->
+                sb.appendLine("   $weatherLine")
+            }
             sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
             if (row.notes.isNotBlank()) {
                 sb.appendLine("   \uD83D\uDCDD ${row.notes}")
@@ -1411,6 +1519,15 @@ class MainViewModel(
                 if (reason.isBlank()) "❌ Cancelled" else "❌ Cancelled — $reason"
             }
         }
+    }
+
+    private fun formatHistoryWeatherDetail(row: ClientStopRow): String? {
+        val parts = mutableListOf<String>()
+        row.weatherTempF?.let { parts += "${it}°F" }
+        row.weatherWindMph?.let { parts += "Wind ${it} mph" }
+        row.weatherDesc?.takeIf { it.isNotBlank() }?.let { parts += it }
+        if (parts.isEmpty()) return null
+        return "🌦️ ${parts.joinToString("  •  ")}"
     }
 
     private fun formatServiceTypes(serviceTypes: String): String {
@@ -1573,6 +1690,9 @@ class MainViewModel(
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = state.arrivalStartedAtMillis
         savedStateHandle[KEY_ARRIVAL_LAT] = state.arrivalLat
         savedStateHandle[KEY_ARRIVAL_LNG] = state.arrivalLng
+        savedStateHandle[KEY_ARRIVAL_WEATHER_TEMP_F] = state.arrivalWeatherTempF
+        savedStateHandle[KEY_ARRIVAL_WEATHER_WIND_MPH] = state.arrivalWeatherWindMph
+        savedStateHandle[KEY_ARRIVAL_WEATHER_DESC] = state.arrivalWeatherDesc
         savedStateHandle[KEY_IS_TRACKING] = state.isTracking
         // Destination queue
         savedStateHandle[KEY_DEST_QUEUE] = state.destinationQueue.joinToString("|") {

@@ -25,7 +25,10 @@ class ServiceCompletionUseCase(
         val clientId: String,
         val clientName: String,
         val arrivedAtMillis: Long,
-        val location: GeoPoint
+        val location: GeoPoint,
+        val weatherTempF: Int? = null,
+        val weatherWindMph: Int? = null,
+        val weatherDesc: String? = null
     )
 
     data class ConfirmSelectedRequest(
@@ -34,6 +37,9 @@ class ServiceCompletionUseCase(
         val arrivalStartedAtMillis: Long?,
         val arrivalLat: Double?,
         val arrivalLng: Double?,
+        val weatherTempF: Int? = null,
+        val weatherWindMph: Int? = null,
+        val weatherDesc: String? = null,
         val selectedSuggestionEligibleSteps: Set<ServiceType>,
         val selectedServiceTypes: Set<ServiceType>,
         val currentLocation: GeoPoint?,
@@ -160,9 +166,6 @@ class ServiceCompletionUseCase(
 
         val stopLat = request.arrivalLat ?: request.currentLocation?.latitude
         val stopLng = request.arrivalLng ?: request.currentLocation?.longitude
-        val snapshot = if (stopLat != null && stopLng != null) {
-            runCatching { weatherRepository?.fetchCurrentSnapshot(stopLat, stopLng) }.getOrNull()
-        } else null
 
         runCatching {
             clientRepository.saveClientStopEvent(
@@ -176,9 +179,9 @@ class ServiceCompletionUseCase(
                 notes = trimmedNotes,
                 lat = stopLat,
                 lng = stopLng,
-                weatherTempF = snapshot?.tempF,
-                weatherWindMph = snapshot?.windMph,
-                weatherDesc = snapshot?.description
+                weatherTempF = request.weatherTempF,
+                weatherWindMph = request.weatherWindMph,
+                weatherDesc = request.weatherDesc
             )
         }
 
@@ -271,10 +274,6 @@ class ServiceCompletionUseCase(
             if (savedAnyRecord) {
                 val mLat = member.location.latitude
                 val mLng = member.location.longitude
-                val snapshot = runCatching {
-                    weatherRepository?.fetchCurrentSnapshot(mLat, mLng)
-                }.getOrNull()
-
                 runCatching {
                     clientRepository.saveClientStopEvent(
                         clientId = updatedClient.id,
@@ -286,9 +285,9 @@ class ServiceCompletionUseCase(
                         serviceTypes = stepsForClient,
                         lat = mLat,
                         lng = mLng,
-                        weatherTempF = snapshot?.tempF,
-                        weatherWindMph = snapshot?.windMph,
-                        weatherDesc = snapshot?.description
+                        weatherTempF = member.weatherTempF,
+                        weatherWindMph = member.weatherWindMph,
+                        weatherDesc = member.weatherDesc
                     )
                 }
             }

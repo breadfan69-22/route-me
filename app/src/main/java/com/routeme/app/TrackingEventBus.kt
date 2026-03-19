@@ -15,7 +15,10 @@ data class ClusterMember(
     val client: Client,
     val timeOnSiteMillis: Long,
     val arrivedAtMillis: Long,
-    val location: Location
+    val location: Location,
+    val weatherTempF: Int? = null,
+    val weatherWindMph: Int? = null,
+    val weatherDesc: String? = null
 )
 
 sealed interface TrackingEvent {

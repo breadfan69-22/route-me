@@ -163,6 +163,9 @@ class LocationTrackingNotifier(
         val clientIds = members.map { it.client.id }.toTypedArray()
         val minutesArray = members.map { (it.timeOnSiteMillis / 60_000).toInt() }.toIntArray()
         val arrivedAtArray = members.map { it.arrivedAtMillis }.toLongArray()
+        val weatherTempArray = members.map { it.weatherTempF ?: Int.MIN_VALUE }.toIntArray()
+        val weatherWindArray = members.map { it.weatherWindMph ?: Int.MIN_VALUE }.toIntArray()
+        val weatherDescArray = members.map { it.weatherDesc.orEmpty() }.toTypedArray()
         val names = members.joinToString(", ") { it.client.name }
 
         members.forEach { member ->
@@ -174,6 +177,9 @@ class LocationTrackingNotifier(
             putExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS, clientIds)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES, minutesArray)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT, arrivedAtArray)
+            putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F, weatherTempArray)
+            putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH, weatherWindArray)
+            putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC, weatherDescArray)
         }
         val pendingIntent = PendingIntent.getActivity(
             context, requestCode, openIntent,
