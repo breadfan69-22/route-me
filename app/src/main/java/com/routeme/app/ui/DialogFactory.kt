@@ -261,8 +261,7 @@ object DialogFactory {
         val checked = BooleanArray(members.size) { true }
 
         AlertDialog.Builder(context)
-            .setTitle(context.getString(R.string.dialog_cluster_title))
-            .setMessage(context.getString(R.string.dialog_cluster_message, members.size))
+            .setTitle(context.getString(R.string.dialog_cluster_title, members.size))
             .setMultiChoiceItems(names, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
