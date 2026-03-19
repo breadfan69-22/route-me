@@ -158,4 +158,16 @@
     <string name="status_errands_enabled">Errands Mode enabled</string>
     <string name="status_errands_disabled">Errands Mode disabled</string>
     <string name="status_errands_no_destinations">Add destinations first</string>
+
+    <!-- Sync Sheet Activity -->
+    <string name="sync_sheet_save">Save</string>
+
+    <!-- Step Picker Bottom Sheet -->
+    <string name="step_picker_title">Select Step(s)</string>
+    <string name="step_picker_done">Done</string>
+    <string name="step_picker_chip_3g">3+G</string>
+    <string name="step_picker_chip_incidental">I</string>
+
+    <!-- Destinations Activity — input row -->
+    <string name="dest_add_label">Add</string>
 </resources>

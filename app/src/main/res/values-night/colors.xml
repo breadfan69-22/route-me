@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Neumorphic tile tokens (dark mode) -->
+    <color name="neumorph_surface">#1E211E</color>
+    <color name="neumorph_shadow_dark">#0D0F0D</color>
+    <color name="neumorph_shadow_light">#2E332E</color>
+</resources>
