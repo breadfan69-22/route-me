@@ -120,8 +120,7 @@
     <!-- Cluster completion -->
     <string name="notif_cluster_title">Mark all %d complete?</string>
     <string name="notif_cluster_text">Finished cluster: %s</string>
-    <string name="dialog_cluster_title">Mark cluster complete?</string>
-    <string name="dialog_cluster_message">You serviced %d nearby properties.\nUncheck any you didn\u2019t do:</string>
+    <string name="dialog_cluster_title">Mark %d nearby properties complete? Uncheck any you didn\u2019t do:</string>
     <string name="dialog_cluster_confirm">Mark Selected Complete</string>
     <string name="dialog_cluster_cancel">Not yet</string>
 

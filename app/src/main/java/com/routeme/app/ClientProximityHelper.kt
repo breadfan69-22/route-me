@@ -6,14 +6,24 @@ import java.util.Locale
 object ClientProximityHelper {
 
     /**
-     * Extracts the street name from a standard US address string, lower-cased.
-     * e.g. "123 Oak Ave, Anytown, ST" → "oak ave"
+     * Extracts the street name from a standard US address string, lower-cased,
+     * with common road-type suffixes stripped so that e.g. "High Pointe Cir" and
+     * "High Pointe" (same physical cul-de-sac, inconsistent suffix in client data)
+     * compare as equal.
+     * e.g. "123 Oak Ave, Anytown, ST" → "oak"
+     *      "6275 High Pointe Cir, Portage" → "high pointe"
+     *      "6290 High Pointe, Portage"    → "high pointe"
      * Returns null if the address is blank or no street portion can be parsed.
      */
     fun extractStreetName(address: String): String? {
         val streetPortion = address.trim().substringBefore(',').trim()
         val withoutNumber = streetPortion.replaceFirst(Regex("""^\d+[A-Za-z]?\s+"""), "")
-        return withoutNumber.lowercase(Locale.getDefault()).ifBlank { null }
+        val lower = withoutNumber.lowercase(Locale.getDefault()).trimEnd()
+        val withoutSuffix = lower.replace(
+            Regex("""\s+(ave|avenue|blvd|boulevard|cir|circle|ct|court|cr|cres|crescent|dr|drive|expy|expressway|fwy|freeway|hwy|highway|ln|lane|pkwy|parkway|pl|place|rd|road|sq|square|st|street|ter|terrace|trl|trail|way)$"""),
+            ""
+        )
+        return withoutSuffix.ifBlank { null }
     }
 
     private val defaultDistanceCalculator: (Double, Double, Double, Double) -> Float = { fromLat, fromLng, toLat, toLng ->
