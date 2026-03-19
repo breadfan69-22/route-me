@@ -112,4 +112,51 @@ object DistanceMatrixHelper {
             clients.map { DrivingInfo(it.id, null, null, null, null) }
         }
     }
+
+    /**
+     * Fetches driving distance in miles between two coordinate pairs.
+     * Returns null if the API key is blank, the request fails, or no route exists.
+     *
+     * Must be called on a background thread.
+     */
+    fun fetchDrivingDistanceMiles(
+        fromLat: Double,
+        fromLng: Double,
+        toLat: Double,
+        toLng: Double
+    ): Double? {
+        if (apiKey.isBlank()) return null
+
+        val origin = "$fromLat,$fromLng"
+        val destination = "$toLat,$toLng"
+        val url = "$BASE_URL?origins=${URLEncoder.encode(origin, "UTF-8")}" +
+            "&destinations=${URLEncoder.encode(destination, "UTF-8")}" +
+            "&units=imperial" +
+            "&key=$apiKey"
+
+        return try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 5_000
+            connection.readTimeout = 5_000
+
+            val response = connection.inputStream.bufferedReader().readText()
+            connection.disconnect()
+
+            val json = JSONObject(response)
+            if (json.getString("status") != "OK") return null
+
+            val element = json.getJSONArray("rows")
+                .getJSONObject(0)
+                .getJSONArray("elements")
+                .getJSONObject(0)
+
+            if (element.getString("status") != "OK") return null
+
+            val distanceMeters = element.getJSONObject("distance").getInt("value")
+            distanceMeters / 1609.344  // meters to miles
+        } catch (e: Exception) {
+            Log.e(TAG, "Pair driving distance request failed: ${e.message}")
+            null
+        }
+    }
 }

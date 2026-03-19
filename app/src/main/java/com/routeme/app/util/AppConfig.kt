@@ -129,6 +129,9 @@ object AppConfig {
         const val CLUSTER_RADIUS_MILES = 0.078   // ~125 m (~410 ft)
         // Cluster bonus requires BOTH proximity AND same street name.
         const val CLUSTER_NEIGHBOR_BONUS = 80.0
+        // Driving distance ceiling: if a cluster pair exceeds this, the cluster
+        // bonus is revoked (river/highway barrier makes them not truly adjacent).
+        const val CLUSTER_MAX_DRIVING_MILES = 0.25
         // Applied when a candidate shares a street name with the last-picked stop,
         // even if outside cluster radius. Breaks ties between near-equal distances.
         const val SAME_STREET_BONUS = 20.0

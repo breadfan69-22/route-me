@@ -33,7 +33,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainViewModel(
     private val clientRepository: ClientRepository,
@@ -503,6 +505,12 @@ class MainViewModel(
         if (checkAndPromptStaleArrival { suggestNextClients(currentLocation) }) return
         viewModelScope.launch {
             val state = _uiState.value
+
+            // Pre-verify driving distances for cluster-candidate pairs on IO.
+            withContext(Dispatchers.IO) {
+                routingEngine.precomputeClusterDrivingDistances(state.clients)
+            }
+
             val result = suggestionUseCase.suggestNextClients(
                 clients = state.clients,
                 selectedServiceTypes = state.selectedServiceTypes,

@@ -9,6 +9,7 @@ import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
+import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
@@ -20,6 +21,46 @@ class RoutingEngine {
         val suggestion: ClientSuggestion,
         val score: Double
     )
+
+    /**
+     * Cache of verified driving distances for cluster-candidate pairs.
+     * Key = sorted pair of client IDs. Value = driving distance in miles, or null if unknown.
+     * Populated by [precomputeClusterDrivingDistances] before [rankClients].
+     */
+    private var clusterDrivingCache: Map<Pair<String, String>, Double?> = emptyMap()
+
+    /**
+     * Identifies all client pairs within haversine cluster radius that share a
+     * street name, then fetches their driving distances from the Distance Matrix API.
+     *
+     * Must be called on a background thread (IO dispatcher).
+     * Results are cached and used by [orderRoute] to gate the cluster bonus.
+     */
+    fun precomputeClusterDrivingDistances(clients: List<Client>) {
+        val geocoded = clients.filter { it.latitude != null && it.longitude != null }
+        val cache = mutableMapOf<Pair<String, String>, Double?>()
+
+        for (i in geocoded.indices) {
+            val a = geocoded[i]
+            val aStreet = ClientProximityHelper.extractStreetName(a.address) ?: continue
+            for (j in i + 1 until geocoded.size) {
+                val b = geocoded[j]
+                val bStreet = ClientProximityHelper.extractStreetName(b.address) ?: continue
+                if (aStreet != bStreet) continue
+
+                val haversine = distanceMilesBetween(a.latitude!!, a.longitude!!, b.latitude!!, b.longitude!!)
+                if (haversine > AppConfig.Routing.CLUSTER_RADIUS_MILES) continue
+
+                val key = if (a.id < b.id) Pair(a.id, b.id) else Pair(b.id, a.id)
+                if (key in cache) continue
+
+                cache[key] = DistanceMatrixHelper.fetchDrivingDistanceMiles(
+                    a.latitude, a.longitude, b.latitude, b.longitude
+                )
+            }
+        }
+        clusterDrivingCache = cache
+    }
 
     fun rankClients(
         clients: List<Client>,
@@ -147,9 +188,22 @@ class RoutingEngine {
                 val hopPenalty = hopMiles * AppConfig.Routing.ORDER_HOP_PENALTY_PER_MILE
                 val candidateStreet = ClientProximityHelper.extractStreetName(candidate.suggestion.client.address)
                 // Cluster bonus: within proximity radius AND same street (or street unavailable).
-                val clusterBonus = if (hopMiles <= AppConfig.Routing.CLUSTER_RADIUS_MILES &&
+                val clusterBonusRaw = if (hopMiles <= AppConfig.Routing.CLUSTER_RADIUS_MILES &&
                     (currentStreet == null || candidateStreet == null || currentStreet == candidateStreet))
                     AppConfig.Routing.CLUSTER_NEIGHBOR_BONUS else 0.0
+                // Revoke cluster bonus if verified driving distance exceeds threshold.
+                val clusterBonus = if (clusterBonusRaw > 0.0) {
+                    val currentId = ordered.lastOrNull()?.suggestion?.client?.id
+                    val candidateId = candidate.suggestion.client.id
+                    val cacheKey = if (currentId != null && currentId < candidateId)
+                        Pair(currentId, candidateId)
+                    else if (currentId != null)
+                        Pair(candidateId, currentId)
+                    else null
+                    val drivingMiles = cacheKey?.let { clusterDrivingCache[it] }
+                    if (drivingMiles != null && drivingMiles > AppConfig.Routing.CLUSTER_MAX_DRIVING_MILES) 0.0
+                    else clusterBonusRaw
+                } else 0.0
                 // Same-street bonus: even outside cluster radius, boost same-street candidates.
                 val sameStreetBonus = if (clusterBonus == 0.0 &&
                     currentStreet != null && candidateStreet != null && currentStreet == candidateStreet)
