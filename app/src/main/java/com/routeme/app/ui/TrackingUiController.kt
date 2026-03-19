@@ -19,8 +19,8 @@ class TrackingUiController(
     private val onTrackingSessionReset: () -> Unit
 ) {
     companion object {
-        private const val REQUEST_LOCATION_PERMISSION = 102
-        private const val REQUEST_POST_NOTIFICATIONS = 103
+        const val REQUEST_LOCATION_PERMISSION = 102
+        const val REQUEST_POST_NOTIFICATIONS = 103
     }
 
     fun toggleTracking() {
@@ -32,6 +32,11 @@ class TrackingUiController(
     }
 
     fun startTracking() {
+        if (trackingEventBus.isTracking.value) {
+            viewModel.setTrackingActive(true)
+            return
+        }
+
         if (!hasFineLocationPermission()) {
             requestLocationPermissions()
             return
@@ -39,13 +44,9 @@ class TrackingUiController(
 
         maybeRequestNotificationPermission()
 
-        val intent = Intent(activity, LocationTrackingService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            activity.startForegroundService(intent)
-        } else {
-            activity.startService(intent)
-        }
+        startTrackingService()
 
+        trackingEventBus.setTrackingActive(true)
         viewModel.setTrackingActive(true)
         onTrackingSessionReset()
         viewModel.postStatus(activity.getString(R.string.status_tracking_started))
@@ -53,13 +54,30 @@ class TrackingUiController(
 
     fun stopTracking() {
         activity.stopService(Intent(activity, LocationTrackingService::class.java))
+        trackingEventBus.setTrackingActive(false)
         viewModel.setTrackingActive(false)
         onTrackingSessionReset()
         viewModel.postStatus(activity.getString(R.string.status_tracking_stopped))
     }
 
+    fun refreshTrackedClients() {
+        if (!trackingEventBus.isTracking.value && !viewModel.uiState.value.isTracking) {
+            return
+        }
+
+        startTrackingService(LocationTrackingService.ACTION_REFRESH_TRACKED_CLIENTS)
+    }
+
     fun syncTrackingState() {
         viewModel.setTrackingActive(trackingEventBus.isTracking.value)
+    }
+
+    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == REQUEST_LOCATION_PERMISSION && grantResults.isNotEmpty()) {
+            if (hasFineLocationPermission()) {
+                startTracking()
+            }
+        }
     }
 
     fun dismissNotification(notificationId: Int) {
@@ -99,6 +117,18 @@ class TrackingUiController(
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 REQUEST_POST_NOTIFICATIONS
             )
+        }
+    }
+
+    private fun startTrackingService(action: String? = null) {
+        val intent = Intent(activity, LocationTrackingService::class.java).apply {
+            this.action = action
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.startForegroundService(intent)
+        } else {
+            activity.startService(intent)
         }
     }
 }

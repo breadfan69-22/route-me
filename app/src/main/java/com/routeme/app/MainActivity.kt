@@ -265,6 +265,10 @@ class MainActivity : AppCompatActivity() {
                 showWeekSummaryDialog(event.summary)
             }
 
+            MainEvent.RefreshTrackingClients -> {
+                trackingUiController.refreshTrackedClients()
+            }
+
             MainEvent.ServiceConfirmed -> Unit
         }
     }
@@ -295,6 +299,15 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleArrivalIntent(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        trackingUiController.onRequestPermissionsResult(requestCode, grantResults)
     }
 
     override fun onResume() {

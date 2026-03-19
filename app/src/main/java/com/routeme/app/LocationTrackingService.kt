@@ -49,6 +49,7 @@ class LocationTrackingService : Service(), KoinComponent {
         private const val ARRIVAL_NOTIF_BASE = 2000
         private const val COMPLETE_NOTIF_BASE = 3000
         private const val CLUSTER_NOTIF_BASE = 4000
+        const val ACTION_REFRESH_TRACKED_CLIENTS = "com.routeme.app.action.REFRESH_TRACKED_CLIENTS"
         const val EXTRA_ARRIVAL_CLIENT_ID = "arrival_client_id"
         const val EXTRA_ARRIVAL_LAT = "arrival_lat"
         const val EXTRA_ARRIVAL_LNG = "arrival_lng"
@@ -170,6 +171,23 @@ class LocationTrackingService : Service(), KoinComponent {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REFRESH_TRACKED_CLIENTS && locationDispatcher != null) {
+            serviceScope.launch {
+                refreshTrackedClients()
+            }
+            Log.d(TAG, "Tracking clients refreshed")
+            return START_STICKY
+        }
+
+        if (locationDispatcher != null) {
+            serviceScope.launch {
+                refreshTrackedClients()
+            }
+            trackingEventBus.setTrackingActive(true)
+            Log.d(TAG, "Location tracking already running")
+            return START_STICKY
+        }
+
         val notification = trackingNotifier.buildTrackingNotification()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

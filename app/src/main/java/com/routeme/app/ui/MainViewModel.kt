@@ -246,6 +246,9 @@ class MainViewModel(
                                 )
                             }
                             persistCriticalState(_uiState.value)
+                            if (_uiState.value.isTracking) {
+                                _events.emit(MainEvent.RefreshTrackingClients)
+                            }
                             if (result.shouldAutoGeocode) {
                                 geocodeMissingClientCoordinates()
                             }
@@ -289,6 +292,9 @@ class MainViewModel(
                             )
                         }
                         persistCriticalState(_uiState.value)
+                        if (_uiState.value.isTracking) {
+                            _events.emit(MainEvent.RefreshTrackingClients)
+                        }
                     }
                 }
             } finally {

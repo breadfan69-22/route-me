@@ -45,6 +45,7 @@ data class MainUiState(
 sealed interface MainEvent {
     data class ShowSnackbar(val message: String) : MainEvent
     data class OpenMapsRoute(val uri: String) : MainEvent
+    data object RefreshTrackingClients : MainEvent
     data object ServiceConfirmed : MainEvent
     data class ShowDailySummary(val summary: String) : MainEvent
     /** Route history dialog with prev/next day navigation. */
