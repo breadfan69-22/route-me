@@ -221,6 +221,8 @@ class MainViewModel(
         viewModelScope.launch {
             setLoading(true)
             setStatus("Syncing from Google Sheets…", emitSnackbar = false)
+            var shouldEmitSyncComplete = false
+            var shouldAutoGeocode = false
             try {
                 when (val result = syncSettingsUseCase.syncFromSheets(url)) {
                     is SyncSettingsUseCase.SyncFromSheetsResult.Error -> {
@@ -252,15 +254,20 @@ class MainViewModel(
                             if (_uiState.value.isTracking) {
                                 _events.emit(MainEvent.RefreshTrackingClients)
                             }
-                            if (result.shouldAutoGeocode) {
-                                geocodeMissingClientCoordinates()
-                            }
-                            _events.emit(MainEvent.SyncComplete)
+                            shouldEmitSyncComplete = true
+                            shouldAutoGeocode = result.shouldAutoGeocode
                         }
                     }
                 }
             } finally {
                 setLoading(false)
+            }
+
+            if (shouldEmitSyncComplete) {
+                _events.emit(MainEvent.SyncComplete)
+            }
+            if (shouldAutoGeocode) {
+                geocodeMissingClientCoordinates()
             }
         }
     }
