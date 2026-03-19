@@ -166,7 +166,7 @@ class RouteHistoryUseCase(
 
     private suspend fun getClientStopsForRange(startMillis: Long, endMillis: Long): List<ClientStopRow> {
         val rows = clientRepository.getClientStops(startMillis, endMillis)
-        if (rows.isNotEmpty()) return rows
+        if (rows.isNotEmpty()) return deduplicateCancelledStops(rows)
 
         val legacyRows = clientRepository.getDailyRecords(startMillis, endMillis)
         return legacyRows.map { legacy ->
@@ -182,6 +182,21 @@ class RouteHistoryUseCase(
                 notes = legacy.notes
             )
         }
+    }
+
+    /**
+     * When two cancelled stops share the same client + arrival time (e.g. stale_discard
+     * written when the user switched clients, followed by completion_prompt_not_yet written
+     * when the GPS departure fired), only keep the one with the latest endedAtMillis —
+     * that reflects the actual on-site departure rather than the UI switch moment.
+     */
+    private fun deduplicateCancelledStops(rows: List<ClientStopRow>): List<ClientStopRow> {
+        val (cancelled, others) = rows.partition { it.status == ClientStopStatus.CANCELLED.name }
+        val deduped = cancelled
+            .groupBy { it.clientId to it.arrivedAtMillis }
+            .values
+            .map { group -> group.maxByOrNull { it.endedAtMillis }!! }
+        return (others + deduped).sortedBy { it.arrivedAtMillis ?: it.endedAtMillis }
     }
 
     /**
