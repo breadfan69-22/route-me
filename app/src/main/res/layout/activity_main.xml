@@ -59,123 +59,7 @@
                 android:textColor="?attr/colorOnTertiaryContainer"
                 android:visibility="gone" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:clipChildren="false"
-                android:orientation="horizontal">
-
-                <com.routeme.app.ui.NeumorphTileLayout
-                    android:id="@+id/tileUpcoming"
-                    android:layout_width="0dp"
-                    android:layout_height="132dp"
-                    android:layout_marginEnd="4dp"
-                    android:layout_weight="3">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:orientation="vertical"
-                        android:padding="10dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_upcoming_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-
-                            <ImageView
-                                android:id="@+id/badgeUpcoming"
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="@string/tile_upcoming_title"
-                                android:padding="4dp"
-                                android:src="@drawable/ic_more_horiz"
-                                app:tint="?attr/colorPrimary" />
-                        </LinearLayout>
-                    </LinearLayout>
-                </com.routeme.app.ui.NeumorphTileLayout>
-
-                <com.routeme.app.ui.NeumorphTileLayout
-                    android:id="@+id/tileSync"
-                    android:layout_width="0dp"
-                    android:layout_height="132dp"
-                    android:layout_marginStart="4dp"
-                    android:layout_marginEnd="4dp"
-                    android:layout_weight="2">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:orientation="vertical"
-                        android:padding="10dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_sync_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-
-                            <ImageView
-                                android:id="@+id/badgeSync"
-                                android:layout_width="28dp"
-                                android:layout_height="28dp"
-                                android:background="?attr/selectableItemBackgroundBorderless"
-                                android:contentDescription="@string/tile_sync_title"
-                                android:padding="4dp"
-                                android:src="@drawable/ic_more_horiz"
-                                app:tint="?attr/colorPrimary" />
-                        </LinearLayout>
-                    </LinearLayout>
-                </com.routeme.app.ui.NeumorphTileLayout>
-
-                <com.routeme.app.ui.NeumorphTileLayout
-                    android:id="@+id/tileStep"
-                    android:layout_width="0dp"
-                    android:layout_height="132dp"
-                    android:layout_marginStart="4dp"
-                    android:layout_weight="3">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent"
-                        android:orientation="vertical"
-                        android:padding="10dp">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/tile_step_title"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-
-                        <TextView
-                            android:id="@+id/stepLabel"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="@string/tile_step_placeholder"
-                            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
-
-                    </LinearLayout>
-                </com.routeme.app.ui.NeumorphTileLayout>
-            </LinearLayout>
-
+            <!-- Row 1: tracking + direction (most-used operational tiles) -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -302,50 +186,169 @@
                 </com.routeme.app.ui.NeumorphTileLayout>
             </LinearLayout>
 
-            <com.routeme.app.ui.NeumorphTileLayout
+            <!-- Row 2: events, sync, current step -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:clipChildren="false"
+                android:orientation="horizontal">
+
+                <com.routeme.app.ui.NeumorphTileLayout
+                    android:id="@+id/tileUpcoming"
+                    android:layout_width="0dp"
+                    android:layout_height="132dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="3">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/tile_upcoming_title"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                            <ImageView
+                                android:id="@+id/badgeUpcoming"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/tile_upcoming_title"
+                                android:padding="4dp"
+                                android:src="@drawable/ic_more_horiz"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.routeme.app.ui.NeumorphTileLayout>
+
+                <com.routeme.app.ui.NeumorphTileLayout
+                    android:id="@+id/tileSync"
+                    android:layout_width="0dp"
+                    android:layout_height="132dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="3">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/tile_sync_title"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                            <ImageView
+                                android:id="@+id/badgeSync"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/tile_sync_title"
+                                android:padding="4dp"
+                                android:src="@drawable/ic_more_horiz"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.routeme.app.ui.NeumorphTileLayout>
+
+                <com.routeme.app.ui.NeumorphTileLayout
+                    android:id="@+id/tileStep"
+                    android:layout_width="0dp"
+                    android:layout_height="132dp"
+                    android:layout_marginStart="4dp"
+                    android:layout_weight="3">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:orientation="vertical"
+                        android:padding="10dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/tile_step_title"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                        <TextView
+                            android:id="@+id/stepLabel"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="@string/tile_step_placeholder"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+                    </LinearLayout>
+                </com.routeme.app.ui.NeumorphTileLayout>
+            </LinearLayout>
+
+            <!-- Floating suggestion list — GONE when empty, appears when suggestions load -->
+            <LinearLayout
                 android:id="@+id/tileSuggested"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="8dp"
+                android:orientation="vertical"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="4dp">
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
+                    <TextView
+                        android:id="@+id/suggestionHeader"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:layout_weight="1"
+                        android:text="@string/tile_suggested_title"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
-                        <TextView
-                            android:id="@+id/suggestionHeader"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/tile_suggested_title"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
-
-                        <ImageView
-                            android:id="@+id/badgeSuggestedRefresh"
-                            android:layout_width="28dp"
-                            android:layout_height="28dp"
-                            android:background="?attr/selectableItemBackgroundBorderless"
-                            android:contentDescription="@string/tile_refresh_suggestions"
-                            android:padding="4dp"
-                            android:src="@drawable/ic_refresh"
-                            app:tint="?attr/colorPrimary" />
-                    </LinearLayout>
-
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/suggestionRecyclerView"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp" />
+                    <ImageView
+                        android:id="@+id/badgeSuggestedRefresh"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/tile_refresh_suggestions"
+                        android:padding="4dp"
+                        android:src="@drawable/ic_refresh"
+                        app:tint="?attr/colorPrimary" />
                 </LinearLayout>
-            </com.routeme.app.ui.NeumorphTileLayout>
+
+                <!-- Fixed height = ~5 slot rows visible; snap-scroll through the full list -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/suggestionRecyclerView"
+                    android:layout_width="match_parent"
+                    android:layout_height="240dp" />
+            </LinearLayout>
 
             <com.routeme.app.ui.NeumorphTileLayout
                 android:id="@+id/tileSelected"

@@ -255,6 +255,7 @@ class MainViewModel(
                             if (result.shouldAutoGeocode) {
                                 geocodeMissingClientCoordinates()
                             }
+                            _events.emit(MainEvent.SyncComplete)
                         }
                     }
                 }

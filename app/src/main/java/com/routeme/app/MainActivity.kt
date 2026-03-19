@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private var sheetsUrl: String = ""
     private val SUGGEST_LOCATION_MAX_AGE_MS = 120_000L
     private var lastObservedServiceTypes: Set<ServiceType>? = null
+    private var lastObservedClientCount: Int? = null
 
     /** Tracks which client IDs we already showed an arrival dialog for this session
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
@@ -186,6 +187,12 @@ class MainActivity : AppCompatActivity() {
                         binding.statusText.text = state.statusText
                         binding.clientDetailsText.text = state.selectedClientDetails
 
+                        val previousClientCount = lastObservedClientCount
+                        lastObservedClientCount = state.clients.size
+                        if (previousClientCount != null && previousClientCount == 0 && state.clients.isNotEmpty()) {
+                            if (state.selectedServiceTypes.isNotEmpty()) suggestNextClients()
+                        }
+
                         val previousServiceTypes = lastObservedServiceTypes
                         if (previousServiceTypes != null && previousServiceTypes != state.selectedServiceTypes) {
                             rerunSuggestionsIfVisible()
@@ -210,11 +217,11 @@ class MainActivity : AppCompatActivity() {
                                 state.destinationQueue.size
                             )
                             binding.tileSuggested.visibility = View.GONE
-                            binding.suggestionRecyclerView.visibility = View.GONE
                         } else {
                             binding.errandsBanner.visibility = View.GONE
-                            binding.tileSuggested.visibility = View.VISIBLE
-                            binding.suggestionRecyclerView.visibility = View.VISIBLE
+                            // Float the suggestion list — only visible when there are suggestions to show
+                            binding.tileSuggested.visibility =
+                                if (state.suggestions.isEmpty()) View.GONE else View.VISIBLE
                         }
                         val activeDest = state.activeDestination
                         binding.directionIcon.setImageResource(
@@ -299,6 +306,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             MainEvent.ServiceConfirmed -> Unit
+
+            MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
         }
     }
 
@@ -648,7 +657,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun rerunSuggestionsIfVisible() {
-        if (clients.isNotEmpty() && viewModel.uiState.value.suggestions.isNotEmpty()) {
+        if (clients.isNotEmpty()) {
             suggestNextClients()
         }
     }

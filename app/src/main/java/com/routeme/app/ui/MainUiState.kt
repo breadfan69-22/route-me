@@ -79,4 +79,6 @@ sealed interface MainEvent {
     ) : MainEvent
     /** Prompt the user to edit persistent notes for a client. */
     data class EditClientNotes(val clientId: String, val clientName: String, val currentNotes: String) : MainEvent
+    /** Emitted after a successful sheet sync so the UI can auto-refresh suggestions. */
+    data object SyncComplete : MainEvent
 }
