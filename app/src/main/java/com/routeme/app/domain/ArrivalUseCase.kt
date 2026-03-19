@@ -38,6 +38,7 @@ class ArrivalUseCase(
     }
 
     private var pendingActionAfterStaleResolve: (() -> Unit)? = null
+    private var staleArrivalSuppressed = false
 
     fun startArrivalForSelected(selectedClient: Client?, currentLocation: GeoPoint?): StartArrivalResult {
         if (selectedClient == null) {
@@ -69,6 +70,7 @@ class ArrivalUseCase(
     ): StaleArrivalPrompt? {
         val started = arrivalStartedAtMillis ?: return null
         val clientName = selectedClientName ?: return null
+        if (staleArrivalSuppressed) return null
 
         val minutes = ((nowProvider() - started) / 60_000L).coerceAtLeast(1)
         pendingActionAfterStaleResolve = deferredAction
@@ -78,6 +80,7 @@ class ArrivalUseCase(
     fun resolveStaleArrival(markComplete: Boolean, selectedClientName: String?): ResolveStaleResult {
         val action = pendingActionAfterStaleResolve
         pendingActionAfterStaleResolve = null
+        staleArrivalSuppressed = false
 
         return if (markComplete) {
             ResolveStaleResult.ConfirmAndContinue(action)
@@ -92,6 +95,18 @@ class ArrivalUseCase(
 
     fun dropPendingStaleAction() {
         pendingActionAfterStaleResolve = null
+    }
+
+    /** Suppress stale-arrival prompts and run the pending action. Arrival timer keeps ticking. */
+    fun hideStaleArrival(): (() -> Unit)? {
+        val action = pendingActionAfterStaleResolve
+        pendingActionAfterStaleResolve = null
+        staleArrivalSuppressed = true
+        return action
+    }
+
+    fun resetStaleArrivalSuppression() {
+        staleArrivalSuppressed = false
     }
 
     fun markArrivalForClient(

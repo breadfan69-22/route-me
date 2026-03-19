@@ -491,8 +491,8 @@ class MainActivity : AppCompatActivity() {
             onDiscard = {
                 viewModel.resolveStaleArrival(markComplete = false)
             },
-            onGoBack = {
-                viewModel.dropPendingStaleAction()
+            onHide = {
+                viewModel.hideStaleArrival()
             }
         )
     }

@@ -139,6 +139,48 @@ class ArrivalUseCaseTest {
         assertNull(action)
     }
 
+    @Test
+    fun `hideStaleArrival suppresses future prompts and returns deferred action`() {
+        val useCase = ArrivalUseCase(mockk())
+        var invoked = false
+        useCase.createStaleArrivalPrompt(
+            arrivalStartedAtMillis = 100_000L,
+            selectedClientName = "Client-H",
+            deferredAction = { invoked = true }
+        )
+
+        val action = useCase.hideStaleArrival()
+        assertNotNull(action)
+        action?.invoke()
+        assertTrue(invoked)
+
+        // Subsequent prompts should be suppressed
+        val suppressed = useCase.createStaleArrivalPrompt(
+            arrivalStartedAtMillis = 100_000L,
+            selectedClientName = "Client-H",
+            deferredAction = { }
+        )
+        assertNull(suppressed)
+    }
+
+    @Test
+    fun `resetStaleArrivalSuppression re-enables prompts`() {
+        val useCase = ArrivalUseCase(mockk())
+        useCase.createStaleArrivalPrompt(
+            arrivalStartedAtMillis = 100_000L,
+            selectedClientName = "Client-R",
+            deferredAction = { }
+        )
+        useCase.hideStaleArrival()
+
+        // Suppressed
+        assertNull(useCase.createStaleArrivalPrompt(100_000L, "Client-R") { })
+
+        // Reset
+        useCase.resetStaleArrivalSuppression()
+        assertNotNull(useCase.createStaleArrivalPrompt(100_000L, "Client-R") { })
+    }
+
     private fun testClient(id: String): Client {
         return Client(
             id = id,

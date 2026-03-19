@@ -730,6 +730,7 @@ class MainViewModel(
 
         _uiState.update { it.copy(arrivalStartedAtMillis = null, arrivalLat = null, arrivalLng = null) }
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
+        arrivalUseCase.resetStaleArrivalSuppression()
         viewModelScope.launch { setStatus(statusMessage) }
     }
 
@@ -789,6 +790,11 @@ class MainViewModel(
                 result.deferredAction?.invoke()
             }
         }
+    }
+
+    /** Dismiss the stale-arrival dialog and suppress future prompts for this stop. Arrival timer keeps ticking. */
+    fun hideStaleArrival() {
+        arrivalUseCase.hideStaleArrival()?.invoke()
     }
 
     fun recordCancelledClientStop(

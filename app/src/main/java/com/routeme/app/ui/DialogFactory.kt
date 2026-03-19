@@ -225,7 +225,7 @@ object DialogFactory {
         minutesElapsed: Long,
         onMarkComplete: () -> Unit,
         onDiscard: () -> Unit,
-        onGoBack: () -> Unit
+        onHide: () -> Unit
     ) {
         AlertDialog.Builder(context)
             .setTitle(context.getString(R.string.dialog_stale_arrival_title))
@@ -242,8 +242,8 @@ object DialogFactory {
             .setNegativeButton(context.getString(R.string.dialog_stale_discard)) { _, _ ->
                 onDiscard()
             }
-            .setNeutralButton(context.getString(R.string.dialog_stale_go_back)) { _, _ ->
-                onGoBack()
+            .setNeutralButton(context.getString(R.string.dialog_stale_hide)) { _, _ ->
+                onHide()
             }
             .setCancelable(false)
             .show()

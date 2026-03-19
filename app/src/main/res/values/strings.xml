@@ -69,7 +69,7 @@
     <string name="dialog_stale_arrival_message">You arrived at %1$s %2$d min ago but haven\u2019t marked the job done.\n\nWhat would you like to do?</string>
     <string name="dialog_stale_mark_complete">Mark Complete</string>
     <string name="dialog_stale_discard">Discard</string>
-    <string name="dialog_stale_go_back">Go Back</string>
+    <string name="dialog_stale_hide">Hide for Now</string>
     <string name="cu_override_label">CU Override</string>
 
     <!-- Button labels -->
