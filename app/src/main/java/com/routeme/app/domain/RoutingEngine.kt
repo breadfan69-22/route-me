@@ -2,6 +2,7 @@ package com.routeme.app.domain
 
 import android.location.Location
 import com.routeme.app.Client
+import com.routeme.app.ClientProximityHelper
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
 import com.routeme.app.SHOP_LAT
@@ -132,6 +133,8 @@ class RoutingEngine {
         val destLat = destination?.lat ?: SHOP_LAT
         val destLng = destination?.lng ?: SHOP_LNG
         var currentDistToShop = distanceMilesBetween(currentLat, currentLng, destLat, destLng)
+        // Street name of the last-picked stop. Null at the start (raw GPS, no address).
+        var currentStreet: String? = null
 
         val ordered = mutableListOf<ScoredSuggestion>()
 
@@ -142,6 +145,15 @@ class RoutingEngine {
 
                 val hopMiles = distanceMilesBetween(currentLat, currentLng, lat, lng)
                 val hopPenalty = hopMiles * AppConfig.Routing.ORDER_HOP_PENALTY_PER_MILE
+                val candidateStreet = ClientProximityHelper.extractStreetName(candidate.suggestion.client.address)
+                // Cluster bonus: within proximity radius AND same street (or street unavailable).
+                val clusterBonus = if (hopMiles <= AppConfig.Routing.CLUSTER_RADIUS_MILES &&
+                    (currentStreet == null || candidateStreet == null || currentStreet == candidateStreet))
+                    AppConfig.Routing.CLUSTER_NEIGHBOR_BONUS else 0.0
+                // Same-street bonus: even outside cluster radius, boost same-street candidates.
+                val sameStreetBonus = if (clusterBonus == 0.0 &&
+                    currentStreet != null && candidateStreet != null && currentStreet == candidateStreet)
+                    AppConfig.Routing.SAME_STREET_BONUS else 0.0
 
                 val candidateDistToShop = candidate.suggestion.distanceToShopMiles
                     ?: distanceMilesBetween(lat, lng, destLat, destLng)
@@ -172,7 +184,7 @@ class RoutingEngine {
                 val overdueBonus = ((candidate.suggestion.daysSinceLast ?: 0) / AppConfig.Routing.ORDER_OVERDUE_DIVISOR_DAYS)
                     .coerceAtMost(AppConfig.Routing.ORDER_OVERDUE_BONUS_MAX)
 
-                (candidate.score * AppConfig.Routing.ORDER_BASE_SCORE_WEIGHT) - hopPenalty + directionAdjustment + overdueBonus
+                (candidate.score * AppConfig.Routing.ORDER_BASE_SCORE_WEIGHT) - hopPenalty + clusterBonus + sameStreetBonus + directionAdjustment + overdueBonus
             } ?: break
 
             ordered.add(next)
@@ -182,6 +194,7 @@ class RoutingEngine {
             currentLng = next.suggestion.client.longitude ?: currentLng
             currentDistToShop = next.suggestion.distanceToShopMiles
                 ?: distanceMilesBetween(currentLat, currentLng, destLat, destLng)
+            currentStreet = ClientProximityHelper.extractStreetName(next.suggestion.client.address)
         }
 
         val tail = withoutCoords.sortedWith(

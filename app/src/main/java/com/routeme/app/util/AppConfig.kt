@@ -5,7 +5,7 @@ object AppConfig {
         const val ARRIVAL_RADIUS_METERS = 60f
         const val ONSITE_RADIUS_METERS = 150f
         const val MODE_SWITCH_RADIUS_METERS = 200f
-        const val CLUSTER_RADIUS_METERS = 200f
+        const val CLUSTER_RADIUS_METERS = 125f
 
         const val DWELL_THRESHOLD_MS = 60_000L
         const val JOB_MIN_DURATION_MS = 3 * 60 * 1000L
@@ -122,5 +122,15 @@ object AppConfig {
 
         const val TWO_OPT_MAX_PASSES = 50
         const val TWO_OPT_IMPROVEMENT_EPSILON = 0.01
+
+        // When ordering the route, give a strong bonus to any candidate that is
+        // within cluster radius of the current route position (i.e. a next-door
+        // neighbor of the stop just picked). Keeps cluster properties adjacent.
+        const val CLUSTER_RADIUS_MILES = 0.078   // ~125 m (~410 ft)
+        // Cluster bonus requires BOTH proximity AND same street name.
+        const val CLUSTER_NEIGHBOR_BONUS = 80.0
+        // Applied when a candidate shares a street name with the last-picked stop,
+        // even if outside cluster radius. Breaks ties between near-equal distances.
+        const val SAME_STREET_BONUS = 20.0
     }
 }

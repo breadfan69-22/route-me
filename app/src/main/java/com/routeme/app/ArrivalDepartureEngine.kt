@@ -147,6 +147,10 @@ class ArrivalDepartureEngine(
                     val nLat = neighbor.latitude ?: continue
                     val nLng = neighbor.longitude ?: continue
                     if (distanceCalculator(cLat, cLng, nLat, nLng) <= clusterRadiusMeters) {
+                        // Only expand cluster to neighbors on the same street.
+                        val candidateStreet = ClientProximityHelper.extractStreetName(candidate.client.address)
+                        val neighborStreet = ClientProximityHelper.extractStreetName(neighbor.address)
+                        if (candidateStreet != null && neighborStreet != null && candidateStreet != neighborStreet) continue
                         synthetic.add(
                             CompletionCandidate(
                                 client = neighbor,
