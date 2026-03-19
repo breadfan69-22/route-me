@@ -507,6 +507,10 @@ class MainViewModel(
         if (checkAndPromptStaleArrival { suggestNextClients(currentLocation) }) return
         viewModelScope.launch {
             val state = _uiState.value
+            if (state.isLoading) {
+                setStatus("Still loading clients, please wait…")
+                return@launch
+            }
 
             // Pre-verify driving distances for cluster-candidate pairs on IO.
             withContext(ioDispatcher) {
