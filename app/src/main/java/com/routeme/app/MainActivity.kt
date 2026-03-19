@@ -196,6 +196,7 @@ class MainActivity : AppCompatActivity() {
                         if (state.arrivalStartedAtMillis == null) {
                             statusNotesBinding.visitNotesInput.text?.clear()
                         }
+                        trackingActionsBinding.suggestButton.isEnabled = !state.isLoading
                         updateStepToggleEnabled(state.completedSteps)
                         val activeDest = state.activeDestination
                         if (activeDest != null) {
