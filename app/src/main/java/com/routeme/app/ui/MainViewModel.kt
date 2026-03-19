@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,7 +50,8 @@ class MainViewModel(
     private val destinationQueueUseCase: DestinationQueueUseCase = DestinationQueueUseCase(preferencesRepository, routingEngine),
     private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
-    private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue)
+    private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue),
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
     companion object {
         private const val KEY_SERVICE_TYPE = "service_type"
@@ -507,7 +509,7 @@ class MainViewModel(
             val state = _uiState.value
 
             // Pre-verify driving distances for cluster-candidate pairs on IO.
-            withContext(Dispatchers.IO) {
+            withContext(ioDispatcher) {
                 routingEngine.precomputeClusterDrivingDistances(state.clients)
             }
 
