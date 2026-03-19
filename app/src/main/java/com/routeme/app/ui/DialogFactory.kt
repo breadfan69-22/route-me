@@ -22,6 +22,15 @@ object DialogFactory {
             .show()
     }
 
+    fun showStartTrackingPrompt(context: Context, onConfirm: () -> Unit) {
+        AlertDialog.Builder(context)
+            .setTitle(context.getString(R.string.dialog_start_tracking_title))
+            .setMessage(context.getString(R.string.dialog_start_tracking_message))
+            .setPositiveButton(R.string.dialog_start_tracking_confirm) { _, _ -> onConfirm() }
+            .setNegativeButton(R.string.dialog_start_tracking_cancel, null)
+            .show()
+    }
+
     fun showRouteHistoryDialog(
         context: Context,
         event: MainEvent.ShowRouteHistory,

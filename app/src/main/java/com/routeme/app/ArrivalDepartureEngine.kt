@@ -132,6 +132,36 @@ class ArrivalDepartureEngine(
             }
         }
 
+        // Cluster expansion: include adjacent tracked clients with no active arrival.
+        // Handles the "phone in truck" case where only one client fired an arrival but
+        // the neighbor was also serviced. The user can uncheck any they didn't do.
+        if (completable.isNotEmpty()) {
+            val alreadyIncluded = completable.map { it.client.id }.toMutableSet()
+            val synthetic = mutableListOf<CompletionCandidate>()
+            for (candidate in completable) {
+                val cLat = candidate.client.latitude ?: continue
+                val cLng = candidate.client.longitude ?: continue
+                for (neighbor in trackedClients) {
+                    if (neighbor.id in alreadyIncluded) continue
+                    if (neighbor.id in activeArrivals) continue
+                    val nLat = neighbor.latitude ?: continue
+                    val nLng = neighbor.longitude ?: continue
+                    if (distanceCalculator(cLat, cLng, nLat, nLng) <= clusterRadiusMeters) {
+                        synthetic.add(
+                            CompletionCandidate(
+                                client = neighbor,
+                                arrivedAtMillis = candidate.arrivedAtMillis,
+                                location = candidate.location,
+                                timeOnSiteMillis = candidate.timeOnSiteMillis
+                            )
+                        )
+                        alreadyIncluded.add(neighbor.id)
+                    }
+                }
+            }
+            completable.addAll(synthetic)
+        }
+
         departed.forEach { activeArrivals.remove(it) }
         return DepartureEvaluation(departedClientIds = departed, completionCandidates = completable)
     }

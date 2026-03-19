@@ -148,6 +148,17 @@ class MainActivity : AppCompatActivity() {
         DistanceMatrixHelper.apiKey = BuildConfig.MAPS_API_KEY
         GeocodingHelper.apiKey = BuildConfig.MAPS_API_KEY
 
+        maybePromptStartTracking(savedInstanceState)
+
+    }
+
+    private fun maybePromptStartTracking(savedInstanceState: Bundle?) {
+        if (savedInstanceState != null) return
+        if (trackingEventBus.isTracking.value || viewModel.uiState.value.isTracking) return
+
+        DialogFactory.showStartTrackingPrompt(this) {
+            trackingUiController.startTracking()
+        }
     }
 
     private fun observeViewModel() {

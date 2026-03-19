@@ -33,7 +33,7 @@ val appModule = module {
     factory { ArrivalUseCase(get()) }
     factory { SuggestionUseCase(get()) }
     factory { DestinationQueueUseCase(get(), get()) }
-    factory { RouteHistoryUseCase(get(), get()) }
+    factory { RouteHistoryUseCase(get()) }
     factory { MapsExportUseCase() }
     single { TrackingEventBus() }
     single { WriteBackRetryQueue(get()) }

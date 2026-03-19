@@ -61,6 +61,10 @@
     <string name="dialog_route_history_title">Route History</string>
 
     <!-- Stale arrival dialog -->
+    <string name="dialog_start_tracking_title">Start Route Tracking?</string>
+    <string name="dialog_start_tracking_message">Do you want to start tracking now?</string>
+    <string name="dialog_start_tracking_confirm">Start Now</string>
+    <string name="dialog_start_tracking_cancel">Not Now</string>
     <string name="dialog_stale_arrival_title">Unfinished Stop</string>
     <string name="dialog_stale_arrival_message">You arrived at %1$s %2$d min ago but haven\u2019t marked the job done.\n\nWhat would you like to do?</string>
     <string name="dialog_stale_mark_complete">Mark Complete</string>

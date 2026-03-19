@@ -108,6 +108,67 @@ class ArrivalDepartureEngineTest {
     }
 
     @Test
+    fun `cluster expansion includes adjacent neighbor with no active arrival`() {
+        val engine = newEngine()
+        val a = client("a", 42.0, -85.0)     // client whose arrival fired normally
+        val b = client("b", 42.0003, -85.0)  // next-door neighbor, phone stayed in truck
+        val tracked = listOf(a, b)
+
+        val atA = location(42.0, -85.0)
+        val far = location(42.005, -85.0)    // drove away from both
+
+        // Only A gets an arrival
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+
+        val eval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        // Both A and B should appear so the user can confirm or uncheck B
+        assertEquals(2, eval.completionCandidates.size)
+        val ids = eval.completionCandidates.map { it.client.id }.toSet()
+        assertTrue("a" in ids)
+        assertTrue("b" in ids)
+        // B inherits A's arrival time as the best estimate
+        val bCandidate = eval.completionCandidates.first { it.client.id == "b" }
+        assertEquals(1_000L, bCandidate.arrivedAtMillis)
+    }
+
+    @Test
+    fun `cluster expansion does not include client outside cluster radius`() {
+        val engine = newEngine()
+        val a = client("a", 42.0, -85.0)
+        val b = client("b", 42.005, -85.0)   // ~555m from A, outside 200m cluster radius
+        val tracked = listOf(a, b)
+
+        val atA = location(42.0, -85.0)
+        val far = location(42.008, -85.0)    // ~888m from A, ~333m from B
+
+        // Only A gets an arrival
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+
+        val eval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        // B is too far from A to be pulled in by cluster expansion
+        assertEquals(1, eval.completionCandidates.size)
+        assertEquals("a", eval.completionCandidates.first().client.id)
+    }
+
+    @Test
     fun `reset clears active state`() {
         val engine = newEngine()
         val client = client("c1", 42.0, -85.0)
