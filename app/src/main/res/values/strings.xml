@@ -170,4 +170,19 @@
 
     <!-- Destinations Activity — input row -->
     <string name="dest_add_label">Add</string>
+
+    <!-- Tile dashboard labels -->
+    <string name="tile_upcoming_title">Upcoming Events</string>
+    <string name="tile_sync_title">Sync Sheet</string>
+    <string name="tile_step_title">Current Step</string>
+    <string name="tile_step_placeholder">Tap to select</string>
+    <string name="tile_tracking_title">Route Tracking</string>
+    <string name="tile_direction_title">Direction</string>
+    <string name="tile_direction_default">Working Outward</string>
+    <string name="tile_direction_icon">Route direction icon</string>
+    <string name="tile_suggested_title">Suggested Next</string>
+    <string name="tile_suggest_button">Suggest Next</string>
+    <string name="tile_refresh_suggestions">Refresh suggestions</string>
+    <string name="tile_selected_title">Selected Next</string>
+    <string name="tile_property">Property</string>
 </resources>

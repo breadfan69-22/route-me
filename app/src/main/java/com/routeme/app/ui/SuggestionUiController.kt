@@ -1,142 +1,86 @@
 package com.routeme.app.ui
 
-import android.content.res.ColorStateList
-import android.graphics.Typeface
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.TextView
-import androidx.core.content.ContextCompat
-import com.google.android.material.button.MaterialButton
-import com.routeme.app.ClientSuggestion
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSnapHelper
+import androidx.recyclerview.widget.RecyclerView
 import com.routeme.app.R
-import com.routeme.app.databinding.SectionSuggestionsBinding
-import java.util.Locale
+import com.routeme.app.databinding.ActivityMainBinding
 
 class SuggestionUiController(
-    private val binding: SectionSuggestionsBinding,
+    private val binding: ActivityMainBinding,
     private val viewModel: MainViewModel
 ) {
-    fun bindPaginationActions() {
-        binding.moreSuggestionsButton.setOnClickListener {
-            viewModel.nextSuggestionPage()
+    private val adapter = SuggestionSlotAdapter(
+        onSuggestionClicked = { suggestion ->
+            viewModel.selectSuggestion(suggestion.client.id)
             showCurrentPage()
         }
+    )
 
-        binding.prevSuggestionsButton.setOnClickListener {
-            viewModel.previousSuggestionPage()
-            showCurrentPage()
+    private val snapHelper = LinearSnapHelper()
+    private var isInitialized = false
+
+    fun bindPaginationActions() {
+        if (isInitialized) return
+        isInitialized = true
+
+        binding.suggestionRecyclerView.apply {
+            layoutManager = LinearLayoutManager(context, RecyclerView.VERTICAL, false)
+            adapter = this@SuggestionUiController.adapter
         }
+        snapHelper.attachToRecyclerView(binding.suggestionRecyclerView)
+
+        binding.suggestionRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState != RecyclerView.SCROLL_STATE_IDLE) return
+                val layoutManager = recyclerView.layoutManager ?: return
+                val snapped = snapHelper.findSnapView(layoutManager) ?: return
+                val position = layoutManager.getPosition(snapped)
+                val suggestion = viewModel.uiState.value.suggestions.getOrNull(position) ?: return
+                if (viewModel.uiState.value.selectedClient?.id != suggestion.client.id) {
+                    viewModel.selectSuggestion(suggestion.client.id)
+                    showCurrentPage()
+                }
+            }
+        })
     }
 
     fun showCurrentPage() {
-        binding.suggestionsContainer.removeAllViews()
-
         val state = viewModel.uiState.value
-        val page = viewModel.currentPageSuggestions()
-        if (page.isEmpty()) {
-            binding.paginationRow.visibility = View.GONE
+        val suggestions = state.suggestions
+
+        if (suggestions.isEmpty()) {
+            binding.suggestionHeader.text = binding.root.context.getString(
+                R.string.no_eligible_clients,
+                state.selectedServiceTypes.joinToString("+") { it.label },
+                state.minDays
+            )
+            binding.suggestionRecyclerView.visibility = View.GONE
             return
         }
 
-        val context = binding.root.context
-
         val stepsLabel = state.selectedServiceTypes.joinToString("+") { it.label }
-        val header = TextView(context).apply {
-            text = context.getString(
-                R.string.suggestion_header,
-                stepsLabel,
-                state.minDays,
-                state.suggestionOffset + 1,
-                state.suggestionOffset + page.size,
-                state.suggestions.size
-            )
-            setTypeface(null, Typeface.BOLD)
-            textSize = 13f
+        binding.suggestionHeader.text = binding.root.context.getString(
+            R.string.suggestion_header,
+            stepsLabel,
+            state.minDays,
+            1,
+            suggestions.size,
+            suggestions.size
+        )
+
+        binding.suggestionRecyclerView.visibility = View.VISIBLE
+
+        adapter.submit(
+            suggestions = suggestions,
+            selectedClientId = state.selectedClient?.id,
+            selectedServiceTypeCount = state.selectedServiceTypes.size
+        )
+
+        val selectedIndex = suggestions.indexOfFirst { it.client.id == state.selectedClient?.id }
+        if (selectedIndex >= 0) {
+            binding.suggestionRecyclerView.scrollToPosition(selectedIndex)
         }
-        binding.suggestionsContainer.addView(header)
-
-        page.forEachIndexed { indexOnPage, suggestion ->
-            val globalIndex = state.suggestionOffset + indexOnPage
-            binding.suggestionsContainer.addView(
-                buildSuggestionRow(
-                    suggestion = suggestion,
-                    index = globalIndex,
-                    selectedClientId = state.selectedClient?.id,
-                    selectedServiceTypeCount = state.selectedServiceTypes.size
-                )
-            )
-        }
-
-        val hasMore = viewModel.canShowMoreSuggestions()
-        val hasPrev = viewModel.canShowPreviousSuggestions()
-        binding.paginationRow.visibility = if (hasMore || hasPrev) View.VISIBLE else View.GONE
-        binding.prevSuggestionsButton.isEnabled = hasPrev
-        binding.moreSuggestionsButton.isEnabled = hasMore
-    }
-
-    private fun buildSuggestionRow(
-        suggestion: ClientSuggestion,
-        index: Int,
-        selectedClientId: String?,
-        selectedServiceTypeCount: Int
-    ): MaterialButton {
-        val daysText = suggestion.daysSinceLast?.toString() ?: "Never"
-        val driveText = suggestion.drivingTime
-        val distText = when {
-            driveText != null -> "${suggestion.drivingDistance} (${driveText})"
-            suggestion.distanceMiles != null -> String.format(Locale.US, "%.1f mi", suggestion.distanceMiles)
-            else -> ""
-        }
-        val mowText = if (suggestion.mowWindowPreferred) " ✓mow" else ""
-        val cuText = if (suggestion.requiresCuOverride) " ⚠CU" else ""
-        val stepTag = if (suggestion.eligibleSteps.size == 1 && selectedServiceTypeCount == 1) {
-            ""
-        } else {
-            val numbers = suggestion.eligibleSteps
-                .filter { it.stepNumber > 0 }
-                .map { it.stepNumber }
-                .sorted()
-            if (numbers.isNotEmpty()) "[S${numbers.joinToString("+")}] " else ""
-        }
-
-        val label = "${index + 1}. $stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
-        val isSelected = selectedClientId == suggestion.client.id
-        val context = binding.root.context
-
-        return MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = label
-            textSize = 13f
-            isAllCaps = false
-            textAlignment = View.TEXT_ALIGNMENT_TEXT_START
-
-            val topMarginPx = (4 * resources.displayMetrics.density).toInt()
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = topMarginPx
-            }
-
-            if (isSelected) {
-                setBackgroundColor(ContextCompat.getColor(context, R.color.suggestion_selected_bg))
-                setTextColor(ContextCompat.getColor(context, R.color.md_theme_dark_onPrimaryContainer))
-                strokeColor = ColorStateList.valueOf(
-                    ContextCompat.getColor(context, R.color.suggestion_selected_stroke)
-                )
-                strokeWidth = (2 * resources.displayMetrics.density).toInt()
-                setTypeface(null, Typeface.BOLD)
-            } else {
-                strokeWidth = (1 * resources.displayMetrics.density).toInt()
-            }
-
-            setOnClickListener {
-                selectSuggestion(suggestion)
-                showCurrentPage()
-            }
-        }
-    }
-
-    private fun selectSuggestion(suggestion: ClientSuggestion) {
-        viewModel.selectSuggestion(suggestion.client.id)
     }
 }

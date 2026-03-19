@@ -19,10 +19,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.routeme.app.databinding.ActivityMainBinding
-import com.routeme.app.databinding.SectionStatusNotesBinding
-import com.routeme.app.databinding.SectionStepControlsBinding
-import com.routeme.app.databinding.SectionSuggestionsBinding
-import com.routeme.app.databinding.SectionTrackingActionsBinding
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.network.SheetsWriteBack
@@ -32,6 +28,7 @@ import com.routeme.app.ui.EventObserver
 import com.routeme.app.ui.MainEvent
 import com.routeme.app.ui.MainViewModel
 import com.routeme.app.ui.SuggestionUiController
+import com.routeme.app.ui.StepPickerBottomSheet
 import com.routeme.app.ui.TrackingUiController
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -42,10 +39,6 @@ class MainActivity : AppCompatActivity() {
     private var selectedClient: Client? = null
     private var lastLocation: Location? = null
     private lateinit var binding: ActivityMainBinding
-    private lateinit var stepControlsBinding: SectionStepControlsBinding
-    private lateinit var trackingActionsBinding: SectionTrackingActionsBinding
-    private lateinit var suggestionsBinding: SectionSuggestionsBinding
-    private lateinit var statusNotesBinding: SectionStatusNotesBinding
     private lateinit var suggestionUiController: SuggestionUiController
     private lateinit var trackingUiController: TrackingUiController
     private lateinit var destinationInputController: DestinationInputController
@@ -55,6 +48,7 @@ class MainActivity : AppCompatActivity() {
     private val trackingEventBus: TrackingEventBus by inject()
     private var sheetsUrl: String = ""
     private val SUGGEST_LOCATION_MAX_AGE_MS = 120_000L
+    private var lastObservedServiceTypes: Set<ServiceType>? = null
 
     /** Tracks which client IDs we already showed an arrival dialog for this session
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
@@ -101,15 +95,28 @@ class MainActivity : AppCompatActivity() {
         rerunSuggestionsIfVisible()
     }
 
+    private val syncSheetScreenLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val syncResult = SyncSheetActivity.extractResult(result.data) ?: return@registerForActivityResult
+        if (syncResult.readUrl.isNotBlank()) {
+            sheetsUrl = syncResult.readUrl
+        }
+        if (syncResult.writeUrl.isNotBlank()) {
+            SheetsWriteBack.webAppUrl = syncResult.writeUrl
+        }
+        saveSyncSettings()
+        if (syncResult.syncRequested && sheetsUrl.isNotBlank()) {
+            syncFromSheets(sheetsUrl)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        stepControlsBinding = SectionStepControlsBinding.bind(binding.root)
-        trackingActionsBinding = SectionTrackingActionsBinding.bind(binding.root)
-        suggestionsBinding = SectionSuggestionsBinding.bind(binding.root)
-        statusNotesBinding = SectionStatusNotesBinding.bind(binding.root)
-        suggestionUiController = SuggestionUiController(suggestionsBinding, viewModel)
+        suggestionUiController = SuggestionUiController(binding, viewModel)
         trackingUiController = TrackingUiController(
             activity = this,
             viewModel = viewModel,
@@ -138,8 +145,8 @@ class MainActivity : AppCompatActivity() {
 
         setSupportActionBar(binding.topToolbar)
 
-        setupStepToggle()
-        setupActions()
+        suggestionUiController.bindPaginationActions()
+        setupTileActions()
         observeViewModel()
         eventObserver.start()
         handleArrivalIntent(intent)
@@ -176,44 +183,51 @@ class MainActivity : AppCompatActivity() {
                         if (state.summaryText.isNotBlank()) {
                             binding.summaryText.text = state.summaryText
                         }
-                        if (state.statusText.isNotBlank()) {
-                            statusNotesBinding.statusText.text = state.statusText
+                        binding.statusText.text = state.statusText
+                        binding.clientDetailsText.text = state.selectedClientDetails
+
+                        val previousServiceTypes = lastObservedServiceTypes
+                        if (previousServiceTypes != null && previousServiceTypes != state.selectedServiceTypes) {
+                            rerunSuggestionsIfVisible()
                         }
-                        if (state.selectedClientDetails.isNotBlank()) {
-                            statusNotesBinding.clientDetailsText.text = state.selectedClientDetails
-                        }
-                        trackingActionsBinding.trackingButton.text = if (state.isTracking) {
+                        lastObservedServiceTypes = state.selectedServiceTypes
+
+                        binding.stepLabel.text = formatStepLabel(state.selectedServiceTypes)
+                        binding.tileTracking.isActive = state.isTracking
+                        binding.trackingButton.text = if (state.isTracking) {
                             getString(R.string.stop_tracking)
                         } else {
                             getString(R.string.start_tracking)
                         }
-                        statusNotesBinding.arrivedButton.text = if (state.arrivalStartedAtMillis != null) {
-                            getString(R.string.btn_cancel)
-                        } else {
-                            getString(R.string.btn_arrived)
-                        }
-                        statusNotesBinding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
+                        binding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
                         if (state.arrivalStartedAtMillis == null) {
                             clearVisitNotesInput()
                         }
-                        trackingActionsBinding.suggestButton.isEnabled =
-                            !state.isLoading && !state.isSuggestionsLoading && !state.errandsModeEnabled
-                        trackingActionsBinding.suggestButton.visibility =
-                            if (state.errandsModeEnabled) View.GONE else View.VISIBLE
-                        updateStepToggleEnabled(state.completedSteps)
                         if (state.errandsModeEnabled) {
                             binding.errandsBanner.visibility = View.VISIBLE
                             binding.errandsBanner.text = getString(
                                 R.string.errands_banner_active,
                                 state.destinationQueue.size
                             )
-                            suggestionsBinding.suggestionsContainer.visibility = View.GONE
-                            suggestionsBinding.paginationRow.visibility = View.GONE
+                            binding.tileSuggested.visibility = View.GONE
+                            binding.suggestionRecyclerView.visibility = View.GONE
                         } else {
                             binding.errandsBanner.visibility = View.GONE
-                            suggestionsBinding.suggestionsContainer.visibility = View.VISIBLE
+                            binding.tileSuggested.visibility = View.VISIBLE
+                            binding.suggestionRecyclerView.visibility = View.VISIBLE
                         }
                         val activeDest = state.activeDestination
+                        binding.directionIcon.setImageResource(
+                            if (activeDest != null) R.drawable.ic_assistant_navigation
+                            else when (state.routeDirection) {
+                                RouteDirection.OUTWARD -> R.drawable.ic_arrow_upward
+                                RouteDirection.HOMEWARD -> R.drawable.ic_home_work
+                            }
+                        )
+                        binding.directionText.text = activeDest?.name ?: when (state.routeDirection) {
+                            RouteDirection.OUTWARD -> getString(R.string.menu_direction_outward)
+                            RouteDirection.HOMEWARD -> getString(R.string.menu_direction_homeward)
+                        }
                         if (activeDest != null) {
                             binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDest.name}"
                             binding.destinationBanner.visibility = View.VISIBLE
@@ -339,32 +353,6 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
-    /** Map each toggle button ID to its ServiceType. */
-    private val toggleButtonToServiceType: Map<Int, ServiceType> by lazy {
-        mapOf(
-            R.id.btnStep1 to ServiceType.ROUND_1,
-            R.id.btnStep2 to ServiceType.ROUND_2,
-            R.id.btnStep3 to ServiceType.ROUND_3,
-            R.id.btnStep4 to ServiceType.ROUND_4,
-            R.id.btnStep5 to ServiceType.ROUND_5,
-            R.id.btnStep6 to ServiceType.ROUND_6,
-            R.id.btnStepGrub to ServiceType.GRUB,
-            R.id.btnStepInc to ServiceType.INCIDENTAL
-        )
-    }
-
-    /** Reverse map: ServiceType → button ID. */
-    private val serviceTypeToButtonId: Map<ServiceType, Int> by lazy {
-        toggleButtonToServiceType.entries.associate { (id, type) -> type to id }
-    }
-
-    /** Read which service types are currently toggled on. */
-    private fun getSelectedServiceTypes(): Set<ServiceType> {
-        val checked = stepControlsBinding.stepToggleGroup.checkedButtonIds
-        val types = checked.mapNotNull { toggleButtonToServiceType[it] }.toSet()
-        return types.ifEmpty { setOf(ServiceType.ROUND_1) } // fallback
-    }
-
     /** Build a short label like "S1+2" from explicitly supplied service types. */
     private fun formatStepLabel(types: Set<ServiceType>): String {
         if (types.isEmpty()) return ServiceType.ROUND_1.label
@@ -372,59 +360,96 @@ class MainActivity : AppCompatActivity() {
         return types.sortedBy { it.stepNumber }.joinToString("+") { it.label }
     }
 
-    private fun setupStepToggle() {
-        // Restore selection from ViewModel (which resolves from savedState / prefs / date windows)
-        val savedTypes = viewModel.uiState.value.selectedServiceTypes
-        // Clear all first, then check the right ones
-        stepControlsBinding.stepToggleGroup.clearChecked()
-        for (type in savedTypes) {
-            serviceTypeToButtonId[type]?.let { stepControlsBinding.stepToggleGroup.check(it) }
+    private fun setupTileActions() {
+        binding.badgeUpcoming.setOnClickListener {
+            startActivity(Intent(this, UpcomingEventsActivity::class.java))
         }
-    }
 
-    /** Disable and grey out toggle buttons for steps that are fully completed. */
-    private fun updateStepToggleEnabled(completedSteps: Set<ServiceType>) {
-        for ((type, buttonId) in serviceTypeToButtonId) {
-            val button = findViewById<View>(buttonId) ?: continue
-            val isCompleted = type in completedSteps
-            button.isEnabled = !isCompleted
-            button.alpha = if (isCompleted) 0.35f else 1.0f
+        binding.tileSync.setOnClickListener {
+            if (sheetsUrl.isNotBlank()) {
+                syncFromSheets(sheetsUrl)
+            } else {
+                Snackbar.make(binding.root, "No sheet URL configured — tap ⋯ to set one", Snackbar.LENGTH_SHORT).show()
+            }
         }
-    }
+        binding.badgeSync.setOnClickListener {
+            launchSyncSheetScreen()
+        }
 
-    private fun setupActions() {
-        suggestionUiController.bindPaginationActions()
+        binding.tileStep.setOnClickListener {
+            StepPickerBottomSheet
+                .newInstance(viewModel.uiState.value.selectedServiceTypes)
+                .show(supportFragmentManager, "step_picker")
+        }
 
-        trackingActionsBinding.trackingButton.setOnClickListener {
+        binding.trackingButton.setOnClickListener {
             trackingUiController.toggleTracking()
         }
 
-        trackingActionsBinding.suggestButton.setOnClickListener {
-            viewModel.setServiceTypes(getSelectedServiceTypes())
+        binding.tileTracking.setOnClickListener {
+            trackingUiController.toggleTracking()
+        }
+        binding.badgeTracking.setOnClickListener {
+            viewModel.showDailySummary()
+        }
+
+        binding.directionIcon.setOnClickListener {
+            val state = viewModel.uiState.value
+            if (!state.errandsModeEnabled && state.activeDestination == null) {
+                viewModel.toggleRouteDirection()
+                rerunSuggestionsIfVisible()
+            }
+        }
+        binding.tileDirection.setOnClickListener {
+            val state = viewModel.uiState.value
+            if (state.errandsModeEnabled || state.activeDestination != null) {
+                launchDestinationsScreen()
+            }
+        }
+        binding.badgeDirection.setOnClickListener {
+            launchDestinationsScreen()
+        }
+
+        binding.badgeSuggestedRefresh.setOnClickListener {
+            if (viewModel.uiState.value.errandsModeEnabled) {
+                Snackbar.make(binding.root, "Errands Mode is active", Snackbar.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             suggestNextClients()
         }
 
-        statusNotesBinding.mapsButton.setOnClickListener {
-            openSelectedInMaps()
-        }
-
-        statusNotesBinding.arrivedButton.setOnClickListener {
+        binding.tileSelected.setOnClickListener {
             if (viewModel.uiState.value.arrivalStartedAtMillis != null) {
                 viewModel.cancelArrival()
                 return@setOnClickListener
             }
-
             lastLocation = getCurrentLocation()
             viewModel.startArrivalForSelected(lastLocation)
         }
 
-        statusNotesBinding.confirmButton.setOnClickListener {
+        binding.mapsButton.setOnLongClickListener {
+            openSelectedInMaps()
+            true
+        }
+        binding.skipButton.setOnLongClickListener {
+            viewModel.skipSelectedClientToday()
+            true
+        }
+        binding.editNotesButton.setOnLongClickListener {
+            viewModel.editSelectedClientNotes()
+            true
+        }
+        binding.propertyButton.setOnLongClickListener {
+            Snackbar.make(binding.root, "Property stats coming soon", Snackbar.LENGTH_SHORT).show()
+            true
+        }
+        binding.confirmButton.setOnLongClickListener {
             confirmSelectedClientService()
+            true
         }
 
-        statusNotesBinding.skipButton.setOnClickListener {
-            viewModel.skipSelectedClientToday()
-        }
+        binding.propertyButton.isEnabled = false
+        binding.propertyButton.alpha = 0.4f
     }
 
     private fun suggestNextClients() {
@@ -465,17 +490,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readVisitNotesText(): String {
-        return statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
+        return binding.visitNotesInput.text?.toString().orEmpty()
     }
 
     private fun clearVisitNotesInput() {
-        statusNotesBinding.visitNotesInput.text?.clear()
+        binding.visitNotesInput.text?.clear()
     }
 
     private fun confirmSelectedClientService() {
         val current = getCurrentLocation()
         lastLocation = current
-        viewModel.setServiceTypes(getSelectedServiceTypes())
+        val types = viewModel.uiState.value.selectedServiceTypes.ifEmpty { setOf(ServiceType.ROUND_1) }
+        viewModel.setServiceTypes(types)
         val notes = readVisitNotesText()
         viewModel.confirmSelectedClientService(current, notes)
     }
@@ -539,7 +565,6 @@ class MainActivity : AppCompatActivity() {
         menuInflater.inflate(R.menu.main_menu, menu)
         menu.findItem(R.id.action_cu_override)?.isChecked = state.cuOverrideEnabled
         menu.findItem(R.id.action_errands_mode)?.isChecked = state.errandsModeEnabled
-        menu.findItem(R.id.action_toggle_direction)?.title = getDirectionMenuTitle(state.routeDirection)
         val skipCount = viewModel.skippedCount()
         menu.findItem(R.id.action_clear_skips)?.title = if (skipCount > 0)
             "Clear Skipped ($skipCount)" else getString(R.string.menu_clear_skips)
@@ -558,10 +583,6 @@ class MainActivity : AppCompatActivity() {
                 importLauncher.launch(arrayOf("*/*"))
                 true
             }
-            R.id.action_sync_sheets -> {
-                showSheetsUrlDialog()
-                true
-            }
             R.id.action_cu_override -> {
                 item.isChecked = !item.isChecked
                 viewModel.toggleCuOverride()
@@ -574,18 +595,8 @@ class MainActivity : AppCompatActivity() {
                 invalidateOptionsMenu()
                 true
             }
-            R.id.action_toggle_direction -> {
-                viewModel.toggleRouteDirection()
-                item.title = getDirectionMenuTitle(viewModel.uiState.value.routeDirection)
-                rerunSuggestionsIfVisible()
-                true
-            }
             R.id.action_open_route_maps -> {
                 viewModel.exportTopRouteToMaps()
-                true
-            }
-            R.id.action_daily_summary -> {
-                viewModel.showDailySummary()
                 true
             }
             R.id.action_route_history -> {
@@ -595,10 +606,6 @@ class MainActivity : AppCompatActivity() {
             R.id.action_clear_skips -> {
                 viewModel.clearSkippedClients()
                 rerunSuggestionsIfVisible()
-                true
-            }
-            R.id.action_edit_notes -> {
-                viewModel.editSelectedClientNotes()
                 true
             }
             R.id.action_toggle_break_logging -> {
@@ -612,10 +619,6 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_min_days -> {
                 showMinDaysDialog()
-                true
-            }
-            R.id.action_destinations -> {
-                destinationInputController.showDestinationDialog()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -661,6 +664,10 @@ class MainActivity : AppCompatActivity() {
         destinationsScreenLauncher.launch(intent)
     }
 
+    private fun launchSyncSheetScreen() {
+        syncSheetScreenLauncher.launch(SyncSheetActivity.createIntent(this))
+    }
+
     private fun getCurrentLocation(): Location? {
         val hasCoarse = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasFine = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -684,29 +691,6 @@ class MainActivity : AppCompatActivity() {
         val best = listOfNotNull(gps, network, fused).maxByOrNull { it.time }
 
         return best
-    }
-
-    private fun showSheetsUrlDialog() {
-        DialogFactory.showSheetsUrlDialog(
-            context = this,
-            currentReadUrl = sheetsUrl,
-            currentWriteUrl = SheetsWriteBack.webAppUrl,
-            onSyncNow = { enteredReadUrl, enteredWriteUrl ->
-                if (enteredReadUrl.isNotBlank()) {
-                    sheetsUrl = enteredReadUrl
-                }
-                if (enteredWriteUrl.isNotBlank()) {
-                    SheetsWriteBack.webAppUrl = enteredWriteUrl
-                }
-                saveSyncSettings()
-
-                if (sheetsUrl.isNotBlank()) {
-                    syncFromSheets(sheetsUrl)
-                } else {
-                    viewModel.postStatus(getString(R.string.status_saved_write_url))
-                }
-            }
-        )
     }
 
     private fun saveSyncSettings() {
