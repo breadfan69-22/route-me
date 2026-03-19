@@ -59,6 +59,7 @@ class MainViewModel(
         private const val KEY_SERVICE_TYPE = "service_type"
         private const val KEY_MIN_DAYS = "min_days"
         private const val KEY_CU_OVERRIDE = "cu_override"
+        private const val KEY_ERRANDS_MODE = "errands_mode"
         private const val KEY_ROUTE_DIRECTION = "route_direction"
         private const val KEY_SUGGESTION_OFFSET = "suggestion_offset"
         private const val KEY_SELECTED_CLIENT_ID = "selected_client_id"
@@ -110,6 +111,8 @@ class MainViewModel(
             selectedServiceTypes = resolveInitialSteps(),
             minDays = savedStateHandle.get<Int>(KEY_MIN_DAYS) ?: 21,
             cuOverrideEnabled = savedStateHandle.get<Boolean>(KEY_CU_OVERRIDE) ?: false,
+            errandsModeEnabled = savedStateHandle.get<Boolean>(KEY_ERRANDS_MODE)
+                ?: preferencesRepository.errandsModeEnabled,
             routeDirection = savedStateHandle.get<String>(KEY_ROUTE_DIRECTION)
                 ?.let { runCatching { RouteDirection.valueOf(it) }.getOrNull() }
                 ?: RouteDirection.OUTWARD,
@@ -342,6 +345,29 @@ class MainViewModel(
         savedStateHandle[KEY_CU_OVERRIDE] = _uiState.value.cuOverrideEnabled
     }
 
+    fun toggleErrandsMode() {
+        val enabled = !_uiState.value.errandsModeEnabled
+        preferencesRepository.errandsModeEnabled = enabled
+        _uiState.update {
+            if (enabled) {
+                it.copy(
+                    errandsModeEnabled = true,
+                    suggestions = emptyList(),
+                    suggestionOffset = 0,
+                    selectedClient = null,
+                    selectedClientDetails = "",
+                    isSuggestionsLoading = false
+                )
+            } else {
+                it.copy(errandsModeEnabled = false)
+            }
+        }
+        persistCriticalState(_uiState.value)
+        viewModelScope.launch {
+            setStatus(if (enabled) "Errands Mode enabled" else "Errands Mode disabled")
+        }
+    }
+
     fun toggleRouteDirection() {
         _uiState.update {
             it.copy(
@@ -529,49 +555,68 @@ class MainViewModel(
                 return@launch
             }
 
-            // Pre-verify driving distances for cluster-candidate pairs on IO.
-            withContext(ioDispatcher) {
-                routingEngine.precomputeClusterDrivingDistances(state.clients)
-            }
-
-            val result = suggestionUseCase.suggestNextClients(
-                clients = state.clients,
-                selectedServiceTypes = state.selectedServiceTypes,
-                minDays = state.minDays,
-                cuOverrideEnabled = state.cuOverrideEnabled,
-                routeDirection = state.routeDirection,
-                activeDestination = state.activeDestination,
-                currentLocation = currentLocation
-            )
-
-            if (result.dateRolloverDetected) {
-                clearDestinationQueue()
-            }
-
-            if (result.suggestions.isEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        suggestions = emptyList(),
-                        suggestionOffset = result.suggestionOffset,
-                        selectedClient = null,
-                        selectedClientDetails = ""
-                    )
-                }
-                setStatus(result.statusMessage)
+            if (state.errandsModeEnabled) {
+                setStatus("Errands Mode is active")
                 return@launch
             }
 
-            _uiState.update {
-                it.copy(
-                    suggestions = result.suggestions,
-                    suggestionOffset = result.suggestionOffset,
-                    selectedClient = result.selectedClient,
-                    selectedClientDetails = result.selectedClientDetails
+            _uiState.update { it.copy(isSuggestionsLoading = true) }
+
+            try {
+                val latestState = _uiState.value
+
+                // Pre-verify driving distances for cluster-candidate pairs on IO.
+                withContext(ioDispatcher) {
+                    routingEngine.precomputeClusterDrivingDistances(latestState.clients)
+                }
+
+                val result = suggestionUseCase.suggestNextClients(
+                    clients = latestState.clients,
+                    selectedServiceTypes = latestState.selectedServiceTypes,
+                    minDays = latestState.minDays,
+                    cuOverrideEnabled = latestState.cuOverrideEnabled,
+                    routeDirection = latestState.routeDirection,
+                    activeDestination = latestState.activeDestination,
+                    currentLocation = currentLocation
                 )
+
+                if (result.dateRolloverDetected) {
+                    clearDestinationQueue()
+                }
+
+                if (result.suggestions.isEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            suggestions = emptyList(),
+                            suggestionOffset = result.suggestionOffset,
+                            selectedClient = null,
+                            selectedClientDetails = ""
+                        )
+                    }
+                    setStatus(result.statusMessage)
+                    return@launch
+                }
+
+                _uiState.update {
+                    it.copy(
+                        suggestions = result.suggestions,
+                        suggestionOffset = result.suggestionOffset,
+                        selectedClient = result.selectedClient,
+                        selectedClientDetails = result.selectedClientDetails
+                    )
+                }
+                persistCriticalState(_uiState.value)
+                setStatus(result.statusMessage)
+                fetchDrivingTimesForCurrentPage()
+            } finally {
+                _uiState.update { current ->
+                    if (current.isSuggestionsLoading) {
+                        current.copy(isSuggestionsLoading = false)
+                    } else {
+                        current
+                    }
+                }
             }
-            persistCriticalState(_uiState.value)
-            setStatus(result.statusMessage)
-            fetchDrivingTimesForCurrentPage()
         }
     }
 
@@ -661,14 +706,48 @@ class MainViewModel(
     fun exportTopRouteToMaps() {
         viewModelScope.launch {
             val state = _uiState.value
+            val originLocation = suggestionUseCase.lastSuggestionLocation()?.let {
+                MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
+            }
+
+            if (state.errandsModeEnabled) {
+                when (
+                    val result = mapsExportUseCase.exportErrandsRoute(
+                        destinationQueue = state.destinationQueue,
+                        activeDestinationIndex = state.activeDestinationIndex,
+                        originLocation = originLocation
+                    )
+                ) {
+                    MapsExportUseCase.ExportResult.NoDestinations -> {
+                        setStatus("Add destinations first")
+                    }
+
+                    is MapsExportUseCase.ExportResult.Success -> {
+                        val routeExport = result.routeExport
+                        _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
+
+                        val clipped = routeExport.requestedStops - routeExport.includedStops
+                        if (clipped > 0) {
+                            setStatus("Opened errands route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
+                        } else {
+                            setStatus("Opened errands route with ${routeExport.includedStops} stops")
+                        }
+                    }
+
+                    MapsExportUseCase.ExportResult.NoSuggestions,
+                    MapsExportUseCase.ExportResult.NoMappableClients -> {
+                        setStatus("Add destinations first")
+                    }
+                }
+                return@launch
+            }
+
             when (
                 val result = mapsExportUseCase.exportTopRoute(
                     suggestions = state.suggestions,
                     routeDirection = state.routeDirection,
                     activeDestination = state.activeDestination,
-                    originLocation = suggestionUseCase.lastSuggestionLocation()?.let {
-                        MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
-                    }
+                    originLocation = originLocation
                 )
             ) {
                 MapsExportUseCase.ExportResult.NoMappableClients -> {
@@ -677,6 +756,10 @@ class MainViewModel(
 
                 MapsExportUseCase.ExportResult.NoSuggestions -> {
                     setStatus("Run suggestions first")
+                }
+
+                MapsExportUseCase.ExportResult.NoDestinations -> {
+                    setStatus("Add destinations first")
                 }
 
                 is MapsExportUseCase.ExportResult.Success -> {
@@ -1690,6 +1773,7 @@ class MainViewModel(
         savedStateHandle[KEY_SERVICE_TYPE] = state.selectedServiceTypes.joinToString(",") { it.name }
         savedStateHandle[KEY_MIN_DAYS] = state.minDays
         savedStateHandle[KEY_CU_OVERRIDE] = state.cuOverrideEnabled
+        savedStateHandle[KEY_ERRANDS_MODE] = state.errandsModeEnabled
         savedStateHandle[KEY_ROUTE_DIRECTION] = state.routeDirection.name
         savedStateHandle[KEY_SUGGESTION_OFFSET] = state.suggestionOffset
         savedStateHandle[KEY_SELECTED_CLIENT_ID] = state.selectedClient?.id

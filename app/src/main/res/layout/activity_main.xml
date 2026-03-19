@@ -32,6 +32,20 @@
                 android:layout_height="wrap_content"
                 android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
 
+            <TextView
+                android:id="@+id/errandsBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="5dp"
+                android:paddingBottom="5dp"
+                android:background="?attr/colorTertiaryContainer"
+                android:textColor="?attr/colorOnTertiaryContainer"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:visibility="gone" />
+
             <!-- Active destination banner -->
             <TextView
                 android:id="@+id/destinationBanner"

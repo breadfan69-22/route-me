@@ -11,6 +11,7 @@ data class MainUiState(
     val summaryText: String = "",
     val statusText: String = "",
     val isLoading: Boolean = false,
+    val isSuggestionsLoading: Boolean = false,
     val isTracking: Boolean = false,
     val sheetsReadUrl: String = "",
     val sheetsWriteUrl: String = "",
@@ -29,6 +30,7 @@ data class MainUiState(
     val completedSteps: Set<ServiceType> = emptySet(),
     val minDays: Int = 21,
     val cuOverrideEnabled: Boolean = false,
+    val errandsModeEnabled: Boolean = false,
     val routeDirection: RouteDirection = RouteDirection.OUTWARD,
     /** Ordered queue of destinations for today. */
     val destinationQueue: List<SavedDestination> = emptyList(),

@@ -18,6 +18,12 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_errands_mode"
+        android:checkable="true"
+        android:title="@string/menu_errands_mode"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_toggle_direction"
         android:title="@string/menu_direction_outward"
         app:showAsAction="never" />

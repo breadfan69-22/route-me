@@ -44,6 +44,7 @@
     <string name="menu_import_file">Import File</string>
     <string name="menu_sync_sheets">Sync Sheets</string>
     <string name="menu_cu_override">CU Override</string>
+    <string name="menu_errands_mode">Errands Mode</string>
     <string name="menu_direction_outward">→ Working Outward</string>
     <string name="menu_direction_homeward">← Heading Home</string>
     <string name="menu_open_route_maps">Open route in Maps</string>
@@ -153,4 +154,8 @@
     <string name="screen_destinations_title">Destinations</string>
     <string name="screen_destinations_done">Done</string>
     <string name="screen_placeholder_coming_soon">Coming soon</string>
+    <string name="errands_banner_active">🚗 Errands Mode — %1$d destinations queued</string>
+    <string name="status_errands_enabled">Errands Mode enabled</string>
+    <string name="status_errands_disabled">Errands Mode disabled</string>
+    <string name="status_errands_no_destinations">Add destinations first</string>
 </resources>

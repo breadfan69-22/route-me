@@ -37,6 +37,11 @@ class PreferencesRepository(context: Context) {
         get() = prefs.getString(PREF_SELECTED_STEPS, "") ?: ""
         set(value) = prefs.edit().putString(PREF_SELECTED_STEPS, value).apply()
 
+    /** Whether destination-only errands routing mode is enabled. */
+    var errandsModeEnabled: Boolean
+        get() = prefs.getBoolean(PREF_ERRANDS_MODE, false)
+        set(value) = prefs.edit().putBoolean(PREF_ERRANDS_MODE, value).apply()
+
     /** The epoch day (millis / 86400000) when the step selection was last saved manually. */
     var selectedStepsDate: Long
         get() = prefs.getLong(PREF_SELECTED_STEPS_DATE, 0L)
@@ -120,6 +125,7 @@ class PreferencesRepository(context: Context) {
         private const val PREF_NON_CLIENT_LOGGING = "non_client_logging_enabled"
         private const val PREF_NON_CLIENT_THRESHOLD = "non_client_stop_threshold_min"
         private const val PREF_SELECTED_STEPS = "selected_steps"
+        private const val PREF_ERRANDS_MODE = "errands_mode"
         private const val PREF_SELECTED_STEPS_DATE = "selected_steps_date"
         private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
         private const val PREF_ACTIVE_DESTINATION = "active_destination"

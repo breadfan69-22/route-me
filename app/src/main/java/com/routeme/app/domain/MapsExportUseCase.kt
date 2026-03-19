@@ -28,6 +28,38 @@ class MapsExportUseCase(
         data class Success(val routeExport: RouteExport) : ExportResult
         data object NoSuggestions : ExportResult
         data object NoMappableClients : ExportResult
+        data object NoDestinations : ExportResult
+    }
+
+    fun exportErrandsRoute(
+        destinationQueue: List<SavedDestination>,
+        activeDestinationIndex: Int,
+        originLocation: GeoPoint?
+    ): ExportResult {
+        val normalizedIndex = activeDestinationIndex.coerceAtLeast(0)
+        val remainingQueue = if (normalizedIndex >= destinationQueue.size) {
+            emptyList()
+        } else {
+            destinationQueue.drop(normalizedIndex)
+        }
+
+        if (remainingQueue.isEmpty()) {
+            return ExportResult.NoDestinations
+        }
+
+        val origin = originLocation?.let { "${it.latitude},${it.longitude}" } ?: "$SHOP_LAT,$SHOP_LNG"
+        val usableStops = remainingQueue.take(maxGoogleWaypoints + 1)
+        val destination = usableStops.last().let { "${it.lat},${it.lng}" }
+        val waypoints = usableStops.dropLast(1).map { "${it.lat},${it.lng}" }
+        val uri = buildMapsDirectionsUrl(origin, destination, waypoints)
+
+        return ExportResult.Success(
+            RouteExport(
+                uri = uri,
+                includedStops = usableStops.size,
+                requestedStops = remainingQueue.size
+            )
+        )
     }
 
     fun exportTopRoute(

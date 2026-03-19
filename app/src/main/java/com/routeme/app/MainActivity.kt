@@ -194,10 +194,25 @@ class MainActivity : AppCompatActivity() {
                         }
                         statusNotesBinding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
                         if (state.arrivalStartedAtMillis == null) {
-                            statusNotesBinding.visitNotesInput.text?.clear()
+                            clearVisitNotesInput()
                         }
-                        trackingActionsBinding.suggestButton.isEnabled = !state.isLoading
+                        trackingActionsBinding.suggestButton.isEnabled =
+                            !state.isLoading && !state.isSuggestionsLoading && !state.errandsModeEnabled
+                        trackingActionsBinding.suggestButton.visibility =
+                            if (state.errandsModeEnabled) View.GONE else View.VISIBLE
                         updateStepToggleEnabled(state.completedSteps)
+                        if (state.errandsModeEnabled) {
+                            binding.errandsBanner.visibility = View.VISIBLE
+                            binding.errandsBanner.text = getString(
+                                R.string.errands_banner_active,
+                                state.destinationQueue.size
+                            )
+                            suggestionsBinding.suggestionsContainer.visibility = View.GONE
+                            suggestionsBinding.paginationRow.visibility = View.GONE
+                        } else {
+                            binding.errandsBanner.visibility = View.GONE
+                            suggestionsBinding.suggestionsContainer.visibility = View.VISIBLE
+                        }
                         val activeDest = state.activeDestination
                         if (activeDest != null) {
                             binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDest.name}"
@@ -350,9 +365,9 @@ class MainActivity : AppCompatActivity() {
         return types.ifEmpty { setOf(ServiceType.ROUND_1) } // fallback
     }
 
-    /** Build a short label like "S1+2" from the currently selected toggles. */
-    private fun getSelectedStepsLabel(): String {
-        val types = getSelectedServiceTypes()
+    /** Build a short label like "S1+2" from explicitly supplied service types. */
+    private fun formatStepLabel(types: Set<ServiceType>): String {
+        if (types.isEmpty()) return ServiceType.ROUND_1.label
         if (types.size == 1) return types.first().label
         return types.sortedBy { it.stepNumber }.joinToString("+") { it.label }
     }
@@ -449,11 +464,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun readVisitNotesText(): String {
+        return statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
+    }
+
+    private fun clearVisitNotesInput() {
+        statusNotesBinding.visitNotesInput.text?.clear()
+    }
+
     private fun confirmSelectedClientService() {
         val current = getCurrentLocation()
         lastLocation = current
         viewModel.setServiceTypes(getSelectedServiceTypes())
-        val notes = statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
+        val notes = readVisitNotesText()
         viewModel.confirmSelectedClientService(current, notes)
     }
 
@@ -499,7 +522,7 @@ class MainActivity : AppCompatActivity() {
             onMarkComplete = {
                 val location = getCurrentLocation()
                 lastLocation = location
-                val notes = statusNotesBinding.visitNotesInput.text?.toString().orEmpty()
+                val notes = readVisitNotesText()
                 viewModel.resolveStaleArrival(markComplete = true, currentLocation = location, visitNotes = notes)
             },
             onDiscard = {
@@ -515,12 +538,18 @@ class MainActivity : AppCompatActivity() {
         val state = viewModel.uiState.value
         menuInflater.inflate(R.menu.main_menu, menu)
         menu.findItem(R.id.action_cu_override)?.isChecked = state.cuOverrideEnabled
+        menu.findItem(R.id.action_errands_mode)?.isChecked = state.errandsModeEnabled
         menu.findItem(R.id.action_toggle_direction)?.title = getDirectionMenuTitle(state.routeDirection)
         val skipCount = viewModel.skippedCount()
         menu.findItem(R.id.action_clear_skips)?.title = if (skipCount > 0)
             "Clear Skipped ($skipCount)" else getString(R.string.menu_clear_skips)
         menu.findItem(R.id.action_toggle_break_logging)?.isChecked = viewModel.isNonClientLoggingEnabled()
         return true
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        menu.findItem(R.id.action_errands_mode)?.isChecked = viewModel.uiState.value.errandsModeEnabled
+        return super.onPrepareOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -537,6 +566,12 @@ class MainActivity : AppCompatActivity() {
                 item.isChecked = !item.isChecked
                 viewModel.toggleCuOverride()
                 rerunSuggestionsIfVisible()
+                true
+            }
+            R.id.action_errands_mode -> {
+                viewModel.toggleErrandsMode()
+                item.isChecked = viewModel.uiState.value.errandsModeEnabled
+                invalidateOptionsMenu()
                 true
             }
             R.id.action_toggle_direction -> {
@@ -730,7 +765,7 @@ class MainActivity : AppCompatActivity() {
         if (!fromNotification && arrivedClientIds.contains(client.id)) return
         arrivedClientIds.add(client.id)
 
-        val stepsLabel = getSelectedStepsLabel()
+        val stepsLabel = formatStepLabel(viewModel.uiState.value.selectedServiceTypes)
 
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_arrived_title, client.name))
@@ -759,7 +794,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showCompletionDialog(client: Client, timeOnSiteMillis: Long, arrivedAtMillis: Long, location: Location) {
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
-        val stepsLabel = getSelectedStepsLabel()
+        val stepsLabel = formatStepLabel(viewModel.uiState.value.selectedServiceTypes)
 
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_complete_title, client.name))
