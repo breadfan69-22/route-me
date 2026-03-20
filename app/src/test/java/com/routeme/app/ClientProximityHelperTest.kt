@@ -93,6 +93,27 @@ class ClientProximityHelperTest {
     }
 
     @Test
+    fun `isInCluster true for corner-lot neighbor with different street name within radius`() {
+        // 100 Main St and 100 Oak Ave are on perpendicular streets but share a corner,
+        // physically ~30 m apart. The street names differ, but they should still cluster.
+        val departing = client("dep", 42.0, -85.0).copy(address = "100 Main St, Anytown")
+        val cornerLot = client("corner", 42.0003, -85.0).copy(address = "100 Oak Ave, Anytown")
+        val userNearCorner = location(42.00031, -85.0)
+
+        val result = ClientProximityHelper.isInCluster(
+            departingClient = departing,
+            location = userNearCorner,
+            trackedClients = listOf(departing, cornerLot),
+            activeArrivalClientIds = emptySet(),
+            clusterRadiusMeters = 100f,
+            onSiteRadiusMeters = 50f,
+            distanceCalculator = distanceCalculator
+        )
+
+        assertTrue(result)
+    }
+
+    @Test
     fun `isInCluster false when no qualifying neighbors`() {
         val departing = client("dep", 42.0, -85.0)
         val far = client("far", 42.03, -85.0)

@@ -169,6 +169,38 @@ class ArrivalDepartureEngineTest {
     }
 
     @Test
+    fun `cluster expansion includes corner-lot neighbor on different street`() {
+        // Reproduces the edge case: next-door property has a perpendicular street address
+        // (e.g. 100 Main St vs 100 Oak Ave on a corner lot) but is physically within radius.
+        val engine = newEngine()
+        val a = client("a", 42.0, -85.0).copy(address = "100 Main St, Anytown")
+        val corner = client("corner", 42.0003, -85.0).copy(address = "100 Oak Ave, Anytown")
+        val tracked = listOf(a, corner)
+
+        val atA = location(42.0, -85.0)
+        val far = location(42.005, -85.0)    // drove away from both
+
+        // Only A gets an arrival (corner lot client had no GPS dwell)
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+
+        val eval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        // Corner-lot neighbor should be included despite different street name
+        assertEquals(2, eval.completionCandidates.size)
+        val ids = eval.completionCandidates.map { it.client.id }.toSet()
+        assertTrue("a" in ids)
+        assertTrue("corner" in ids)
+    }
+
+    @Test
     fun `reset clears active state`() {
         val engine = newEngine()
         val client = client("c1", 42.0, -85.0)

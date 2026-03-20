@@ -30,11 +30,14 @@ class RoutingEngine {
     private var clusterDrivingCache: Map<Pair<String, String>, Double?> = emptyMap()
 
     /**
-     * Identifies all client pairs within haversine cluster radius that share a
-     * street name, then fetches their driving distances from the Distance Matrix API.
+     * Identifies all client pairs within haversine cluster radius, then fetches their
+     * driving distances from the Distance Matrix API.
      *
      * Must be called on a background thread (IO dispatcher).
      * Results are cached and used by [orderRoute] to gate the cluster bonus.
+     * Corner-lot clients on different streets are included so the driving-distance
+     * barrier check can revoke the bonus when a physical barrier (highway, river)
+     * separates them despite close GPS proximity.
      */
     fun precomputeClusterDrivingDistances(clients: List<Client>) {
         val geocoded = clients.filter { it.latitude != null && it.longitude != null }
@@ -42,11 +45,8 @@ class RoutingEngine {
 
         for (i in geocoded.indices) {
             val a = geocoded[i]
-            val aStreet = ClientProximityHelper.extractStreetName(a.address) ?: continue
             for (j in i + 1 until geocoded.size) {
                 val b = geocoded[j]
-                val bStreet = ClientProximityHelper.extractStreetName(b.address) ?: continue
-                if (aStreet != bStreet) continue
 
                 val haversine = distanceMilesBetween(a.latitude!!, a.longitude!!, b.latitude!!, b.longitude!!)
                 if (haversine > AppConfig.Routing.CLUSTER_RADIUS_MILES) continue
@@ -187,9 +187,10 @@ class RoutingEngine {
                 val hopMiles = distanceMilesBetween(currentLat, currentLng, lat, lng)
                 val hopPenalty = hopMiles * AppConfig.Routing.ORDER_HOP_PENALTY_PER_MILE
                 val candidateStreet = ClientProximityHelper.extractStreetName(candidate.suggestion.client.address)
-                // Cluster bonus: within proximity radius AND same street (or street unavailable).
-                val clusterBonusRaw = if (hopMiles <= AppConfig.Routing.CLUSTER_RADIUS_MILES &&
-                    (currentStreet == null || candidateStreet == null || currentStreet == candidateStreet))
+                // Cluster bonus: within proximity radius. Corner-lot clients on different streets
+                // are intentionally included; the driving-distance cache revokes the bonus when
+                // a physical barrier separates them despite close GPS proximity.
+                val clusterBonusRaw = if (hopMiles <= AppConfig.Routing.CLUSTER_RADIUS_MILES)
                     AppConfig.Routing.CLUSTER_NEIGHBOR_BONUS else 0.0
                 // Revoke cluster bonus if verified driving distance exceeds threshold.
                 val clusterBonus = if (clusterBonusRaw > 0.0) {

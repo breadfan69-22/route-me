@@ -5,6 +5,11 @@ import java.util.Locale
 
 object ClientProximityHelper {
 
+    private val HOUSE_NUMBER_RE = Regex("""^\d+[A-Za-z]?\s+""")
+    private val ROAD_SUFFIX_RE = Regex(
+        """\s+(ave|avenue|blvd|boulevard|cir|circle|ct|court|cr|cres|crescent|dr|drive|expy|expressway|fwy|freeway|hwy|highway|ln|lane|pkwy|parkway|pl|place|rd|road|sq|square|st|street|ter|terrace|trl|trail|way)$"""
+    )
+
     /**
      * Extracts the street name from a standard US address string, lower-cased,
      * with common road-type suffixes stripped so that e.g. "High Pointe Cir" and
@@ -17,12 +22,9 @@ object ClientProximityHelper {
      */
     fun extractStreetName(address: String): String? {
         val streetPortion = address.trim().substringBefore(',').trim()
-        val withoutNumber = streetPortion.replaceFirst(Regex("""^\d+[A-Za-z]?\s+"""), "")
+        val withoutNumber = streetPortion.replaceFirst(HOUSE_NUMBER_RE, "")
         val lower = withoutNumber.lowercase(Locale.getDefault()).trimEnd()
-        val withoutSuffix = lower.replace(
-            Regex("""\s+(ave|avenue|blvd|boulevard|cir|circle|ct|court|cr|cres|crescent|dr|drive|expy|expressway|fwy|freeway|hwy|highway|ln|lane|pkwy|parkway|pl|place|rd|road|sq|square|st|street|ter|terrace|trl|trail|way)$"""),
-            ""
-        )
+        val withoutSuffix = lower.replace(ROAD_SUFFIX_RE, "")
         return withoutSuffix.ifBlank { null }
     }
 
@@ -91,11 +93,6 @@ object ClientProximityHelper {
 
             val clusterDist = distanceMeters(depLat, depLng, nLat, nLng, distanceCalculator)
             if (clusterDist > clusterRadiusMeters) continue
-
-            // Only treat as a cluster partner if on the same street (or addresses unavailable)
-            val depStreet = extractStreetName(departingClient.address)
-            val neighborStreet = extractStreetName(neighbor.address)
-            if (depStreet != null && neighborStreet != null && depStreet != neighborStreet) continue
 
             val userDist = distanceMeters(location.latitude, location.longitude, nLat, nLng, distanceCalculator)
             if (userDist <= onSiteRadiusMeters || neighbor.id in activeArrivalClientIds) {
