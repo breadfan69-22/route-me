@@ -176,10 +176,16 @@
 
     <!-- Tile dashboard labels -->
     <string name="tile_upcoming_title">Upcoming Events</string>
+    <string name="tile_upcoming_status_none">No events</string>
+    <string name="tile_upcoming_status_has">Events upcoming</string>
     <string name="tile_sync_title">Sync Sheet</string>
+    <string name="tile_sync_status_loaded">Sheet loaded</string>
+    <string name="tile_sync_status_none">No sheet</string>
     <string name="tile_step_title">Current Step</string>
     <string name="tile_step_placeholder">Tap to select</string>
     <string name="tile_tracking_title">Route Tracking</string>
+    <string name="tile_tracking_status_active">Active</string>
+    <string name="tile_tracking_status_idle">Idle</string>
     <string name="tile_direction_title">Direction</string>
     <string name="tile_direction_default">Working Outward</string>
     <string name="tile_direction_icon">Route direction icon</string>
