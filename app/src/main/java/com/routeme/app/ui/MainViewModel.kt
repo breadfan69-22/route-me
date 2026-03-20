@@ -155,15 +155,14 @@ class MainViewModel(
     private fun fetchStartupWeather() {
         val repo = weatherRepository ?: return
         viewModelScope.launch {
-            val snapshot = withContext(ioDispatcher) {
-                runCatching { repo.fetchCurrentSnapshot(SHOP_LAT, SHOP_LNG) }.getOrNull()
+            val daily = withContext(ioDispatcher) {
+                runCatching { repo.getWeatherForDay(System.currentTimeMillis(), SHOP_LAT, SHOP_LNG) }.getOrNull()
             } ?: return@launch
             _uiState.update {
-                // Only set if no weather already stored (arrival weather takes priority once on route)
                 if (it.currentWeatherTempF != null) return@update it
                 it.copy(
-                    currentWeatherTempF = snapshot.tempF,
-                    currentWeatherIconDesc = snapshot.description
+                    currentWeatherTempF = daily.highTempF,
+                    currentWeatherIconDesc = daily.description
                 )
             }
         }
