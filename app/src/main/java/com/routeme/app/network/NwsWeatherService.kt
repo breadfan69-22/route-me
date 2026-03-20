@@ -9,6 +9,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Fetches weather observations from the National Weather Service (NWS) API.
@@ -27,6 +28,12 @@ object NwsWeatherService {
     private const val USER_AGENT = "RouteMe/1.0 (lawn-route-app)"
     private const val CONNECT_TIMEOUT = 10_000
     private const val READ_TIMEOUT = 10_000
+
+    /**
+     * Nearest observation station ID keyed by "%.1f,%.1f" (lat/lng rounded to 0.1°, ~11 km).
+     * Station IDs are stable landmarks; there's no need to re-resolve on every request.
+     */
+    private val stationCache = ConcurrentHashMap<String, String>()
 
     /**
      * Fetch a daily weather summary for the given location and date.
@@ -83,8 +90,12 @@ object NwsWeatherService {
 
     /**
      * Resolve the nearest observation station for a lat/lon via the NWS points API.
+     * Result is cached by rounded grid cell (~11 km) to avoid redundant network calls.
      */
     private fun resolveNearestStation(lat: Double, lng: Double): String? {
+        val cacheKey = "%.1f,%.1f".format(lat, lng)
+        stationCache[cacheKey]?.let { return it }
+
         // NWS wants max 4 decimal places
         val latStr = "%.4f".format(lat)
         val lngStr = "%.4f".format(lng)
@@ -101,7 +112,10 @@ object NwsWeatherService {
         if (features == null || features.length() == 0) return null
 
         val stationProps = features.getJSONObject(0).optJSONObject("properties")
-        return stationProps?.optString("stationIdentifier")
+        val stationId = stationProps?.optString("stationIdentifier") ?: return null
+
+        stationCache[cacheKey] = stationId
+        return stationId
     }
 
     /**

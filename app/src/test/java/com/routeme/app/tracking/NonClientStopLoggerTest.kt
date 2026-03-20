@@ -35,10 +35,10 @@ class NonClientStopLoggerTest {
         val location = location(42.0, -85.0)
 
         nowMillis = 1_000L
-        logger.onLocationTick(location)
+        logger.onLocationTick(location, isNearClientOrActive = false)
 
         nowMillis = 61_000L
-        logger.onLocationTick(location)
+        logger.onLocationTick(location, isNearClientOrActive = false)
 
         coVerify(exactly = 1) {
             dao.insertStop(
@@ -72,7 +72,7 @@ class NonClientStopLoggerTest {
         )
 
         nowMillis = 61_000L
-        logger.onLocationTick(location(42.0, -85.0))
+        logger.onLocationTick(location(42.0, -85.0), isNearClientOrActive = false)
 
         coVerify(exactly = 1) { dao.updateDeparture(7L, 61_000L, 1L) }
         coVerify(exactly = 0) { dao.insertStop(any()) }
@@ -90,9 +90,6 @@ class NonClientStopLoggerTest {
             preferencesRepository = preferencesRepository,
             nonClientStopDao = nonClientStopDao,
             nonClientStopTracker = nonClientStopTracker,
-            arrivalRadiusMeters = 60f,
-            hasActiveArrivals = { false },
-            isNearAnyClient = { _, _ -> false },
             launchAsync = { block -> runBlocking { block() } },
             nowProvider = nowProvider,
             reverseGeocode = reverseGeocode,

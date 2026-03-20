@@ -12,9 +12,6 @@ class DestinationArrivalCoordinator(
     private val destinationDwellDetector: DestinationDwellDetector,
     private val preferencesRepository: PreferencesRepository,
     private val nonClientStopDao: NonClientStopDao,
-    private val arrivalRadiusMeters: Float,
-    private val hasActiveArrivals: () -> Boolean,
-    private val isNearAnyClient: (Location, Float) -> Boolean,
     private val launchAsync: (suspend () -> Unit) -> Unit,
     private val postToMainThread: ((() -> Unit) -> Unit),
     private val emitEvent: (TrackingEvent) -> Unit,
@@ -22,12 +19,11 @@ class DestinationArrivalCoordinator(
     private val logWarn: (String) -> Unit = { message -> Log.w(tag, message) }
 ) {
 
-    fun onLocationTick(location: Location) {
+    fun onLocationTick(location: Location, isNearClientOrActive: Boolean) {
         val outcome = destinationDwellDetector.onLocationTick(
             location = location,
             activeDestination = preferencesRepository.activeDestination,
-            isNearClientOrActiveArrival = isNearAnyClient(location, arrivalRadiusMeters) ||
-                hasActiveArrivals()
+            isNearClientOrActiveArrival = isNearClientOrActive
         )
 
         val reached = outcome.destinationReached ?: return

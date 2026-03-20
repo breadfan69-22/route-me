@@ -74,6 +74,7 @@ class LocationTrackingService : Service(), KoinComponent {
     }
 
     private var locationDispatcher: LocationDispatcher? = null
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     // Core collaborators
     private val modeController = TrackingModeController(
@@ -116,9 +117,7 @@ class LocationTrackingService : Service(), KoinComponent {
             cancelNotification = { notifId ->
                 getSystemService(NotificationManager::class.java).cancel(notifId)
             },
-            postToMainThread = { block ->
-                android.os.Handler(mainLooper).post { block() }
-            },
+            postToMainThread = { block -> mainHandler.post { block() } },
             emitEvent = { event ->
                 onTrackingEventFromArrivalCoordinator(event)
             }
@@ -133,9 +132,6 @@ class LocationTrackingService : Service(), KoinComponent {
                 nonClientStopRadiusMeters = AppConfig.Tracking.NON_CLIENT_STOP_RADIUS_METERS,
                 nonClientDepartRadiusMeters = AppConfig.Tracking.NON_CLIENT_DEPART_RADIUS_METERS
             ),
-            arrivalRadiusMeters = AppConfig.Tracking.ARRIVAL_RADIUS_METERS,
-            hasActiveArrivals = { arrivalDispatchCoordinator.hasActiveArrivals() },
-            isNearAnyClient = ::isNearAnyClient,
             launchAsync = { block ->
                 serviceScope.launch { block() }
             }
@@ -150,15 +146,10 @@ class LocationTrackingService : Service(), KoinComponent {
             ),
             preferencesRepository = preferencesRepository,
             nonClientStopDao = nonClientStopDao,
-            arrivalRadiusMeters = AppConfig.Tracking.ARRIVAL_RADIUS_METERS,
-            hasActiveArrivals = { arrivalDispatchCoordinator.hasActiveArrivals() },
-            isNearAnyClient = ::isNearAnyClient,
             launchAsync = { block ->
                 serviceScope.launch { block() }
             },
-            postToMainThread = { block ->
-                android.os.Handler(mainLooper).post { block() }
-            },
+            postToMainThread = { block -> mainHandler.post { block() } },
             emitEvent = { event ->
                 trackingEventBus.tryEmit(event)
             }
@@ -252,8 +243,13 @@ class LocationTrackingService : Service(), KoinComponent {
             },
             onLocationTick = { location ->
                 arrivalDispatchCoordinator.onLocationTick(location, trackedClients)
-                nonClientStopLogger.onLocationTick(location)
-                destinationArrivalCoordinator.onLocationTick(location)
+                // Compute proximity once; both remaining coordinators share the result
+                // to avoid redundant O(N) client-list scans on every GPS tick.
+                val nearClientOrActive =
+                    isNearAnyClient(location, AppConfig.Tracking.ARRIVAL_RADIUS_METERS) ||
+                        arrivalDispatchCoordinator.hasActiveArrivals()
+                nonClientStopLogger.onLocationTick(location, nearClientOrActive)
+                destinationArrivalCoordinator.onLocationTick(location, nearClientOrActive)
             }
         )
         locationDispatcher?.startLocationUpdates()

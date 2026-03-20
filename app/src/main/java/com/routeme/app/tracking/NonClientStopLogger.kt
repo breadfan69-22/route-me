@@ -15,9 +15,6 @@ class NonClientStopLogger(
     private val preferencesRepository: PreferencesRepository,
     private val nonClientStopDao: NonClientStopDao,
     private val nonClientStopTracker: NonClientStopTracker,
-    private val arrivalRadiusMeters: Float,
-    private val hasActiveArrivals: () -> Boolean,
-    private val isNearAnyClient: (Location, Float) -> Boolean,
     private val launchAsync: (suspend () -> Unit) -> Unit,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
     private val reverseGeocode: (Double, Double) -> String? = { lat, lng ->
@@ -27,7 +24,7 @@ class NonClientStopLogger(
     private val logWarn: (String) -> Unit = { message -> Log.w(tag, message) }
 ) {
 
-    fun onLocationTick(location: Location) {
+    fun onLocationTick(location: Location, isNearClientOrActive: Boolean) {
         if (!preferencesRepository.nonClientLoggingEnabled) {
             clearState()
             return
@@ -35,12 +32,11 @@ class NonClientStopLogger(
 
         val now = nowProvider()
         val thresholdMs = preferencesRepository.nonClientStopThresholdMinutes * 60_000L
-        val nearClient = isNearAnyClient(location, arrivalRadiusMeters)
 
         val outcome = nonClientStopTracker.onLocationTick(
             location = location,
             nowMillis = now,
-            isNearClientOrActiveArrival = nearClient || hasActiveArrivals(),
+            isNearClientOrActiveArrival = isNearClientOrActive,
             thresholdMs = thresholdMs
         )
 

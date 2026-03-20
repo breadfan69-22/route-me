@@ -65,6 +65,14 @@ object GeocodingHelper {
 
     private val ZIP_PATTERN = Regex("\\b\\d{5}\\b")
 
+    /**
+     * Pre-compiled alias patterns paired with their replacement city names.
+     * Building these once avoids re-compiling on every [enrichAddress] call.
+     */
+    private val CITY_ALIAS_PATTERNS: List<Pair<Regex, String>> = CITY_ALIASES.map { (alias, city) ->
+        Regex("\\b${Regex.escape(alias)}\\b", RegexOption.IGNORE_CASE) to city
+    }
+
     data class GeocodingResult(
         val geocodedCount: Int,
         val failedCount: Int,
@@ -100,9 +108,7 @@ object GeocodingHelper {
 
         // Try to expand known city abbreviations
         var foundCity = false
-        for ((alias, fullName) in CITY_ALIASES) {
-            // Match the alias as a whole word (case-insensitive)
-            val aliasRegex = Regex("\\b${Regex.escape(alias)}\\b", RegexOption.IGNORE_CASE)
+        for ((aliasRegex, fullName) in CITY_ALIAS_PATTERNS) {
             if (aliasRegex.containsMatchIn(addr)) {
                 addr = aliasRegex.replace(addr, fullName)
                 foundCity = true

@@ -38,10 +38,10 @@ class DestinationArrivalCoordinatorTest {
         val here = location(42.0, -85.0)
 
         nowMillis = 1_000L
-        coordinator.onLocationTick(here)
+        coordinator.onLocationTick(here, isNearClientOrActive = false)
 
         nowMillis = 2_100L
-        coordinator.onLocationTick(here)
+        coordinator.onLocationTick(here, isNearClientOrActive = false)
 
         coVerify(exactly = 1) {
             dao.insertStop(
@@ -74,17 +74,16 @@ class DestinationArrivalCoordinatorTest {
             preferencesRepository = preferences,
             nonClientStopDao = dao,
             nowProvider = { nowMillis },
-            isNearAnyClient = { _, _ -> true },
             emitEvent = { events += it }
         )
 
         val here = location(42.0, -85.0)
 
         nowMillis = 1_000L
-        coordinator.onLocationTick(here)
+        coordinator.onLocationTick(here, isNearClientOrActive = true)
 
         nowMillis = 2_100L
-        coordinator.onLocationTick(here)
+        coordinator.onLocationTick(here, isNearClientOrActive = true)
 
         coVerify(exactly = 0) { dao.insertStop(any()) }
         assertTrue(events.none { it is TrackingEvent.DestinationReached })
@@ -94,8 +93,6 @@ class DestinationArrivalCoordinatorTest {
         preferencesRepository: PreferencesRepository,
         nonClientStopDao: NonClientStopDao,
         nowProvider: () -> Long,
-        isNearAnyClient: (Location, Float) -> Boolean = { _, _ -> false },
-        hasActiveArrivals: () -> Boolean = { false },
         emitEvent: (TrackingEvent) -> Unit
     ): DestinationArrivalCoordinator {
         return DestinationArrivalCoordinator(
@@ -112,9 +109,6 @@ class DestinationArrivalCoordinatorTest {
             ),
             preferencesRepository = preferencesRepository,
             nonClientStopDao = nonClientStopDao,
-            arrivalRadiusMeters = 60f,
-            hasActiveArrivals = hasActiveArrivals,
-            isNearAnyClient = isNearAnyClient,
             launchAsync = { block -> runBlocking { block() } },
             postToMainThread = { block -> block() },
             emitEvent = emitEvent,
