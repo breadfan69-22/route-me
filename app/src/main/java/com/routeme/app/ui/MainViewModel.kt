@@ -11,6 +11,8 @@ import com.routeme.app.ClientStopStatus
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
+import com.routeme.app.SHOP_LAT
+import com.routeme.app.SHOP_LNG
 import com.routeme.app.NonClientStop
 import com.routeme.app.suggestedStepsForDate
 import com.routeme.app.TrackingEvent
@@ -147,6 +149,24 @@ class MainViewModel(
         loadSyncSettings()
         loadClients()
         loadSavedDestinations()
+        fetchStartupWeather()
+    }
+
+    private fun fetchStartupWeather() {
+        val repo = weatherRepository ?: return
+        viewModelScope.launch {
+            val snapshot = withContext(ioDispatcher) {
+                runCatching { repo.fetchCurrentSnapshot(SHOP_LAT, SHOP_LNG) }.getOrNull()
+            } ?: return@launch
+            _uiState.update {
+                // Only set if no weather already stored (arrival weather takes priority once on route)
+                if (it.currentWeatherTempF != null) return@update it
+                it.copy(
+                    currentWeatherTempF = snapshot.tempF,
+                    currentWeatherIconDesc = snapshot.description
+                )
+            }
+        }
     }
 
     fun loadClients() {
