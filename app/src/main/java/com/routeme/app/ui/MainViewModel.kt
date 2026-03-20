@@ -1039,7 +1039,9 @@ class MainViewModel(
                     state.copy(
                         arrivalWeatherTempF = snapshot.tempF,
                         arrivalWeatherWindMph = snapshot.windMph,
-                        arrivalWeatherDesc = snapshot.description
+                        arrivalWeatherDesc = snapshot.description,
+                        currentWeatherTempF = snapshot.tempF,
+                        currentWeatherIconDesc = snapshot.description
                     )
                 }
             }

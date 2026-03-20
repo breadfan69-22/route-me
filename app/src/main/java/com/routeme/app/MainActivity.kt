@@ -222,7 +222,12 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         // Split-flap remaining count
-                        updateRemainingCount(state.eligibleClientCount)
+                        val countdownValue = if (state.errandsModeEnabled) {
+                            state.destinationQueue.size
+                        } else {
+                            state.eligibleClientCount
+                        }
+                        updateRemainingCount(countdownValue)
 
                         // Destination chip
                         val dest = state.activeDestination
@@ -295,13 +300,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupSplitFlapDigits() {
         val container = binding.heroSplitFlapContainer
         val digitWidthPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 22f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 44f, resources.displayMetrics
         ).toInt()
         val digitHeightPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 28f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 58f, resources.displayMetrics
         ).toInt()
         val marginPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 2f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 3f, resources.displayMetrics
         ).toInt()
 
         splitFlapDigits = (0 until 3).map { i ->
@@ -325,14 +330,14 @@ class MainActivity : AppCompatActivity() {
             state.errandsModeEnabled -> R.drawable.ic_hero_notepad
             state.selectedServiceTypes.any {
                 it == ServiceType.GRUB || it == ServiceType.INCIDENTAL
-            } -> R.drawable.ic_hero_bug
+            } -> R.drawable.grub
             state.selectedServiceTypes.any {
                 it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5
-            } -> R.drawable.ic_hero_sprayer
+            } -> R.drawable.siteone_lesco_495246_1
             state.selectedServiceTypes.any {
                 it == ServiceType.ROUND_1 || it == ServiceType.ROUND_3 ||
                 it == ServiceType.ROUND_4 || it == ServiceType.ROUND_6
-            } -> R.drawable.ic_hero_spreader
+            } -> R.drawable.permagreen_turf_spreader_sprayer
             else -> R.drawable.ic_hero_default
         }
         if (newRes == currentHeroRes) return
@@ -354,9 +359,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stepTypeToSmallIcon(types: Set<ServiceType>): Int = when {
-        types.any { it == ServiceType.GRUB || it == ServiceType.INCIDENTAL } -> R.drawable.ic_step_bug
-        types.any { it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5 } -> R.drawable.ic_step_sprayer
-        else -> R.drawable.ic_step_spreader
+        types.any { it == ServiceType.GRUB || it == ServiceType.INCIDENTAL } -> R.drawable.grub_small
+        types.any { it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5 } -> R.drawable.siteone_lesco_495246_1_small
+        else -> R.drawable.permagreen_turf_spreader_sprayer_small
     }
 
     private fun updateRemainingCount(newCount: Int) {

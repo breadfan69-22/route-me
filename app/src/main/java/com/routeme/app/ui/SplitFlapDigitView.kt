@@ -35,7 +35,7 @@ class SplitFlapDigitView @JvmOverloads constructor(
         clipToPadding = false
 
         val digitTextSize = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_SP, 16f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_SP, 32f, resources.displayMetrics
         )
 
         topHalf = TextView(context).apply {
