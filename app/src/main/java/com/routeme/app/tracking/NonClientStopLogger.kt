@@ -24,7 +24,12 @@ class NonClientStopLogger(
         GeocodingHelper.reverseGeocode(lat, lng)
     },
     private val logDebug: (String) -> Unit = { message -> Log.d(tag, message) },
-    private val logWarn: (String) -> Unit = { message -> Log.w(tag, message) }
+    private val logWarn: (String) -> Unit = { message -> Log.w(tag, message) },
+    private val distanceBetweenMeters: (Double, Double, Double, Double) -> Float = { fromLat, fromLng, toLat, toLng ->
+        val results = FloatArray(1)
+        Location.distanceBetween(fromLat, fromLng, toLat, toLng, results)
+        results[0]
+    }
 ) {
 
     fun onLocationTick(location: Location, isNearClientOrActive: Boolean) {
@@ -85,9 +90,8 @@ class NonClientStopLogger(
             "Non-client stop detected! Stationary ${request.elapsedMillis / 60_000}min at (${request.lat}, ${request.lng})"
         )
 
-        val shopResults = FloatArray(1)
-        Location.distanceBetween(request.lat, request.lng, SHOP_LAT, SHOP_LNG, shopResults)
-        val isAtShop = shopResults[0] <= AppConfig.Tracking.NON_CLIENT_SHOP_LABEL_RADIUS_METERS
+        val shopDistanceMeters = distanceBetweenMeters(request.lat, request.lng, SHOP_LAT, SHOP_LNG)
+        val isAtShop = shopDistanceMeters <= AppConfig.Tracking.NON_CLIENT_SHOP_LABEL_RADIUS_METERS
 
         val entity = NonClientStopEntity(
             lat = request.lat,

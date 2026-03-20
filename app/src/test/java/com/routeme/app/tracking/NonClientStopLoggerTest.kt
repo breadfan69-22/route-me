@@ -83,7 +83,9 @@ class NonClientStopLoggerTest {
         preferencesRepository: PreferencesRepository,
         nonClientStopTracker: NonClientStopTracker = newTracker(),
         nowProvider: () -> Long = { 0L },
-        reverseGeocode: (Double, Double) -> String? = { _, _ -> null }
+        reverseGeocode: (Double, Double) -> String? = { _, _ -> null },
+        distanceBetweenMeters: (Double, Double, Double, Double) -> Float =
+            ::approximateDistanceMeters
     ): NonClientStopLogger {
         return NonClientStopLogger(
             tag = "NonClientStopLoggerTest",
@@ -93,6 +95,7 @@ class NonClientStopLoggerTest {
             launchAsync = { block -> runBlocking { block() } },
             nowProvider = nowProvider,
             reverseGeocode = reverseGeocode,
+            distanceBetweenMeters = distanceBetweenMeters,
             logDebug = { },
             logWarn = { }
         )
@@ -102,12 +105,14 @@ class NonClientStopLoggerTest {
         return NonClientStopTracker(
             nonClientStopRadiusMeters = 60f,
             nonClientDepartRadiusMeters = 80f,
-            distanceCalculator = { fromLat, fromLng, toLat, toLng ->
-                val dLat = (fromLat - toLat) * 111_000.0
-                val dLng = (fromLng - toLng) * 111_000.0
-                kotlin.math.sqrt(dLat * dLat + dLng * dLng).toFloat()
-            }
+            distanceCalculator = ::approximateDistanceMeters
         )
+    }
+
+    private fun approximateDistanceMeters(fromLat: Double, fromLng: Double, toLat: Double, toLng: Double): Float {
+        val dLat = (fromLat - toLat) * 111_000.0
+        val dLng = (fromLng - toLng) * 111_000.0
+        return kotlin.math.sqrt(dLat * dLat + dLng * dLng).toFloat()
     }
 
     private fun location(lat: Double, lng: Double): Location {

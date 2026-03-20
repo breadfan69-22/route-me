@@ -1300,10 +1300,6 @@ class MainViewModel(
         currentLocation: Location?,
         visitNotes: String
     ): ServiceCompletionUseCase.ConfirmSelectedRequest {
-        val selectedSuggestionEligibleSteps = state.selectedClient
-            ?.let { client -> state.suggestions.find { it.client.id == client.id }?.eligibleSteps }
-            ?: emptySet()
-
         return ServiceCompletionUseCase.ConfirmSelectedRequest(
             clients = state.clients,
             selectedClient = state.selectedClient,
@@ -1313,13 +1309,23 @@ class MainViewModel(
             weatherTempF = state.arrivalWeatherTempF,
             weatherWindMph = state.arrivalWeatherWindMph,
             weatherDesc = state.arrivalWeatherDesc,
-            selectedSuggestionEligibleSteps = selectedSuggestionEligibleSteps,
+            selectedSuggestionEligibleSteps = selectedSuggestionEligibleStepsForSelectedClient(state),
             selectedServiceTypes = state.selectedServiceTypes,
-            currentLocation = currentLocation?.let {
-                ServiceCompletionUseCase.GeoPoint(it.latitude, it.longitude)
-            },
+            currentLocation = serviceCompletionGeoPoint(currentLocation),
             visitNotes = visitNotes
         )
+    }
+
+    private fun selectedSuggestionEligibleStepsForSelectedClient(state: MainUiState): Set<ServiceType> {
+        return state.selectedClient
+            ?.let { client -> state.suggestions.find { it.client.id == client.id }?.eligibleSteps }
+            ?: emptySet()
+    }
+
+    private fun serviceCompletionGeoPoint(location: Location?): ServiceCompletionUseCase.GeoPoint? {
+        return location?.let {
+            ServiceCompletionUseCase.GeoPoint(it.latitude, it.longitude)
+        }
     }
 
     private suspend fun handleConfirmSelectedSuccess(
@@ -1412,27 +1418,32 @@ class MainViewModel(
         state: MainUiState,
         selectedMembers: List<com.routeme.app.ClusterMember>
     ): ServiceCompletionUseCase.ConfirmClusterRequest {
-        val eligibleStepsByClientId = state.suggestions
-            .associate { suggestion -> suggestion.client.id to suggestion.eligibleSteps }
-
         return ServiceCompletionUseCase.ConfirmClusterRequest(
             clients = state.clients,
             selectedServiceTypes = state.selectedServiceTypes,
-            suggestionEligibleStepsByClientId = eligibleStepsByClientId,
-            selectedMembers = selectedMembers.map { member ->
-                ServiceCompletionUseCase.ClusterMemberInput(
-                    clientId = member.client.id,
-                    clientName = member.client.name,
-                    arrivedAtMillis = member.arrivedAtMillis,
-                    location = ServiceCompletionUseCase.GeoPoint(
-                        member.location.latitude,
-                        member.location.longitude
-                    ),
-                    weatherTempF = member.weatherTempF,
-                    weatherWindMph = member.weatherWindMph,
-                    weatherDesc = member.weatherDesc
-                )
-            }
+            suggestionEligibleStepsByClientId = suggestionEligibleStepsByClientId(state),
+            selectedMembers = selectedMembers.map(::toClusterMemberInput)
+        )
+    }
+
+    private fun suggestionEligibleStepsByClientId(state: MainUiState): Map<String, Set<ServiceType>> {
+        return state.suggestions.associate { suggestion ->
+            suggestion.client.id to suggestion.eligibleSteps
+        }
+    }
+
+    private fun toClusterMemberInput(member: com.routeme.app.ClusterMember): ServiceCompletionUseCase.ClusterMemberInput {
+        return ServiceCompletionUseCase.ClusterMemberInput(
+            clientId = member.client.id,
+            clientName = member.client.name,
+            arrivedAtMillis = member.arrivedAtMillis,
+            location = ServiceCompletionUseCase.GeoPoint(
+                member.location.latitude,
+                member.location.longitude
+            ),
+            weatherTempF = member.weatherTempF,
+            weatherWindMph = member.weatherWindMph,
+            weatherDesc = member.weatherDesc
         )
     }
 
@@ -2164,6 +2175,13 @@ class MainViewModel(
     }
 
     private fun persistCriticalState(state: MainUiState) {
+        persistSelectionState(state)
+        persistArrivalState(state)
+        persistTrackingState(state)
+        persistDestinationState(state)
+    }
+
+    private fun persistSelectionState(state: MainUiState) {
         savedStateHandle[KEY_SERVICE_TYPE] = state.selectedServiceTypes.joinToString(",") { it.name }
         savedStateHandle[KEY_MIN_DAYS] = state.minDays
         savedStateHandle[KEY_CU_OVERRIDE] = state.cuOverrideEnabled
@@ -2171,14 +2189,22 @@ class MainViewModel(
         savedStateHandle[KEY_ROUTE_DIRECTION] = state.routeDirection.name
         savedStateHandle[KEY_SUGGESTION_OFFSET] = state.suggestionOffset
         savedStateHandle[KEY_SELECTED_CLIENT_ID] = state.selectedClient?.id
+    }
+
+    private fun persistArrivalState(state: MainUiState) {
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = state.arrivalStartedAtMillis
         savedStateHandle[KEY_ARRIVAL_LAT] = state.arrivalLat
         savedStateHandle[KEY_ARRIVAL_LNG] = state.arrivalLng
         savedStateHandle[KEY_ARRIVAL_WEATHER_TEMP_F] = state.arrivalWeatherTempF
         savedStateHandle[KEY_ARRIVAL_WEATHER_WIND_MPH] = state.arrivalWeatherWindMph
         savedStateHandle[KEY_ARRIVAL_WEATHER_DESC] = state.arrivalWeatherDesc
+    }
+
+    private fun persistTrackingState(state: MainUiState) {
         savedStateHandle[KEY_IS_TRACKING] = state.isTracking
-        // Destination queue
+    }
+
+    private fun persistDestinationState(state: MainUiState) {
         savedStateHandle[KEY_DEST_QUEUE] = state.destinationQueue.joinToString("|") {
             "${it.id},${it.name},${it.address},${it.lat},${it.lng}"
         }
