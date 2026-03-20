@@ -4,6 +4,9 @@ import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.Context
 import android.graphics.Typeface
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -18,6 +21,22 @@ import com.routeme.app.data.PreferencesRepository
 import java.util.Calendar
 
 object DialogFactory {
+    private fun doubleBuzz(context: Context) {
+        val vib = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vib.vibrate(
+                VibrationEffect.createWaveform(
+                    longArrayOf(0, 60, 80, 60),
+                    intArrayOf(0, 255, 0, 255),
+                    -1
+                )
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            vib.vibrate(longArrayOf(0, 60, 80, 60), -1)
+        }
+    }
+
     fun showDailySummaryDialog(context: Context, summary: String) {
         AlertDialog.Builder(context)
             .setTitle(context.getString(R.string.dialog_daily_summary_title))
@@ -391,14 +410,15 @@ object DialogFactory {
                 notesLayout.visibility = View.VISIBLE
             }
         }
-        mapsBtn.setOnClickListener { onMaps(); dialog.dismiss() }
-        skipBtn.setOnClickListener { onSkip(); dialog.dismiss() }
+        mapsBtn.setOnClickListener { doubleBuzz(context); onMaps(); dialog.dismiss() }
+        skipBtn.setOnClickListener { doubleBuzz(context); onSkip(); dialog.dismiss() }
         confirmBtn.setOnClickListener {
+            doubleBuzz(context)
             val notes = notesInput.text?.toString().orEmpty()
             onConfirm(notes)
             dialog.dismiss()
         }
-        editNotesBtn.setOnClickListener { onEditNotes(); dialog.dismiss() }
+        editNotesBtn.setOnClickListener { doubleBuzz(context); onEditNotes(); dialog.dismiss() }
         propertyBtn.setOnClickListener {
             android.widget.Toast.makeText(context, "Property stats coming soon", android.widget.Toast.LENGTH_SHORT).show()
         }
