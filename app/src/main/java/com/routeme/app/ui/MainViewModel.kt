@@ -556,75 +556,97 @@ class MainViewModel(
     fun suggestNextClients(currentLocation: Location?) {
         if (checkAndPromptStaleArrival { suggestNextClients(currentLocation) }) return
         viewModelScope.launch {
-            val state = _uiState.value
-            if (state.isLoading) {
-                setStatus("Still loading clients, please wait…")
-                return@launch
-            }
+            suggestNextClientsInternal(currentLocation)
+        }
+    }
 
-            if (state.errandsModeEnabled) {
-                setStatus("Errands Mode is active")
-                return@launch
-            }
+    private suspend fun suggestNextClientsInternal(currentLocation: Location?) {
+        val state = _uiState.value
+        if (!canSuggestForState(state)) return
 
-            _uiState.update { it.copy(isSuggestionsLoading = true) }
+        _uiState.update { it.copy(isSuggestionsLoading = true) }
 
-            try {
-                val latestState = _uiState.value
+        try {
+            val result = computeSuggestionResult(currentLocation)
+            applySuggestionResult(result)
+        } finally {
+            clearSuggestionLoadingFlag()
+        }
+    }
 
-                // Pre-verify driving distances for cluster-candidate pairs on IO.
-                withContext(ioDispatcher) {
-                    routingEngine.precomputeClusterDrivingDistances(latestState.clients)
-                }
+    private suspend fun canSuggestForState(state: MainUiState): Boolean {
+        if (state.isLoading) {
+            setStatus("Still loading clients, please wait…")
+            return false
+        }
 
-                val result = suggestionUseCase.suggestNextClients(
-                    clients = latestState.clients,
-                    selectedServiceTypes = latestState.selectedServiceTypes,
-                    minDays = latestState.minDays,
-                    cuOverrideEnabled = latestState.cuOverrideEnabled,
-                    routeDirection = latestState.routeDirection,
-                    activeDestination = latestState.activeDestination,
-                    currentLocation = currentLocation
+        if (state.errandsModeEnabled) {
+            setStatus("Errands Mode is active")
+            return false
+        }
+
+        return true
+    }
+
+    private suspend fun computeSuggestionResult(
+        currentLocation: Location?
+    ): SuggestionUseCase.SuggestNextResult {
+        val latestState = _uiState.value
+
+        withContext(ioDispatcher) {
+            routingEngine.precomputeClusterDrivingDistances(latestState.clients)
+        }
+
+        return suggestionUseCase.suggestNextClients(
+            clients = latestState.clients,
+            selectedServiceTypes = latestState.selectedServiceTypes,
+            minDays = latestState.minDays,
+            cuOverrideEnabled = latestState.cuOverrideEnabled,
+            routeDirection = latestState.routeDirection,
+            activeDestination = latestState.activeDestination,
+            currentLocation = currentLocation
+        )
+    }
+
+    private suspend fun applySuggestionResult(result: SuggestionUseCase.SuggestNextResult) {
+        if (result.dateRolloverDetected) {
+            clearDestinationQueue()
+        }
+
+        if (result.suggestions.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    suggestions = emptyList(),
+                    suggestionOffset = result.suggestionOffset,
+                    selectedClient = null,
+                    selectedClientDetails = "",
+                    eligibleClientCount = 0
                 )
+            }
+            setStatus(result.statusMessage)
+            return
+        }
 
-                if (result.dateRolloverDetected) {
-                    clearDestinationQueue()
-                }
+        _uiState.update {
+            it.copy(
+                suggestions = result.suggestions,
+                suggestionOffset = result.suggestionOffset,
+                selectedClient = result.selectedClient,
+                selectedClientDetails = result.selectedClientDetails,
+                eligibleClientCount = result.totalEligibleCount
+            )
+        }
+        persistCriticalState(_uiState.value)
+        setStatus(result.statusMessage)
+        fetchDrivingTimesForCurrentPage()
+    }
 
-                if (result.suggestions.isEmpty()) {
-                    _uiState.update {
-                        it.copy(
-                            suggestions = emptyList(),
-                            suggestionOffset = result.suggestionOffset,
-                            selectedClient = null,
-                            selectedClientDetails = "",
-                            eligibleClientCount = 0
-                        )
-                    }
-                    setStatus(result.statusMessage)
-                    return@launch
-                }
-
-                _uiState.update {
-                    it.copy(
-                        suggestions = result.suggestions,
-                        suggestionOffset = result.suggestionOffset,
-                        selectedClient = result.selectedClient,
-                        selectedClientDetails = result.selectedClientDetails,
-                        eligibleClientCount = result.totalEligibleCount
-                    )
-                }
-                persistCriticalState(_uiState.value)
-                setStatus(result.statusMessage)
-                fetchDrivingTimesForCurrentPage()
-            } finally {
-                _uiState.update { current ->
-                    if (current.isSuggestionsLoading) {
-                        current.copy(isSuggestionsLoading = false)
-                    } else {
-                        current
-                    }
-                }
+    private fun clearSuggestionLoadingFlag() {
+        _uiState.update { current ->
+            if (current.isSuggestionsLoading) {
+                current.copy(isSuggestionsLoading = false)
+            } else {
+                current
             }
         }
     }
@@ -703,74 +725,87 @@ class MainViewModel(
     fun exportTopRouteToMaps() {
         viewModelScope.launch {
             val state = _uiState.value
-            val originLocation = suggestionUseCase.lastSuggestionLocation()?.let {
-                MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
-            }
+            val originLocation = suggestionOriginLocation()
 
             if (state.errandsModeEnabled) {
-                when (
-                    val result = mapsExportUseCase.exportErrandsRoute(
-                        destinationQueue = state.destinationQueue,
-                        activeDestinationIndex = state.activeDestinationIndex,
-                        originLocation = originLocation
-                    )
-                ) {
-                    MapsExportUseCase.ExportResult.NoDestinations -> {
-                        setStatus("Add destinations first")
-                    }
-
-                    is MapsExportUseCase.ExportResult.Success -> {
-                        val routeExport = result.routeExport
-                        _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
-
-                        val clipped = routeExport.requestedStops - routeExport.includedStops
-                        if (clipped > 0) {
-                            setStatus("Opened errands route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
-                        } else {
-                            setStatus("Opened errands route with ${routeExport.includedStops} stops")
-                        }
-                    }
-
-                    MapsExportUseCase.ExportResult.NoSuggestions,
-                    MapsExportUseCase.ExportResult.NoMappableClients -> {
-                        setStatus("Add destinations first")
-                    }
-                }
+                handleErrandsRouteExport(state, originLocation)
                 return@launch
             }
 
-            when (
-                val result = mapsExportUseCase.exportTopRoute(
-                    suggestions = state.suggestions,
-                    routeDirection = state.routeDirection,
-                    activeDestination = state.activeDestination,
-                    originLocation = originLocation
-                )
-            ) {
-                MapsExportUseCase.ExportResult.NoMappableClients -> {
-                    setStatus("No mappable clients in current suggestions")
-                }
+            handleSuggestionRouteExport(state, originLocation)
+        }
+    }
 
-                MapsExportUseCase.ExportResult.NoSuggestions -> {
-                    setStatus("Run suggestions first")
-                }
+    private fun suggestionOriginLocation(): MapsExportUseCase.GeoPoint? {
+        return suggestionUseCase.lastSuggestionLocation()?.let {
+            MapsExportUseCase.GeoPoint(it.latitude, it.longitude)
+        }
+    }
 
-                MapsExportUseCase.ExportResult.NoDestinations -> {
-                    setStatus("Add destinations first")
-                }
-
-                is MapsExportUseCase.ExportResult.Success -> {
-                    val routeExport = result.routeExport
-                    _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
-
-                    val clipped = routeExport.requestedStops - routeExport.includedStops
-                    if (clipped > 0) {
-                        setStatus("Opened Maps route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
-                    } else {
-                        setStatus("Opened Maps route with ${routeExport.includedStops} stops")
-                    }
-                }
+    private suspend fun handleErrandsRouteExport(
+        state: MainUiState,
+        originLocation: MapsExportUseCase.GeoPoint?
+    ) {
+        when (
+            val result = mapsExportUseCase.exportErrandsRoute(
+                destinationQueue = state.destinationQueue,
+                activeDestinationIndex = state.activeDestinationIndex,
+                originLocation = originLocation
+            )
+        ) {
+            MapsExportUseCase.ExportResult.NoDestinations,
+            MapsExportUseCase.ExportResult.NoSuggestions,
+            MapsExportUseCase.ExportResult.NoMappableClients -> {
+                setStatus("Add destinations first")
             }
+
+            is MapsExportUseCase.ExportResult.Success -> {
+                emitRouteExportSuccess(result.routeExport, routeKind = "errands")
+            }
+        }
+    }
+
+    private suspend fun handleSuggestionRouteExport(
+        state: MainUiState,
+        originLocation: MapsExportUseCase.GeoPoint?
+    ) {
+        when (
+            val result = mapsExportUseCase.exportTopRoute(
+                suggestions = state.suggestions,
+                routeDirection = state.routeDirection,
+                activeDestination = state.activeDestination,
+                originLocation = originLocation
+            )
+        ) {
+            MapsExportUseCase.ExportResult.NoMappableClients -> {
+                setStatus("No mappable clients in current suggestions")
+            }
+
+            MapsExportUseCase.ExportResult.NoSuggestions -> {
+                setStatus("Run suggestions first")
+            }
+
+            MapsExportUseCase.ExportResult.NoDestinations -> {
+                setStatus("Add destinations first")
+            }
+
+            is MapsExportUseCase.ExportResult.Success -> {
+                emitRouteExportSuccess(result.routeExport, routeKind = "Maps")
+            }
+        }
+    }
+
+    private suspend fun emitRouteExportSuccess(
+        routeExport: MapsExportUseCase.RouteExport,
+        routeKind: String
+    ) {
+        _events.emit(MainEvent.OpenMapsRoute(routeExport.uri))
+
+        val clipped = routeExport.requestedStops - routeExport.includedStops
+        if (clipped > 0) {
+            setStatus("Opened $routeKind route with ${routeExport.includedStops} of ${routeExport.requestedStops} stops")
+        } else {
+            setStatus("Opened $routeKind route with ${routeExport.includedStops} stops")
         }
     }
 
