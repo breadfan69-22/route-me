@@ -272,9 +272,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindPrimaryTiles(state: MainUiState) {
+        bindStepTile(state)
+        bindSyncTile(state)
+        bindUpcomingTile()
+        bindTrackingTile(state)
+        bindErrandsSuggestionVisibility(state)
+        bindDirectionTile(state)
+    }
+
+    private fun bindStepTile(state: MainUiState) {
         binding.stepLabel.text = formatStepLabel(state.selectedServiceTypes)
         binding.stepIcon.setImageResource(resolveStepTileIcon(state))
+    }
 
+    private fun bindSyncTile(state: MainUiState) {
         val sheetLoaded = state.sheetsReadUrl.isNotBlank()
         binding.syncIcon.setImageResource(
             if (sheetLoaded) R.drawable.ic_cloud_download else R.drawable.ic_cloud_off
@@ -284,10 +295,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.tile_sync_status_none)
         }
+    }
 
+    private fun bindUpcomingTile() {
         binding.upcomingIcon.setImageResource(R.drawable.ic_event_available)
         binding.upcomingStatusText.text = getString(R.string.tile_upcoming_status_none)
+    }
 
+    private fun bindTrackingTile(state: MainUiState) {
         binding.tileDirection.isActive = state.routeDirection == RouteDirection.HOMEWARD
         binding.tileTracking.isActive = state.isTracking
         binding.trackingButton.setImageResource(
@@ -298,7 +313,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.tile_tracking_status_idle)
         }
+    }
 
+    private fun bindErrandsSuggestionVisibility(state: MainUiState) {
         if (state.errandsModeEnabled) {
             binding.errandsBanner.visibility = View.VISIBLE
             binding.errandsBanner.text = getString(
@@ -311,7 +328,9 @@ class MainActivity : AppCompatActivity() {
             binding.tileSuggested.visibility =
                 if (state.suggestions.isEmpty()) View.GONE else View.VISIBLE
         }
+    }
 
+    private fun bindDirectionTile(state: MainUiState) {
         val activeDestination = state.activeDestination
         binding.directionIcon.setImageResource(
             if (activeDestination != null) R.drawable.ic_assistant_navigation
@@ -525,65 +544,48 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleMainEvent(event: MainEvent) {
         when (event) {
-            is MainEvent.ShowSnackbar -> {
-                Snackbar.make(binding.root, event.message, Snackbar.LENGTH_SHORT).show()
-            }
-
-            is MainEvent.OpenMapsRoute -> {
-                openMapsUri(Uri.parse(event.uri))
-            }
-
-            is MainEvent.ShowDailySummary -> {
-                showDailySummaryDialog(event.summary)
-            }
-
-            is MainEvent.StaleArrivalPrompt -> {
-                showStaleArrivalDialog(event.clientName, event.minutesElapsed)
-            }
-
-            is MainEvent.ClusterCompletePrompt -> {
-                showClusterCompletionDialog(event.members)
-            }
-
-            is MainEvent.UndoConfirmation -> {
-                Snackbar.make(binding.root, "Confirmed ${event.clientName}", Snackbar.LENGTH_LONG)
-                    .setDuration(8000)
-                    .setAction("UNDO") {
-                        viewModel.undoLastConfirmation(event.clientId, event.recordCompletedAtMillis)
-                    }
-                    .show()
-            }
-
-            is MainEvent.UndoClusterConfirmation -> {
-                val label = "Confirmed ${event.clientNames.size} stops"
-                Snackbar.make(binding.root, label, Snackbar.LENGTH_LONG)
-                    .setDuration(8000)
-                    .setAction("UNDO") {
-                        viewModel.undoClusterConfirmation(event.clientIds, event.recordCompletedAtMillis)
-                    }
-                    .show()
-            }
-
-            is MainEvent.EditClientNotes -> {
-                showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
-            }
-
-            is MainEvent.ShowRouteHistory -> {
-                showRouteHistoryDialog(event)
-            }
-
-            is MainEvent.ShowWeekSummary -> {
-                showWeekSummaryDialog(event.summary)
-            }
-
-            MainEvent.RefreshTrackingClients -> {
-                trackingUiController.refreshTrackedClients()
-            }
-
+            is MainEvent.ShowSnackbar -> showShortSnackbar(event.message)
+            is MainEvent.OpenMapsRoute -> openMapsUri(Uri.parse(event.uri))
+            is MainEvent.ShowDailySummary -> showDailySummaryDialog(event.summary)
+            is MainEvent.StaleArrivalPrompt -> showStaleArrivalDialog(event.clientName, event.minutesElapsed)
+            is MainEvent.ClusterCompletePrompt -> showClusterCompletionDialog(event.members)
+            is MainEvent.UndoConfirmation -> showUndoConfirmationSnackbar(event)
+            is MainEvent.UndoClusterConfirmation -> showUndoClusterConfirmationSnackbar(event)
+            is MainEvent.EditClientNotes -> showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
+            is MainEvent.ShowRouteHistory -> showRouteHistoryDialog(event)
+            is MainEvent.ShowWeekSummary -> showWeekSummaryDialog(event.summary)
+            MainEvent.RefreshTrackingClients -> trackingUiController.refreshTrackedClients()
             MainEvent.ServiceConfirmed -> Unit
-
             MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
         }
+    }
+
+    private fun showShortSnackbar(message: String) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_SHORT).show()
+    }
+
+    private fun showUndoConfirmationSnackbar(event: MainEvent.UndoConfirmation) {
+        showUndoSnackbar(
+            message = "Confirmed ${event.clientName}",
+            onUndo = { viewModel.undoLastConfirmation(event.clientId, event.recordCompletedAtMillis) }
+        )
+    }
+
+    private fun showUndoClusterConfirmationSnackbar(event: MainEvent.UndoClusterConfirmation) {
+        val message = "Confirmed ${event.clientNames.size} stops"
+        showUndoSnackbar(
+            message = message,
+            onUndo = { viewModel.undoClusterConfirmation(event.clientIds, event.recordCompletedAtMillis) }
+        )
+    }
+
+    private fun showUndoSnackbar(message: String, onUndo: () -> Unit) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG)
+            .setDuration(8000)
+            .setAction("UNDO") {
+                onUndo()
+            }
+            .show()
     }
 
     private fun handleTrackingEvent(event: TrackingEvent) {
@@ -645,10 +647,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupTileActions() {
+        setupUpcomingTileActions()
+        setupSyncTileActions()
+        setupStepTileActions()
+        setupTrackingTileActions()
+        setupDirectionTileActions()
+        setupSuggestionRefreshActions()
+    }
+
+    private fun setupUpcomingTileActions() {
         binding.badgeUpcoming.setOnClickListener {
             startActivity(Intent(this, UpcomingEventsActivity::class.java))
         }
+    }
 
+    private fun setupSyncTileActions() {
         binding.tileSync.setOnClickListener {
             if (sheetsUrl.isNotBlank()) {
                 syncFromSheets(sheetsUrl)
@@ -659,13 +672,17 @@ class MainActivity : AppCompatActivity() {
         binding.badgeSync.setOnClickListener {
             launchSyncSheetScreen()
         }
+    }
 
+    private fun setupStepTileActions() {
         binding.tileStep.setOnClickListener {
             StepPickerBottomSheet
                 .newInstance(viewModel.uiState.value.selectedServiceTypes)
                 .show(supportFragmentManager, "step_picker")
         }
+    }
 
+    private fun setupTrackingTileActions() {
         binding.trackingButton.setOnClickListener {
             trackingUiController.toggleTracking()
         }
@@ -676,7 +693,9 @@ class MainActivity : AppCompatActivity() {
         binding.badgeTracking.setOnClickListener {
             viewModel.showDailySummary()
         }
+    }
 
+    private fun setupDirectionTileActions() {
         binding.directionIcon.setOnClickListener {
             val state = viewModel.uiState.value
             if (!state.errandsModeEnabled && state.activeDestination == null) {
@@ -693,7 +712,9 @@ class MainActivity : AppCompatActivity() {
         binding.badgeDirection.setOnClickListener {
             launchDestinationsScreen()
         }
+    }
 
+    private fun setupSuggestionRefreshActions() {
         binding.badgeSuggestedRefresh.setOnClickListener {
             if (viewModel.uiState.value.errandsModeEnabled) {
                 Snackbar.make(binding.root, "Errands Mode is active", Snackbar.LENGTH_SHORT).show()
@@ -701,8 +722,6 @@ class MainActivity : AppCompatActivity() {
             }
             suggestNextClients()
         }
-
-
     }
 
     private fun suggestNextClients() {
@@ -1083,96 +1102,131 @@ class MainActivity : AppCompatActivity() {
     private fun handleArrivalIntent(intent: Intent?) {
         if (intent == null) return
 
-        // Handle "Arrived at X?" notification tap
-        val arrivalClientId = intent.getStringExtra(LocationTrackingService.EXTRA_ARRIVAL_CLIENT_ID)
-        if (arrivalClientId != null) {
-            val client = clients.find { it.id == arrivalClientId } ?: return
-            val arrivedAt = intent.getLongExtra(LocationTrackingService.EXTRA_ARRIVAL_ARRIVED_AT, System.currentTimeMillis())
-            val location = locationFromIntent(
-                intent,
-                LocationTrackingService.EXTRA_ARRIVAL_LAT,
-                LocationTrackingService.EXTRA_ARRIVAL_LNG,
-                LocationTrackingService.EXTRA_ARRIVAL_TIME
-            ) ?: trackingEventBus.latestLocation.value ?: getCurrentLocation() ?: return
-            // Force show dialog even if arrivedClientIds already has this client
-            // (notification tap = explicit user action)
-            showArrivalDialog(client, arrivedAt, location, fromNotification = true)
-            // Clear extra only after successfully handling
-            intent.removeExtra(LocationTrackingService.EXTRA_ARRIVAL_CLIENT_ID)
-            intent.removeExtra(LocationTrackingService.EXTRA_ARRIVAL_LAT)
-            intent.removeExtra(LocationTrackingService.EXTRA_ARRIVAL_LNG)
-            intent.removeExtra(LocationTrackingService.EXTRA_ARRIVAL_TIME)
-            intent.removeExtra(LocationTrackingService.EXTRA_ARRIVAL_ARRIVED_AT)
-            return
-        }
+        if (handleArrivalNotificationIntent(intent)) return
+        if (handleCompletionNotificationIntent(intent)) return
+        handleClusterCompletionNotificationIntent(intent)
+    }
 
-        // Handle "Mark job complete for X?" notification tap
-        val completeClientId = intent.getStringExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID)
-        if (completeClientId != null) {
-            val minutes = intent.getIntExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, 5)
-            val arrivedAt = intent.getLongExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, System.currentTimeMillis() - minutes * 60_000L)
-            val client = clients.find { it.id == completeClientId } ?: return
-            val location = locationFromIntent(
-                intent,
-                LocationTrackingService.EXTRA_COMPLETE_LAT,
-                LocationTrackingService.EXTRA_COMPLETE_LNG,
-                LocationTrackingService.EXTRA_COMPLETE_TIME
-            ) ?: trackingEventBus.latestLocation.value ?: getCurrentLocation() ?: return
-            showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
-            // Clear extras only after successfully handling
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_LAT)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_LNG)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_TIME)
-            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT)
-            return
-        }
+    private fun handleArrivalNotificationIntent(intent: Intent): Boolean {
+        val arrivalClientId = intent.getStringExtra(LocationTrackingService.EXTRA_ARRIVAL_CLIENT_ID) ?: return false
+        val client = clients.find { it.id == arrivalClientId } ?: return true
+        val arrivedAt = intent.getLongExtra(LocationTrackingService.EXTRA_ARRIVAL_ARRIVED_AT, System.currentTimeMillis())
+        val location = resolveNotificationLocation(
+            intent,
+            LocationTrackingService.EXTRA_ARRIVAL_LAT,
+            LocationTrackingService.EXTRA_ARRIVAL_LNG,
+            LocationTrackingService.EXTRA_ARRIVAL_TIME
+        ) ?: return true
 
-        // Handle "Mark all N complete?" cluster notification tap
+        showArrivalDialog(client, arrivedAt, location, fromNotification = true)
+        clearIntentExtras(
+            intent,
+            LocationTrackingService.EXTRA_ARRIVAL_CLIENT_ID,
+            LocationTrackingService.EXTRA_ARRIVAL_LAT,
+            LocationTrackingService.EXTRA_ARRIVAL_LNG,
+            LocationTrackingService.EXTRA_ARRIVAL_TIME,
+            LocationTrackingService.EXTRA_ARRIVAL_ARRIVED_AT
+        )
+        return true
+    }
+
+    private fun handleCompletionNotificationIntent(intent: Intent): Boolean {
+        val completeClientId = intent.getStringExtra(LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID) ?: return false
+        val minutes = intent.getIntExtra(LocationTrackingService.EXTRA_COMPLETE_MINUTES, 5)
+        val arrivedAt = intent.getLongExtra(
+            LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT,
+            System.currentTimeMillis() - minutes * 60_000L
+        )
+        val client = clients.find { it.id == completeClientId } ?: return true
+        val location = resolveNotificationLocation(
+            intent,
+            LocationTrackingService.EXTRA_COMPLETE_LAT,
+            LocationTrackingService.EXTRA_COMPLETE_LNG,
+            LocationTrackingService.EXTRA_COMPLETE_TIME
+        ) ?: return true
+
+        showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
+        clearIntentExtras(
+            intent,
+            LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID,
+            LocationTrackingService.EXTRA_COMPLETE_MINUTES,
+            LocationTrackingService.EXTRA_COMPLETE_LAT,
+            LocationTrackingService.EXTRA_COMPLETE_LNG,
+            LocationTrackingService.EXTRA_COMPLETE_TIME,
+            LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT
+        )
+        return true
+    }
+
+    private fun handleClusterCompletionNotificationIntent(intent: Intent) {
         val clusterClientIds = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS)
-        if (clusterClientIds != null && clusterClientIds.size >= 2) {
-            val minutesArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES) ?: IntArray(clusterClientIds.size) { 5 }
-            val arrivedAtArray = intent.getLongArrayExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
-            val weatherTempArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
-            val weatherWindArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
-            val weatherDescArray = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
-            val location = trackingEventBus.latestLocation.value ?: getCurrentLocation()
-            val now = System.currentTimeMillis()
-            val members = clusterClientIds.mapIndexedNotNull { i, id ->
-                val client = clients.find { it.id == id } ?: return@mapIndexedNotNull null
-                val mins = minutesArray.getOrElse(i) { 5 }
-                val arrivedAt = arrivedAtArray?.getOrElse(i) { now - mins * 60_000L } ?: (now - mins * 60_000L)
-                val weatherTemp = weatherTempArray
-                    ?.getOrElse(i) { Int.MIN_VALUE }
-                    ?.takeUnless { it == Int.MIN_VALUE }
-                val weatherWind = weatherWindArray
-                    ?.getOrElse(i) { Int.MIN_VALUE }
-                    ?.takeUnless { it == Int.MIN_VALUE }
-                val weatherDesc = weatherDescArray
-                    ?.getOrElse(i) { "" }
-                    ?.takeIf { it.isNotBlank() }
-                ClusterMember(
-                    client = client,
-                    timeOnSiteMillis = mins * 60_000L,
-                    arrivedAtMillis = arrivedAt,
-                    location = location ?: Location("notification"),
-                    weatherTempF = weatherTemp,
-                    weatherWindMph = weatherWind,
-                    weatherDesc = weatherDesc
-                )
-            }
-            if (members.size >= 2) {
-                showClusterCompletionDialog(members)
-            }
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS)
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES)
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
-            intent.removeExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
-            return
+        if (clusterClientIds == null || clusterClientIds.size < 2) return
+
+        val members = buildClusterMembers(intent, clusterClientIds)
+        if (members.size >= 2) {
+            showClusterCompletionDialog(members)
         }
+
+        clearIntentExtras(
+            intent,
+            LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS,
+            LocationTrackingService.EXTRA_CLUSTER_MINUTES,
+            LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT,
+            LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F,
+            LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH,
+            LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC
+        )
+    }
+
+    private fun buildClusterMembers(intent: Intent, clusterClientIds: Array<String>): List<ClusterMember> {
+        val minutesArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES)
+            ?: IntArray(clusterClientIds.size) { 5 }
+        val arrivedAtArray = intent.getLongArrayExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
+        val weatherTempArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
+        val weatherWindArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
+        val weatherDescArray = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
+        val location = trackingEventBus.latestLocation.value ?: getCurrentLocation()
+        val now = System.currentTimeMillis()
+
+        return clusterClientIds.mapIndexedNotNull { index, id ->
+            val client = clients.find { it.id == id } ?: return@mapIndexedNotNull null
+            val mins = minutesArray.getOrElse(index) { 5 }
+            val arrivedAt = arrivedAtArray?.getOrElse(index) { now - mins * 60_000L } ?: (now - mins * 60_000L)
+            val weatherTemp = weatherTempArray
+                ?.getOrElse(index) { Int.MIN_VALUE }
+                ?.takeUnless { it == Int.MIN_VALUE }
+            val weatherWind = weatherWindArray
+                ?.getOrElse(index) { Int.MIN_VALUE }
+                ?.takeUnless { it == Int.MIN_VALUE }
+            val weatherDesc = weatherDescArray
+                ?.getOrElse(index) { "" }
+                ?.takeIf { it.isNotBlank() }
+
+            ClusterMember(
+                client = client,
+                timeOnSiteMillis = mins * 60_000L,
+                arrivedAtMillis = arrivedAt,
+                location = location ?: Location("notification"),
+                weatherTempF = weatherTemp,
+                weatherWindMph = weatherWind,
+                weatherDesc = weatherDesc
+            )
+        }
+    }
+
+    private fun resolveNotificationLocation(
+        intent: Intent,
+        latKey: String,
+        lngKey: String,
+        timeKey: String
+    ): Location? {
+        return locationFromIntent(intent, latKey, lngKey, timeKey)
+            ?: trackingEventBus.latestLocation.value
+            ?: getCurrentLocation()
+    }
+
+    private fun clearIntentExtras(intent: Intent, vararg keys: String) {
+        keys.forEach(intent::removeExtra)
     }
 
 }
