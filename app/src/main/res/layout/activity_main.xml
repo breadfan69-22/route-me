@@ -32,26 +32,6 @@
             android:scaleType="fitXY"
             android:importantForAccessibility="no" />
 
-        <!-- Current client name (bottom of hero, above metric chips, visible when stopped at a client) -->
-        <TextView
-            android:id="@+id/heroClientName"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|center_horizontal"
-            android:layout_marginBottom="48dp"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#FFFFFF"
-            android:background="@drawable/bg_metric_chip"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:maxWidth="280dp"
-            android:visibility="gone" />
-
         <!-- Weather block (top-left, large icon + small temp) -->
         <LinearLayout
             android:id="@+id/heroWeatherChip"
@@ -187,6 +167,24 @@
                     android:textSize="13sp"
                     android:textColor="#FFFFFF" />
             </LinearLayout>
+
+            <!-- Current stop chip (visible when at a client) -->
+            <TextView
+                android:id="@+id/heroClientName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                android:background="@drawable/bg_metric_chip"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:maxWidth="160dp"
+                android:visibility="gone" />
 
             <!-- Spacer -->
             <View
@@ -325,7 +323,7 @@
                     android:layout_width="0dp"
                     android:layout_height="136dp"
                     android:layout_marginStart="4dp"
-                    android:layout_weight="2">
+                    android:layout_weight="1">
 
                     <LinearLayout
                         android:layout_width="match_parent"
