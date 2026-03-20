@@ -23,7 +23,7 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- Gradient background (hidden for transparent hero) -->
+        <!-- Gradient background (unused, kept for reference) -->
         <ImageView
             android:id="@+id/heroBackground"
             android:layout_width="match_parent"

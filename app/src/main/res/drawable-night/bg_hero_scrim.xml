@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Night mode: steel/silver tint fading up from bottom (lighter to match top) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:type="linear"
+        android:angle="90"
+        android:startColor="#88546E7A"
+        android:endColor="#00546E7A" />
+</shape>
