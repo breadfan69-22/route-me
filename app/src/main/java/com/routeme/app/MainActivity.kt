@@ -29,6 +29,7 @@ import com.routeme.app.ui.DestinationInputController
 import com.routeme.app.ui.DialogFactory
 import com.routeme.app.ui.EventObserver
 import com.routeme.app.ui.MainEvent
+import com.routeme.app.ui.MainUiState
 import com.routeme.app.ui.MainViewModel
 import com.routeme.app.ui.SplitFlapDigitView
 import com.routeme.app.ui.SuggestionUiController
@@ -184,142 +185,150 @@ class MainActivity : AppCompatActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.uiState.collect { state ->
-                        clients.clear()
-                        clients.addAll(state.clients)
-                        sheetsUrl = state.sheetsReadUrl
-                        if (state.sheetsWriteUrl != SheetsWriteBack.webAppUrl) {
-                            SheetsWriteBack.webAppUrl = state.sheetsWriteUrl
-                        }
-                        if (state.summaryText.isNotBlank()) {
-                            binding.summaryText.text = state.summaryText
-                        }
-                        binding.statusText.text = state.statusText
-
-                        // ═══ Dashboard hero bindings ═══
-                        updateHeroIcon(state)
-
-                        // Current client name
-                        if (state.currentStopClientName != null) {
-                            binding.heroClientName.text = "At: ${state.currentStopClientName}"
-                            binding.heroClientName.visibility = View.VISIBLE
-                        } else {
-                            binding.heroClientName.visibility = View.GONE
-                        }
-
-                        // Weather chip
-                        val hasWeather = state.currentWeatherTempF != null
-                        binding.heroWeatherChip.visibility = if (hasWeather) View.VISIBLE else View.GONE
-                        if (hasWeather) {
-                            binding.heroWeatherTemp.text = "${state.currentWeatherTempF}°F"
-                            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc, state.isDaytime))
-                        }
-
-                        // Step label chip
-                        if (state.selectedServiceTypes.isNotEmpty()) {
-                            binding.heroStepChip.visibility = View.VISIBLE
-                            binding.heroStepLabel.text = buildHeroStepLabel(state.selectedServiceTypes)
-                            binding.heroStepIcon.setImageResource(stepTypeToSmallIcon(state.selectedServiceTypes))
-                        } else {
-                            binding.heroStepChip.visibility = View.GONE
-                        }
-
-                        // Split-flap remaining count
-                        val countdownValue = if (state.errandsModeEnabled) {
-                            state.destinationQueue.size
-                        } else {
-                            state.eligibleClientCount
-                        }
-                        binding.heroCountdownPrefix.text = if (state.errandsModeEnabled) {
-                            getString(R.string.hero_destinations_remaining_prefix)
-                        } else {
-                            getString(R.string.hero_stops_remaining_prefix)
-                        }
-                        updateRemainingCount(countdownValue)
-
-                        // Destination chip
-                        val dest = state.activeDestination
-                        binding.heroDestChip.visibility = if (dest != null) View.VISIBLE else View.GONE
-                        if (dest != null) {
-                            binding.heroDestText.text = "→ ${dest.name}"
-                        }
-                        // ═══ End dashboard hero ═══
-
-                        val previousClientCount = lastObservedClientCount
-                        lastObservedClientCount = state.clients.size
-                        if (previousClientCount != null && previousClientCount == 0 && state.clients.isNotEmpty()) {
-                            if (state.selectedServiceTypes.isNotEmpty()) suggestNextClients()
-                        }
-
-                        val previousServiceTypes = lastObservedServiceTypes
-                        if (previousServiceTypes != null && previousServiceTypes != state.selectedServiceTypes) {
-                            rerunSuggestionsIfVisible()
-                        }
-                        lastObservedServiceTypes = state.selectedServiceTypes
-
-                        binding.stepLabel.text = formatStepLabel(state.selectedServiceTypes)
-                        binding.stepIcon.setImageResource(resolveStepTileIcon(state))
-
-                        // Sync tile icon
-                        val sheetLoaded = state.sheetsReadUrl.isNotBlank()
-                        binding.syncIcon.setImageResource(
-                            if (sheetLoaded) R.drawable.ic_cloud_download else R.drawable.ic_cloud_off
-                        )
-                        binding.syncStatusText.text = if (sheetLoaded) {
-                            getString(R.string.tile_sync_status_loaded)
-                        } else {
-                            getString(R.string.tile_sync_status_none)
-                        }
-
-                        // Upcoming events tile icon (feature to come — always "no events" for now)
-                        binding.upcomingIcon.setImageResource(R.drawable.ic_event_available)
-                        binding.upcomingStatusText.text = getString(R.string.tile_upcoming_status_none)
-
-                        binding.tileDirection.isActive = state.routeDirection == RouteDirection.HOMEWARD
-                        binding.tileTracking.isActive = state.isTracking
-                        binding.trackingButton.setImageResource(
-                            if (state.isTracking) R.drawable.ic_wrong_location else R.drawable.ic_location_on
-                        )
-                        binding.trackingStatusText.text = if (state.isTracking) {
-                            getString(R.string.tile_tracking_status_active)
-                        } else {
-                            getString(R.string.tile_tracking_status_idle)
-                        }
-
-                        if (state.errandsModeEnabled) {
-                            binding.errandsBanner.visibility = View.VISIBLE
-                            binding.errandsBanner.text = getString(
-                                R.string.errands_banner_active,
-                                state.destinationQueue.size
-                            )
-                            binding.tileSuggested.visibility = View.GONE
-                        } else {
-                            binding.errandsBanner.visibility = View.GONE
-                            // Float the suggestion list — only visible when there are suggestions to show
-                            binding.tileSuggested.visibility =
-                                if (state.suggestions.isEmpty()) View.GONE else View.VISIBLE
-                        }
-                        val activeDest = state.activeDestination
-                        binding.directionIcon.setImageResource(
-                            if (activeDest != null) R.drawable.ic_assistant_navigation
-                            else when (state.routeDirection) {
-                                RouteDirection.OUTWARD -> R.drawable.ic_arrow_upward
-                                RouteDirection.HOMEWARD -> R.drawable.ic_home_work
-                            }
-                        )
-                        binding.directionText.text = activeDest?.name ?: when (state.routeDirection) {
-                            RouteDirection.OUTWARD -> getString(R.string.menu_direction_outward)
-                            RouteDirection.HOMEWARD -> getString(R.string.menu_direction_homeward)
-                        }
-                        if (activeDest != null) {
-                            binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDest.name}"
-                            binding.destinationBanner.visibility = View.VISIBLE
-                        } else {
-                            binding.destinationBanner.visibility = View.GONE
-                        }
-                        showCurrentPage()
+                        renderState(state)
                     }
                 }
             }
+        }
+    }
+
+    private fun renderState(state: MainUiState) {
+        syncRenderedState(state)
+        bindDashboardHero(state)
+        handleSuggestionRefreshTriggers(state)
+        bindPrimaryTiles(state)
+        showCurrentPage()
+    }
+
+    private fun syncRenderedState(state: MainUiState) {
+        clients.clear()
+        clients.addAll(state.clients)
+        sheetsUrl = state.sheetsReadUrl
+        if (state.sheetsWriteUrl != SheetsWriteBack.webAppUrl) {
+            SheetsWriteBack.webAppUrl = state.sheetsWriteUrl
+        }
+        if (state.summaryText.isNotBlank()) {
+            binding.summaryText.text = state.summaryText
+        }
+        binding.statusText.text = state.statusText
+    }
+
+    private fun bindDashboardHero(state: MainUiState) {
+        updateHeroIcon(state)
+
+        if (state.currentStopClientName != null) {
+            binding.heroClientName.text = "At: ${state.currentStopClientName}"
+            binding.heroClientName.visibility = View.VISIBLE
+        } else {
+            binding.heroClientName.visibility = View.GONE
+        }
+
+        val hasWeather = state.currentWeatherTempF != null
+        binding.heroWeatherChip.visibility = if (hasWeather) View.VISIBLE else View.GONE
+        if (hasWeather) {
+            binding.heroWeatherTemp.text = "${state.currentWeatherTempF}°F"
+            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc, state.isDaytime))
+        }
+
+        if (state.selectedServiceTypes.isNotEmpty()) {
+            binding.heroStepChip.visibility = View.VISIBLE
+            binding.heroStepLabel.text = buildHeroStepLabel(state.selectedServiceTypes)
+            binding.heroStepIcon.setImageResource(stepTypeToSmallIcon(state.selectedServiceTypes))
+        } else {
+            binding.heroStepChip.visibility = View.GONE
+        }
+
+        val countdownValue = if (state.errandsModeEnabled) {
+            state.destinationQueue.size
+        } else {
+            state.eligibleClientCount
+        }
+        binding.heroCountdownPrefix.text = if (state.errandsModeEnabled) {
+            getString(R.string.hero_destinations_remaining_prefix)
+        } else {
+            getString(R.string.hero_stops_remaining_prefix)
+        }
+        updateRemainingCount(countdownValue)
+
+        val destination = state.activeDestination
+        binding.heroDestChip.visibility = if (destination != null) View.VISIBLE else View.GONE
+        if (destination != null) {
+            binding.heroDestText.text = "→ ${destination.name}"
+        }
+    }
+
+    private fun handleSuggestionRefreshTriggers(state: MainUiState) {
+        val previousClientCount = lastObservedClientCount
+        lastObservedClientCount = state.clients.size
+        if (previousClientCount != null && previousClientCount == 0 && state.clients.isNotEmpty()) {
+            if (state.selectedServiceTypes.isNotEmpty()) suggestNextClients()
+        }
+
+        val previousServiceTypes = lastObservedServiceTypes
+        if (previousServiceTypes != null && previousServiceTypes != state.selectedServiceTypes) {
+            rerunSuggestionsIfVisible()
+        }
+        lastObservedServiceTypes = state.selectedServiceTypes
+    }
+
+    private fun bindPrimaryTiles(state: MainUiState) {
+        binding.stepLabel.text = formatStepLabel(state.selectedServiceTypes)
+        binding.stepIcon.setImageResource(resolveStepTileIcon(state))
+
+        val sheetLoaded = state.sheetsReadUrl.isNotBlank()
+        binding.syncIcon.setImageResource(
+            if (sheetLoaded) R.drawable.ic_cloud_download else R.drawable.ic_cloud_off
+        )
+        binding.syncStatusText.text = if (sheetLoaded) {
+            getString(R.string.tile_sync_status_loaded)
+        } else {
+            getString(R.string.tile_sync_status_none)
+        }
+
+        binding.upcomingIcon.setImageResource(R.drawable.ic_event_available)
+        binding.upcomingStatusText.text = getString(R.string.tile_upcoming_status_none)
+
+        binding.tileDirection.isActive = state.routeDirection == RouteDirection.HOMEWARD
+        binding.tileTracking.isActive = state.isTracking
+        binding.trackingButton.setImageResource(
+            if (state.isTracking) R.drawable.ic_wrong_location else R.drawable.ic_location_on
+        )
+        binding.trackingStatusText.text = if (state.isTracking) {
+            getString(R.string.tile_tracking_status_active)
+        } else {
+            getString(R.string.tile_tracking_status_idle)
+        }
+
+        if (state.errandsModeEnabled) {
+            binding.errandsBanner.visibility = View.VISIBLE
+            binding.errandsBanner.text = getString(
+                R.string.errands_banner_active,
+                state.destinationQueue.size
+            )
+            binding.tileSuggested.visibility = View.GONE
+        } else {
+            binding.errandsBanner.visibility = View.GONE
+            binding.tileSuggested.visibility =
+                if (state.suggestions.isEmpty()) View.GONE else View.VISIBLE
+        }
+
+        val activeDestination = state.activeDestination
+        binding.directionIcon.setImageResource(
+            if (activeDestination != null) R.drawable.ic_assistant_navigation
+            else when (state.routeDirection) {
+                RouteDirection.OUTWARD -> R.drawable.ic_arrow_upward
+                RouteDirection.HOMEWARD -> R.drawable.ic_home_work
+            }
+        )
+        binding.directionText.text = activeDestination?.name ?: when (state.routeDirection) {
+            RouteDirection.OUTWARD -> getString(R.string.menu_direction_outward)
+            RouteDirection.HOMEWARD -> getString(R.string.menu_direction_homeward)
+        }
+        if (activeDestination != null) {
+            binding.destinationBanner.text = "\uD83D\uDCCD Heading toward: ${activeDestination.name}"
+            binding.destinationBanner.visibility = View.VISIBLE
+        } else {
+            binding.destinationBanner.visibility = View.GONE
         }
     }
 
