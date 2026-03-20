@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Body (oval): amber -->
+    <path android:fillColor="#FFB300"
+        android:pathData="M60,30 A20,30 0 1,0 60,90 A20,30 0 1,0 60,30 Z"/>
+    <!-- Head: dark amber -->
+    <path android:fillColor="#FF8F00"
+        android:pathData="M50,30 A10,8 0 1,1 70,30"/>
+    <!-- Wing split line: brown -->
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2"
+        android:pathData="M60,30 L60,90"/>
+    <!-- Wing pattern dots: dark amber -->
+    <path android:fillColor="#E65100"
+        android:pathData="M50,50 A3,3 0 1,0 56,50 A3,3 0 1,0 50,50 Z"/>
+    <path android:fillColor="#E65100"
+        android:pathData="M64,50 A3,3 0 1,0 70,50 A3,3 0 1,0 64,50 Z"/>
+    <path android:fillColor="#E65100"
+        android:pathData="M52,65 A2.5,2.5 0 1,0 57,65 A2.5,2.5 0 1,0 52,65 Z"/>
+    <path android:fillColor="#E65100"
+        android:pathData="M63,65 A2.5,2.5 0 1,0 68,65 A2.5,2.5 0 1,0 63,65 Z"/>
+    <!-- Antennae: brown -->
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M50,30 Q40,18 35,12"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M70,30 Q80,18 85,12"/>
+    <!-- Antenna tips -->
+    <path android:fillColor="#5D4037"
+        android:pathData="M33,10 A3,3 0 1,0 37,10 A3,3 0 1,0 33,10 Z"/>
+    <path android:fillColor="#5D4037"
+        android:pathData="M83,10 A3,3 0 1,0 87,10 A3,3 0 1,0 83,10 Z"/>
+    <!-- Legs (3 pairs): brown -->
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M40,45 L25,38"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M40,60 L22,60"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M40,75 L25,82"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M80,45 L95,38"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M80,60 L98,60"/>
+    <path android:fillColor="#00000000" android:strokeColor="#5D4037" android:strokeWidth="2.5"
+        android:pathData="M80,75 L95,82"/>
+    <!-- Crosshair overlay: red-orange, subtle -->
+    <path android:fillColor="#00000000" android:strokeColor="#FF5722" android:strokeWidth="1.5"
+        android:pathData="M60,15 L60,105"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FF5722" android:strokeWidth="1.5"
+        android:pathData="M15,60 L105,60"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FF5722" android:strokeWidth="1.5"
+        android:pathData="M60,40 A20,20 0 1,0 60,80 A20,20 0 1,0 60,40 Z"/>
+</vector>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Tank -->
+    <path android:fillColor="#42A5F5"
+        android:pathData="M8,2 Q8,1 12,1 Q16,1 16,2 L16,16 Q16,17 12,17 Q8,17 8,16 Z"/>
+    <!-- Hose -->
+    <path android:fillColor="#00000000" android:strokeColor="#78909C" android:strokeWidth="1.2"
+        android:pathData="M16,10 Q19,10 19,13 L19,16"/>
+    <!-- Wand -->
+    <path android:fillColor="#546E7A"
+        android:pathData="M18,16 L20,16 L20,20 L18,20 Z"/>
+    <!-- Nozzle -->
+    <path android:fillColor="#66BB6A"
+        android:pathData="M19,20 L22,19 L22,22 Z"/>
+    <!-- Mist -->
+    <path android:fillColor="#00000000" android:strokeColor="#81D4FA" android:strokeWidth="0.8"
+        android:pathData="M22,19 Q23,18 24,17"/>
+    <path android:fillColor="#00000000" android:strokeColor="#81D4FA" android:strokeWidth="0.8"
+        android:pathData="M22,21 Q23,21 24,20"/>
+</vector>

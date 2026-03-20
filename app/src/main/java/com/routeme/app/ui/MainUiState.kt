@@ -37,7 +37,16 @@ data class MainUiState(
     /** Index into [destinationQueue] for the current active destination. */
     val activeDestinationIndex: Int = 0,
     /** Persistent list of saved destination presets. */
-    val savedDestinations: List<SavedDestination> = emptyList()
+    val savedDestinations: List<SavedDestination> = emptyList(),
+
+    // Dashboard hero fields
+    /** Weather for live dashboard display (sourced from last stop or NWS fallback). */
+    val currentWeatherTempF: Int? = null,
+    val currentWeatherIconDesc: String? = null,
+    /** Total eligible client count (full ranked list size before pagination). */
+    val eligibleClientCount: Int = 0,
+    /** Name of the client we are currently stopped at, null when driving/idle. */
+    val currentStopClientName: String? = null
 ) {
     /** The current active destination, or null if the queue is empty/exhausted. */
     val activeDestination: SavedDestination?

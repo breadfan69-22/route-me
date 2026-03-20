@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Grass blades: varying greens and heights -->
+    <path android:fillColor="#2E7D32"
+        android:pathData="M18,120 L22,120 L24,45 Q23,40 20,42 L16,50 Z"/>
+    <path android:fillColor="#4CAF50"
+        android:pathData="M32,120 L36,120 L40,55 Q38,48 34,52 L30,58 Z"/>
+    <path android:fillColor="#388E3C"
+        android:pathData="M48,120 L52,120 L56,30 Q54,24 50,28 L44,40 Z"/>
+    <path android:fillColor="#66BB6A"
+        android:pathData="M62,120 L66,120 L70,38 Q68,32 64,36 L58,48 Z"/>
+    <path android:fillColor="#43A047"
+        android:pathData="M76,120 L80,120 L84,50 Q82,44 78,48 L72,56 Z"/>
+    <path android:fillColor="#81C784"
+        android:pathData="M90,120 L94,120 L98,58 Q96,52 92,56 L86,64 Z"/>
+    <path android:fillColor="#2E7D32"
+        android:pathData="M102,120 L106,120 L108,65 Q106,60 104,62 L100,68 Z"/>
+    <!-- Dew drops: light dots on tallest blades -->
+    <path android:fillColor="#E0F7FA"
+        android:pathData="M53,40 A2,2 0 1,0 57,40 A2,2 0 1,0 53,40 Z"/>
+    <path android:fillColor="#E0F7FA"
+        android:pathData="M67,48 A1.5,1.5 0 1,0 70,48 A1.5,1.5 0 1,0 67,48 Z"/>
+</vector>

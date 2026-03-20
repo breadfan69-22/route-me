@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Cloud -->
+    <path android:fillColor="#78909C"
+        android:pathData="M8,12 A4,4 0 0,1 12,8 A3,3 0 0,1 18,9 A3,3 0 0,1 20,15 L6,15 A3,3 0 0,1 8,12 Z"/>
+    <!-- Snowflake -->
+    <path android:fillColor="#00000000" android:strokeColor="#E3F2FD" android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M12,16 L12,22 M9,17.5 L15,20.5 M15,17.5 L9,20.5"/>
+</vector>

@@ -1,5 +1,6 @@
 package com.routeme.app
 
+import android.content.res.Configuration
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -7,6 +8,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -27,6 +29,7 @@ import com.routeme.app.ui.DialogFactory
 import com.routeme.app.ui.EventObserver
 import com.routeme.app.ui.MainEvent
 import com.routeme.app.ui.MainViewModel
+import com.routeme.app.ui.SplitFlapDigitView
 import com.routeme.app.ui.SuggestionUiController
 import com.routeme.app.ui.StepPickerBottomSheet
 import com.routeme.app.ui.TrackingUiController
@@ -49,6 +52,8 @@ class MainActivity : AppCompatActivity() {
     private val SUGGEST_LOCATION_MAX_AGE_MS = 120_000L
     private var lastObservedServiceTypes: Set<ServiceType>? = null
     private var lastObservedClientCount: Int? = null
+    private var currentHeroRes: Int = 0
+    private lateinit var splitFlapDigits: List<SplitFlapDigitView>
 
     /** Tracks which client IDs we already showed an arrival dialog for this session
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
@@ -146,6 +151,9 @@ class MainActivity : AppCompatActivity() {
 
         setSupportActionBar(binding.topToolbar)
 
+        setupSplitFlapDigits()
+        applyDarkOverlay()
+
         suggestionUiController.bindPaginationActions()
         setupTileActions()
         observeViewModel()
@@ -184,6 +192,45 @@ class MainActivity : AppCompatActivity() {
                             binding.summaryText.text = state.summaryText
                         }
                         binding.statusText.text = state.statusText
+
+                        // ═══ Dashboard hero bindings ═══
+                        updateHeroIcon(state)
+
+                        // Current client name
+                        if (state.currentStopClientName != null) {
+                            binding.heroClientName.text = state.currentStopClientName
+                            binding.heroClientName.visibility = View.VISIBLE
+                        } else {
+                            binding.heroClientName.visibility = View.GONE
+                        }
+
+                        // Weather chip
+                        val hasWeather = state.currentWeatherTempF != null
+                        binding.heroWeatherChip.visibility = if (hasWeather) View.VISIBLE else View.GONE
+                        if (hasWeather) {
+                            binding.heroWeatherTemp.text = "${state.currentWeatherTempF}°F"
+                            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc))
+                        }
+
+                        // Step label chip
+                        if (state.selectedServiceTypes.isNotEmpty()) {
+                            binding.heroStepChip.visibility = View.VISIBLE
+                            binding.heroStepLabel.text = buildHeroStepLabel(state.selectedServiceTypes)
+                            binding.heroStepIcon.setImageResource(stepTypeToSmallIcon(state.selectedServiceTypes))
+                        } else {
+                            binding.heroStepChip.visibility = View.GONE
+                        }
+
+                        // Split-flap remaining count
+                        updateRemainingCount(state.eligibleClientCount)
+
+                        // Destination chip
+                        val dest = state.activeDestination
+                        binding.heroDestChip.visibility = if (dest != null) View.VISIBLE else View.GONE
+                        if (dest != null) {
+                            binding.heroDestText.text = "→ ${dest.name}"
+                        }
+                        // ═══ End dashboard hero ═══
 
                         val previousClientCount = lastObservedClientCount
                         lastObservedClientCount = state.clients.size
@@ -240,6 +287,98 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+        }
+    }
+
+    // ─── Dashboard Hero helpers ────────────────────────────────
+
+    private fun setupSplitFlapDigits() {
+        val container = binding.heroSplitFlapContainer
+        val digitWidthPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, 22f, resources.displayMetrics
+        ).toInt()
+        val digitHeightPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, 28f, resources.displayMetrics
+        ).toInt()
+        val marginPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP, 2f, resources.displayMetrics
+        ).toInt()
+
+        splitFlapDigits = (0 until 3).map { i ->
+            SplitFlapDigitView(this).apply {
+                val lp = android.widget.LinearLayout.LayoutParams(digitWidthPx, digitHeightPx)
+                if (i > 0) lp.marginStart = marginPx
+                layoutParams = lp
+            }
+        }
+        splitFlapDigits.forEach { container.addView(it) }
+    }
+
+    private fun applyDarkOverlay() {
+        val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        binding.heroDarkOverlay.visibility =
+            if (nightMode == Configuration.UI_MODE_NIGHT_YES) View.VISIBLE else View.GONE
+    }
+
+    private fun updateHeroIcon(state: com.routeme.app.ui.MainUiState) {
+        val newRes = when {
+            state.errandsModeEnabled -> R.drawable.ic_hero_notepad
+            state.selectedServiceTypes.any {
+                it == ServiceType.GRUB || it == ServiceType.INCIDENTAL
+            } -> R.drawable.ic_hero_bug
+            state.selectedServiceTypes.any {
+                it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5
+            } -> R.drawable.ic_hero_sprayer
+            state.selectedServiceTypes.any {
+                it == ServiceType.ROUND_1 || it == ServiceType.ROUND_3 ||
+                it == ServiceType.ROUND_4 || it == ServiceType.ROUND_6
+            } -> R.drawable.ic_hero_spreader
+            else -> R.drawable.ic_hero_default
+        }
+        if (newRes == currentHeroRes) return
+        currentHeroRes = newRes
+        binding.heroIcon.animate().alpha(0f).setDuration(150).withEndAction {
+            binding.heroIcon.setImageResource(newRes)
+            binding.heroIcon.animate().alpha(1f).setDuration(150).start()
+        }.start()
+    }
+
+    private fun buildHeroStepLabel(types: Set<ServiceType>): String {
+        val steps = types.filter { it.stepNumber in 1..6 }
+            .sortedBy { it.stepNumber }
+            .map { "Step ${it.stepNumber}" }
+        val extras = mutableListOf<String>()
+        if (types.contains(ServiceType.GRUB)) extras += "Grub"
+        if (types.contains(ServiceType.INCIDENTAL)) extras += "Incidental"
+        return (steps + extras).joinToString(" + ")
+    }
+
+    private fun stepTypeToSmallIcon(types: Set<ServiceType>): Int = when {
+        types.any { it == ServiceType.GRUB || it == ServiceType.INCIDENTAL } -> R.drawable.ic_step_bug
+        types.any { it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5 } -> R.drawable.ic_step_sprayer
+        else -> R.drawable.ic_step_spreader
+    }
+
+    private fun updateRemainingCount(newCount: Int) {
+        val padded = newCount.coerceIn(0, 999).toString().padStart(3, '0')
+        padded.reversed().forEachIndexed { i, digit ->
+            splitFlapDigits[2 - i].postDelayed({
+                splitFlapDigits[2 - i].setDigit(digit)
+            }, i * 50L)
+        }
+    }
+
+    private fun weatherDescToIcon(desc: String?): Int {
+        val d = desc?.lowercase() ?: return R.drawable.ic_weather_unknown
+        return when {
+            "snow" in d || "flurr" in d || "ice" in d -> R.drawable.ic_weather_snowy
+            "rain" in d || "drizzle" in d || "shower" in d -> R.drawable.ic_weather_rainy
+            "wind" in d || "breezy" in d || "blustery" in d -> R.drawable.ic_weather_windy
+            "thunder" in d || "storm" in d -> R.drawable.ic_weather_rainy
+            "overcast" in d || "cloudy" in d -> R.drawable.ic_weather_cloudy
+            "partly" in d || "mostly" in d || "haze" in d -> R.drawable.ic_weather_partly
+            "clear" in d || "sunny" in d || "fair" in d -> R.drawable.ic_weather_sunny
+            else -> R.drawable.ic_weather_unknown
         }
     }
 

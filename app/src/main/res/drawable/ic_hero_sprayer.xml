@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Tank body: blue rounded rect -->
+    <path android:fillColor="#42A5F5"
+        android:pathData="M40,10 Q40,5 60,5 Q80,5 80,10 L80,80 Q80,85 60,85 Q40,85 40,80 Z"/>
+    <!-- Tank cap: dark blue circle -->
+    <path android:fillColor="#1E88E5"
+        android:pathData="M55,5 A5,3 0 1,0 65,5 A5,3 0 1,0 55,5 Z"/>
+    <!-- Strap (left): beige -->
+    <path android:fillColor="#00000000" android:strokeColor="#BCAAA4" android:strokeWidth="3"
+        android:pathData="M40,25 Q25,35 25,55 Q25,75 40,80"/>
+    <!-- Hose: grey arc from right side -->
+    <path android:fillColor="#00000000" android:strokeColor="#78909C" android:strokeWidth="3"
+        android:pathData="M80,50 Q95,50 95,65 L95,80"/>
+    <!-- Wand: dark grey -->
+    <path android:fillColor="#546E7A"
+        android:pathData="M92,80 L98,80 L98,100 L92,100 Z"/>
+    <!-- Nozzle: green triangle -->
+    <path android:fillColor="#66BB6A"
+        android:pathData="M95,100 L105,95 L105,108 Z"/>
+    <!-- Spray mist: light blue arcs -->
+    <path android:fillColor="#00000000" android:strokeColor="#81D4FA" android:strokeWidth="1.5"
+        android:pathData="M105,95 Q112,90 115,85"/>
+    <path android:fillColor="#00000000" android:strokeColor="#81D4FA" android:strokeWidth="1.5"
+        android:pathData="M105,100 Q115,100 118,96"/>
+    <path android:fillColor="#00000000" android:strokeColor="#81D4FA" android:strokeWidth="1.5"
+        android:pathData="M105,105 Q112,110 116,112"/>
+    <!-- Droplets: light blue dots -->
+    <path android:fillColor="#81D4FA"
+        android:pathData="M116,84 A1.5,1.5 0 1,0 119,84 A1.5,1.5 0 1,0 116,84 Z"/>
+    <path android:fillColor="#B3E5FC"
+        android:pathData="M119,95 A1,1 0 1,0 121,95 A1,1 0 1,0 119,95 Z"/>
+    <path android:fillColor="#81D4FA"
+        android:pathData="M117,113 A1.5,1.5 0 1,0 120,113 A1.5,1.5 0 1,0 117,113 Z"/>
+</vector>

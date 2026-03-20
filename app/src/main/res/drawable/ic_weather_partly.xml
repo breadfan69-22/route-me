@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Sun peeking from behind cloud -->
+    <path android:fillColor="#FDD835"
+        android:pathData="M6,8 A4,4 0 1,1 10,12"/>
+    <!-- Rays (partial) -->
+    <path android:fillColor="#00000000" android:strokeColor="#F9A825" android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:pathData="M6,2 L6,4 M1,8 L3,8 M2.5,4 L4,5.5"/>
+    <!-- Cloud -->
+    <path android:fillColor="#90A4AE"
+        android:pathData="M8,14 A4,4 0 0,1 12,10 A3,3 0 0,1 18,11 A3,3 0 0,1 20,17 L6,17 A3,3 0 0,1 8,14 Z"/>
+</vector>

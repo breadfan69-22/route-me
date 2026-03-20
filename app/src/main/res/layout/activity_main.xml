@@ -16,10 +16,172 @@
         app:title="@string/app_name"
         app:titleTextColor="?attr/colorOnPrimaryContainer" />
 
-    <ScrollView
+    <!-- ═══════════ DASHBOARD HERO (1/3 screen) ═══════════ -->
+    <FrameLayout
+        android:id="@+id/dashboardHero"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_weight="1">
+
+        <!-- Gradient background -->
+        <ImageView
+            android:id="@+id/heroBackground"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:src="@drawable/bg_hero_gradient"
+            android:scaleType="fitXY"
+            android:importantForAccessibility="no" />
+
+        <!-- Current client name (top of hero, visible when stopped at a client) -->
+        <TextView
+            android:id="@+id/heroClientName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="12dp"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/bg_metric_chip"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:maxWidth="320dp"
+            android:visibility="gone" />
+
+        <!-- Large centered equipment icon -->
+        <ImageView
+            android:id="@+id/heroIcon"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_hero_default"
+            android:contentDescription="@string/hero_icon_desc" />
+
+        <!-- Dark mode overlay (GONE in light mode) -->
+        <View
+            android:id="@+id/heroDarkOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#80000000"
+            android:visibility="gone" />
+
+        <!-- Bottom scrim gradient -->
+        <View
+            android:id="@+id/heroScrim"
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            android:layout_gravity="bottom"
+            android:background="@drawable/bg_hero_scrim" />
+
+        <!-- Metric chip row (over scrim, at bottom) -->
+        <LinearLayout
+            android:id="@+id/heroMetrics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp">
+
+            <!-- Weather chip -->
+            <LinearLayout
+                android:id="@+id/heroWeatherChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_metric_chip"
+                android:visibility="gone">
+                <ImageView
+                    android:id="@+id/heroWeatherIcon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:id="@+id/heroWeatherTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Step label chip -->
+            <LinearLayout
+                android:id="@+id/heroStepChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_metric_chip"
+                android:layout_marginStart="6dp"
+                android:visibility="gone">
+                <ImageView
+                    android:id="@+id/heroStepIcon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:importantForAccessibility="no" />
+                <TextView
+                    android:id="@+id/heroStepLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:textSize="13sp"
+                    android:textColor="#FFFFFF" />
+            </LinearLayout>
+
+            <!-- Spacer -->
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <!-- Remaining count: split-flap container (3 digits added programmatically) -->
+            <LinearLayout
+                android:id="@+id/heroSplitFlapContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+
+            <!-- Destination chip -->
+            <LinearLayout
+                android:id="@+id/heroDestChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_metric_chip"
+                android:layout_marginStart="6dp"
+                android:visibility="gone">
+                <TextView
+                    android:id="@+id/heroDestText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="#FFFFFF"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:maxWidth="140dp" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!-- ═══════════ OPERATIONAL TILES (2/3 screen, scrollable) ═══════════ -->
+    <ScrollView
+        android:id="@+id/tileScrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="2"
         android:clipChildren="false"
         android:clipToPadding="false"
         android:fillViewport="true">

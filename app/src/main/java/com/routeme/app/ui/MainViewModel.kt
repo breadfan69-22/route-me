@@ -598,7 +598,8 @@ class MainViewModel(
                             suggestions = emptyList(),
                             suggestionOffset = result.suggestionOffset,
                             selectedClient = null,
-                            selectedClientDetails = ""
+                            selectedClientDetails = "",
+                            eligibleClientCount = 0
                         )
                     }
                     setStatus(result.statusMessage)
@@ -610,7 +611,8 @@ class MainViewModel(
                         suggestions = result.suggestions,
                         suggestionOffset = result.suggestionOffset,
                         selectedClient = result.selectedClient,
-                        selectedClientDetails = result.selectedClientDetails
+                        selectedClientDetails = result.selectedClientDetails,
+                        eligibleClientCount = result.totalEligibleCount
                     )
                 }
                 persistCriticalState(_uiState.value)
@@ -852,7 +854,8 @@ class MainViewModel(
                 arrivalLng = null,
                 arrivalWeatherTempF = null,
                 arrivalWeatherWindMph = null,
-                arrivalWeatherDesc = null
+                arrivalWeatherDesc = null,
+                currentStopClientName = null
             )
         }
         savedStateHandle[KEY_ARRIVAL_STARTED_AT] = null
@@ -1002,7 +1005,8 @@ class MainViewModel(
                 arrivalLng = arrival.arrivalLng,
                 arrivalWeatherTempF = null,
                 arrivalWeatherWindMph = null,
-                arrivalWeatherDesc = null
+                arrivalWeatherDesc = null,
+                currentStopClientName = arrival.selectedClient.name
             )
         }
         persistCriticalState(_uiState.value)
@@ -1122,7 +1126,10 @@ class MainViewModel(
                             arrivalLng = null,
                             arrivalWeatherTempF = null,
                             arrivalWeatherWindMph = null,
-                            arrivalWeatherDesc = null
+                            arrivalWeatherDesc = null,
+                            currentStopClientName = null,
+                            currentWeatherTempF = state.arrivalWeatherTempF ?: it.currentWeatherTempF,
+                            currentWeatherIconDesc = state.arrivalWeatherDesc ?: it.currentWeatherIconDesc
                         )
                     }
                     persistCriticalState(_uiState.value)
@@ -1205,7 +1212,8 @@ class MainViewModel(
                             arrivalLng = null,
                             arrivalWeatherTempF = null,
                             arrivalWeatherWindMph = null,
-                            arrivalWeatherDesc = null
+                            arrivalWeatherDesc = null,
+                            currentStopClientName = null
                         )
                     }
                     persistCriticalState(_uiState.value)

@@ -12,6 +12,7 @@
     <string name="sheets_url_hint">Published Google Sheet CSV URL</string>
     <string name="start_tracking">Start Route Tracking</string>
     <string name="stop_tracking">Stop Route Tracking</string>
+    <string name="hero_icon_desc">Current service type illustration</string>
     <string name="geocoding_clients">Geocoding addresses…</string>
 
     <!-- Status messages -->

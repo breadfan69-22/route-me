@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Clipboard body: warm amber -->
+    <path android:fillColor="#FFB74D"
+        android:pathData="M25,20 L95,20 Q98,20 98,23 L98,110 Q98,113 95,113 L25,113 Q22,113 22,110 L22,23 Q22,20 25,20 Z"/>
+    <!-- Clip at top: dark grey -->
+    <path android:fillColor="#546E7A"
+        android:pathData="M45,10 L75,10 Q78,10 78,13 L78,28 L42,28 L42,13 Q42,10 45,10 Z"/>
+    <!-- Clip ring: medium grey -->
+    <path android:fillColor="#78909C"
+        android:pathData="M50,8 L70,8 Q72,8 72,10 L72,14 Q72,16 70,16 L50,16 Q48,16 48,14 L48,10 Q48,8 50,8 Z"/>
+    <!-- Paper area: cream/white -->
+    <path android:fillColor="#FFF8E1"
+        android:pathData="M30,32 L90,32 L90,108 L30,108 Z"/>
+    <!-- Checklist line 1: green check + text line -->
+    <path android:fillColor="#00000000" android:strokeColor="#4CAF50" android:strokeWidth="3"
+        android:pathData="M36,44 L40,48 L48,38"/>
+    <path android:fillColor="#BDBDBD"
+        android:pathData="M54,40 L84,40 L84,46 L54,46 Z"/>
+    <!-- Checklist line 2: green check + text line -->
+    <path android:fillColor="#00000000" android:strokeColor="#4CAF50" android:strokeWidth="3"
+        android:pathData="M36,60 L40,64 L48,54"/>
+    <path android:fillColor="#BDBDBD"
+        android:pathData="M54,56 L78,56 L78,62 L54,62 Z"/>
+    <!-- Checklist line 3: empty checkbox + text line -->
+    <path android:fillColor="#00000000" android:strokeColor="#9E9E9E" android:strokeWidth="2"
+        android:pathData="M35,70 L49,70 L49,80 L35,80 Z"/>
+    <path android:fillColor="#E0E0E0"
+        android:pathData="M54,72 L82,72 L82,78 L54,78 Z"/>
+    <!-- Checklist line 4: empty checkbox + text line -->
+    <path android:fillColor="#00000000" android:strokeColor="#9E9E9E" android:strokeWidth="2"
+        android:pathData="M35,86 L49,86 L49,96 L35,96 Z"/>
+    <path android:fillColor="#E0E0E0"
+        android:pathData="M54,88 L72,88 L72,94 L54,94 Z"/>
+</vector>

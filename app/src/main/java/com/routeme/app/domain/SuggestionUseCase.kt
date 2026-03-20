@@ -23,7 +23,8 @@ class SuggestionUseCase(
         val selectedClientDetails: String,
         val suggestionOffset: Int,
         val statusMessage: String,
-        val dateRolloverDetected: Boolean
+        val dateRolloverDetected: Boolean,
+        val totalEligibleCount: Int = 0
     )
 
     data class SkipSelectedResult(
@@ -76,7 +77,8 @@ class SuggestionUseCase(
                 selectedClientDetails = "",
                 suggestionOffset = 0,
                 statusMessage = "No eligible clients for $stepsLabel (min $minDays days).",
-                dateRolloverDetected = dateRolloverDetected
+                dateRolloverDetected = dateRolloverDetected,
+                totalEligibleCount = 0
             )
         }
 
@@ -87,7 +89,8 @@ class SuggestionUseCase(
             selectedClientDetails = routingEngine.buildClientDetails(selectedClient),
             suggestionOffset = 0,
             statusMessage = "Selected ${selectedClient.name}",
-            dateRolloverDetected = dateRolloverDetected
+            dateRolloverDetected = dateRolloverDetected,
+            totalEligibleCount = ranked.size
         )
     }
 
