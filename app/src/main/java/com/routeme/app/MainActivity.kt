@@ -200,7 +200,7 @@ class MainActivity : AppCompatActivity() {
 
                         // Current client name
                         if (state.currentStopClientName != null) {
-                            binding.heroClientName.text = state.currentStopClientName
+                            binding.heroClientName.text = "At: ${state.currentStopClientName}"
                             binding.heroClientName.visibility = View.VISIBLE
                         } else {
                             binding.heroClientName.visibility = View.GONE
@@ -211,7 +211,7 @@ class MainActivity : AppCompatActivity() {
                         binding.heroWeatherChip.visibility = if (hasWeather) View.VISIBLE else View.GONE
                         if (hasWeather) {
                             binding.heroWeatherTemp.text = "${state.currentWeatherTempF}°F"
-                            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc))
+                            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc, state.isDaytime))
                         }
 
                         // Step label chip
@@ -458,7 +458,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun weatherDescToIcon(desc: String?): Int {
+    private fun weatherDescToIcon(desc: String?, isDaytime: Boolean): Int {
         val d = desc?.lowercase() ?: return R.drawable.ic_weather_unknown
         return when {
             "snow" in d || "flurr" in d || "ice" in d -> R.drawable.ic_weather_snowy
@@ -466,8 +466,12 @@ class MainActivity : AppCompatActivity() {
             "wind" in d || "breezy" in d || "blustery" in d -> R.drawable.ic_weather_windy
             "thunder" in d || "storm" in d -> R.drawable.ic_weather_rainy
             "overcast" in d || "cloudy" in d -> R.drawable.ic_weather_cloudy
-            "partly" in d || "mostly" in d || "haze" in d -> R.drawable.ic_weather_partly
-            "clear" in d || "sunny" in d || "fair" in d -> R.drawable.ic_weather_sunny
+            "partly" in d || "mostly" in d || "haze" in d -> {
+                if (isDaytime) R.drawable.ic_weather_partly else R.drawable.ic_weather_partly_night
+            }
+            "clear" in d || "sunny" in d || "fair" in d -> {
+                if (isDaytime) R.drawable.ic_weather_sunny else R.drawable.ic_weather_clear_night
+            }
             else -> R.drawable.ic_weather_unknown
         }
     }

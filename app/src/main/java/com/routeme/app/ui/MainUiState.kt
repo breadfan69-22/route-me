@@ -43,6 +43,8 @@ data class MainUiState(
     /** Weather for live dashboard display (sourced from last stop or NWS fallback). */
     val currentWeatherTempF: Int? = null,
     val currentWeatherIconDesc: String? = null,
+    /** True if current time is between sunrise and sunset (for day/night weather icons). */
+    val isDaytime: Boolean = true,
     /** Total eligible client count (full ranked list size before pagination). */
     val eligibleClientCount: Int = 0,
     /** Name of the client we are currently stopped at, null when driving/idle. */

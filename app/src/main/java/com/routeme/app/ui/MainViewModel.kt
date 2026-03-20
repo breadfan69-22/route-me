@@ -158,11 +158,13 @@ class MainViewModel(
             val daily = withContext(ioDispatcher) {
                 runCatching { repo.getWeatherForDay(System.currentTimeMillis(), SHOP_LAT, SHOP_LNG) }.getOrNull()
             } ?: return@launch
+            val isDaytime = com.routeme.app.util.SunCalc.isDaytime(SHOP_LAT, SHOP_LNG)
             _uiState.update {
                 if (it.currentWeatherTempF != null) return@update it
                 it.copy(
                     currentWeatherTempF = daily.highTempF,
-                    currentWeatherIconDesc = daily.description
+                    currentWeatherIconDesc = daily.description,
+                    isDaytime = isDaytime
                 )
             }
         }
@@ -1050,6 +1052,7 @@ class MainViewModel(
             } ?: return@launch
 
             var updated = false
+            val isDaytime = com.routeme.app.util.SunCalc.isDaytime(arrival.arrivalLat, arrival.arrivalLng)
             _uiState.update { state ->
                 if (state.selectedClient?.id != clientId || state.arrivalStartedAtMillis != startedAt) {
                     state
@@ -1060,7 +1063,8 @@ class MainViewModel(
                         arrivalWeatherWindMph = snapshot.windMph,
                         arrivalWeatherDesc = snapshot.description,
                         currentWeatherTempF = snapshot.tempF,
-                        currentWeatherIconDesc = snapshot.description
+                        currentWeatherIconDesc = snapshot.description,
+                        isDaytime = isDaytime
                     )
                 }
             }

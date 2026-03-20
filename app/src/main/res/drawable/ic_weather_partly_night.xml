@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Crescent moon peeking from behind cloud -->
+    <path android:fillColor="#FFE082"
+        android:pathData="M6,4 A5,5 0 1,0 10,12 A4,4 0 1,1 6,4 Z"/>
+    <!-- Small stars -->
+    <path android:fillColor="#FFF9C4"
+        android:pathData="M3,5 L3.3,5.8 L4.1,6.1 L3.3,6.4 L3,7.2 L2.7,6.4 L1.9,6.1 L2.7,5.8 Z"/>
+    <!-- Cloud -->
+    <path android:fillColor="#90A4AE"
+        android:pathData="M8,14 A4,4 0 0,1 12,10 A3,3 0 0,1 18,11 A3,3 0 0,1 20,17 L6,17 A3,3 0 0,1 8,14 Z"/>
+</vector>
