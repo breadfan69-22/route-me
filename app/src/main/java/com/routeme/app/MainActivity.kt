@@ -307,13 +307,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupSplitFlapDigits() {
         val container = binding.heroSplitFlapContainer
         val digitWidthPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 44f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 22f, resources.displayMetrics
         ).toInt()
         val digitHeightPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 58f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 28f, resources.displayMetrics
         ).toInt()
         val marginPx = TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP, 3f, resources.displayMetrics
+            TypedValue.COMPLEX_UNIT_DIP, 2f, resources.displayMetrics
         ).toInt()
 
         splitFlapDigits = (0 until 3).map { i ->
