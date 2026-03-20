@@ -13,6 +13,8 @@
     <string name="start_tracking">Start Route Tracking</string>
     <string name="stop_tracking">Stop Route Tracking</string>
     <string name="hero_icon_desc">Current service type illustration</string>
+    <string name="hero_stops_remaining_prefix">Stops Remaining:</string>
+    <string name="hero_destinations_remaining_prefix">Destinations Remaining:</string>
     <string name="geocoding_clients">Geocoding addresses…</string>
 
     <!-- Status messages -->

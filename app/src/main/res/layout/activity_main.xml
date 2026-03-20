@@ -52,16 +52,40 @@
             android:maxWidth="320dp"
             android:visibility="gone" />
 
-        <!-- Split-flap remaining count (top-left, large) -->
+        <!-- Left-justified countdown row (top-left) -->
         <LinearLayout
-            android:id="@+id/heroSplitFlapContainer"
-            android:layout_width="wrap_content"
+            android:id="@+id/heroCountdownRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
             android:layout_gravity="top|start"
-            android:layout_marginStart="14dp"
-            android:layout_marginTop="10dp" />
+            android:layout_marginTop="10dp"
+            android:paddingStart="12dp"
+            android:gravity="start|center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/heroCountdownPrefix"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_metric_chip"
+                android:paddingStart="10dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="6dp"
+                android:text="@string/hero_stops_remaining_prefix"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/heroSplitFlapContainer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal" />
+
+        </LinearLayout>
 
         <!-- Large centered equipment icon -->
         <ImageView
@@ -72,6 +96,16 @@
             android:scaleType="fitCenter"
             android:src="@drawable/ic_hero_default"
             android:contentDescription="@string/hero_icon_desc" />
+
+        <ImageView
+            android:id="@+id/heroIconSecondary"
+            android:layout_width="160dp"
+            android:layout_height="160dp"
+            android:layout_gravity="center"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_hero_default"
+            android:contentDescription="@string/hero_icon_desc"
+            android:visibility="gone" />
 
         <!-- Dark mode overlay (GONE in light mode) -->
         <View

@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.util.TypedValue
 import android.view.Menu
 import android.view.MenuItem
+import android.view.Gravity
 import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
@@ -53,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private var lastObservedServiceTypes: Set<ServiceType>? = null
     private var lastObservedClientCount: Int? = null
     private var currentHeroRes: Int = 0
+    private var currentHeroSecondaryRes: Int = 0
     private lateinit var splitFlapDigits: List<SplitFlapDigitView>
 
     /** Tracks which client IDs we already showed an arrival dialog for this session
@@ -227,6 +229,11 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             state.eligibleClientCount
                         }
+                        binding.heroCountdownPrefix.text = if (state.errandsModeEnabled) {
+                            getString(R.string.hero_destinations_remaining_prefix)
+                        } else {
+                            getString(R.string.hero_stops_remaining_prefix)
+                        }
                         updateRemainingCount(countdownValue)
 
                         // Destination chip
@@ -326,26 +333,104 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateHeroIcon(state: com.routeme.app.ui.MainUiState) {
-        val newRes = when {
-            state.errandsModeEnabled -> R.drawable.ic_hero_notepad
-            state.selectedServiceTypes.any {
-                it == ServiceType.GRUB || it == ServiceType.INCIDENTAL
-            } -> R.drawable.grub
-            state.selectedServiceTypes.any {
-                it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5
-            } -> R.drawable.siteone_lesco_495246_1
-            state.selectedServiceTypes.any {
-                it == ServiceType.ROUND_1 || it == ServiceType.ROUND_3 ||
-                it == ServiceType.ROUND_4 || it == ServiceType.ROUND_6
-            } -> R.drawable.permagreen_turf_spreader_sprayer
-            else -> R.drawable.ic_hero_default
-        }
-        if (newRes == currentHeroRes) return
-        currentHeroRes = newRes
+        val icons = resolveHeroIcons(state)
+        val primaryRes = icons.first()
+        val secondaryRes = icons.getOrNull(1) ?: 0
+
+        applyHeroIconLayout(primaryRes, secondaryRes)
+
+        if (primaryRes == currentHeroRes && secondaryRes == currentHeroSecondaryRes) return
+        currentHeroRes = primaryRes
+        currentHeroSecondaryRes = secondaryRes
+
         binding.heroIcon.animate().alpha(0f).setDuration(150).withEndAction {
-            binding.heroIcon.setImageResource(newRes)
+            binding.heroIcon.setImageResource(primaryRes)
             binding.heroIcon.animate().alpha(1f).setDuration(150).start()
         }.start()
+
+        if (secondaryRes != 0) {
+            binding.heroIconSecondary.visibility = View.VISIBLE
+            binding.heroIconSecondary.animate().alpha(0f).setDuration(150).withEndAction {
+                binding.heroIconSecondary.setImageResource(secondaryRes)
+                binding.heroIconSecondary.animate().alpha(1f).setDuration(150).start()
+            }.start()
+        } else {
+            binding.heroIconSecondary.visibility = View.GONE
+        }
+    }
+
+    private fun resolveHeroIcons(state: com.routeme.app.ui.MainUiState): List<Int> {
+        if (state.errandsModeEnabled) return listOf(R.drawable.ic_hero_notepad)
+
+        val hasBug = state.selectedServiceTypes.any {
+            it == ServiceType.GRUB || it == ServiceType.INCIDENTAL
+        }
+        val hasSprayer = state.selectedServiceTypes.any {
+            it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5
+        }
+        val hasSpreader = state.selectedServiceTypes.any {
+            it == ServiceType.ROUND_1 || it == ServiceType.ROUND_3 ||
+                it == ServiceType.ROUND_4 || it == ServiceType.ROUND_6
+        }
+
+        val icons = mutableListOf<Int>()
+        if (hasSpreader) icons += R.drawable.permagreen_turf_spreader_sprayer
+        if (hasSprayer) icons += R.drawable.siteone_lesco_495246_1
+        if (hasBug) icons += R.drawable.grub
+
+        if (icons.isEmpty()) return listOf(R.drawable.ic_hero_default)
+        return icons.take(2)
+    }
+
+    private fun applyHeroIconLayout(primaryRes: Int, secondaryRes: Int) {
+        val hasSecondary = secondaryRes != 0
+        val dualBaseDp = 112f
+        val singleBaseDp = 160f
+
+        if (hasSecondary) {
+            val primarySizeDp = if (primaryRes == R.drawable.permagreen_turf_spreader_sprayer) {
+                dualBaseDp * 1.7f
+            } else {
+                dualBaseDp
+            }
+            val secondarySizeDp = if (secondaryRes == R.drawable.permagreen_turf_spreader_sprayer) {
+                dualBaseDp * 1.7f
+            } else {
+                dualBaseDp
+            }
+            applyHeroIconFrame(binding.heroIcon, primarySizeDp, -64f)
+            applyHeroIconFrame(binding.heroIconSecondary, secondarySizeDp, 64f)
+            binding.heroIconSecondary.visibility = View.VISIBLE
+            return
+        }
+
+        val primarySizeDp = if (primaryRes == R.drawable.permagreen_turf_spreader_sprayer) {
+            singleBaseDp * 1.7f
+        } else {
+            singleBaseDp
+        }
+        applyHeroIconFrame(binding.heroIcon, primarySizeDp, 0f)
+        binding.heroIconSecondary.visibility = View.GONE
+        binding.heroIconSecondary.translationX = 0f
+    }
+
+    private fun applyHeroIconFrame(icon: android.widget.ImageView, sizeDp: Float, offsetDp: Float) {
+        val sizePx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            sizeDp,
+            resources.displayMetrics
+        ).toInt()
+        val offsetPx = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            offsetDp,
+            resources.displayMetrics
+        )
+        val params = icon.layoutParams as android.widget.FrameLayout.LayoutParams
+        params.width = sizePx
+        params.height = sizePx
+        params.gravity = Gravity.CENTER
+        icon.layoutParams = params
+        icon.translationX = offsetPx
     }
 
     private fun buildHeroStepLabel(types: Set<ServiceType>): String {
