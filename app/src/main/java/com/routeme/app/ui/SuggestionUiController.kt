@@ -9,12 +9,14 @@ import com.routeme.app.databinding.ActivityMainBinding
 
 class SuggestionUiController(
     private val binding: ActivityMainBinding,
-    private val viewModel: MainViewModel
+    private val viewModel: MainViewModel,
+    private val onSuggestionTapped: (com.routeme.app.ClientSuggestion) -> Unit = {}
 ) {
     private val adapter = SuggestionSlotAdapter(
         onSuggestionClicked = { suggestion ->
             viewModel.selectSuggestion(suggestion.client.id)
             showCurrentPage()
+            onSuggestionTapped(suggestion)
         }
     )
 
@@ -30,20 +32,6 @@ class SuggestionUiController(
             adapter = this@SuggestionUiController.adapter
         }
         snapHelper.attachToRecyclerView(binding.suggestionRecyclerView)
-
-        binding.suggestionRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                if (newState != RecyclerView.SCROLL_STATE_IDLE) return
-                val layoutManager = recyclerView.layoutManager ?: return
-                val snapped = snapHelper.findSnapView(layoutManager) ?: return
-                val position = layoutManager.getPosition(snapped)
-                val suggestion = viewModel.uiState.value.suggestions.getOrNull(position) ?: return
-                if (viewModel.uiState.value.selectedClient?.id != suggestion.client.id) {
-                    viewModel.selectSuggestion(suggestion.client.id)
-                    showCurrentPage()
-                }
-            }
-        })
     }
 
     fun showCurrentPage() {
@@ -77,10 +65,5 @@ class SuggestionUiController(
             selectedClientId = state.selectedClient?.id,
             selectedServiceTypeCount = state.selectedServiceTypes.size
         )
-
-        val selectedIndex = suggestions.indexOfFirst { it.client.id == state.selectedClient?.id }
-        if (selectedIndex >= 0) {
-            binding.suggestionRecyclerView.scrollToPosition(selectedIndex)
-        }
     }
 }

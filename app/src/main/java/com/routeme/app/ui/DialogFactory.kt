@@ -336,4 +336,74 @@ object DialogFactory {
             .show()
     }
 
+    fun showClientActionDialog(
+        context: Context,
+        clientName: String,
+        details: String,
+        arrivalActive: Boolean,
+        onArrive: () -> Unit,
+        onCancelArrival: () -> Unit,
+        onMaps: () -> Unit,
+        onSkip: () -> Unit,
+        onConfirm: (notes: String) -> Unit,
+        onEditNotes: () -> Unit
+    ) {
+        val view = android.view.LayoutInflater.from(context)
+            .inflate(R.layout.dialog_client_action, null)
+
+        val nameText = view.findViewById<TextView>(R.id.dialogClientName)
+        val detailsText = view.findViewById<TextView>(R.id.dialogClientDetails)
+        val arriveBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogArriveButton)
+        val notesLayout = view.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.dialogVisitNotesLayout)
+        val notesInput = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.dialogVisitNotesInput)
+        val mapsBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogMapsButton)
+        val skipBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogSkipButton)
+        val confirmBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogConfirmButton)
+        val editNotesBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogEditNotesButton)
+        val propertyBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogPropertyButton)
+
+        nameText.text = clientName
+        detailsText.text = details
+
+        if (arrivalActive) {
+            arriveBtn.text = context.getString(R.string.dialog_cancel_arrival)
+            notesLayout.visibility = View.VISIBLE
+        } else {
+            arriveBtn.text = context.getString(R.string.dialog_arrive)
+            notesLayout.visibility = View.GONE
+        }
+
+        propertyBtn.isEnabled = false
+        propertyBtn.alpha = 0.4f
+
+        val dialog = AlertDialog.Builder(context)
+            .setView(view)
+            .create()
+
+        arriveBtn.setOnClickListener {
+            if (arrivalActive) {
+                onCancelArrival()
+                arriveBtn.text = context.getString(R.string.dialog_arrive)
+                notesLayout.visibility = View.GONE
+            } else {
+                onArrive()
+                arriveBtn.text = context.getString(R.string.dialog_cancel_arrival)
+                notesLayout.visibility = View.VISIBLE
+            }
+        }
+        mapsBtn.setOnClickListener { onMaps(); dialog.dismiss() }
+        skipBtn.setOnClickListener { onSkip(); dialog.dismiss() }
+        confirmBtn.setOnClickListener {
+            val notes = notesInput.text?.toString().orEmpty()
+            onConfirm(notes)
+            dialog.dismiss()
+        }
+        editNotesBtn.setOnClickListener { onEditNotes(); dialog.dismiss() }
+        propertyBtn.setOnClickListener {
+            android.widget.Toast.makeText(context, "Property stats coming soon", android.widget.Toast.LENGTH_SHORT).show()
+        }
+
+        dialog.show()
+    }
+
 }

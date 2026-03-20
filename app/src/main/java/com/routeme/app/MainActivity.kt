@@ -36,8 +36,7 @@ import org.koin.androidx.viewmodel.ext.android.viewModel
 
 class MainActivity : AppCompatActivity() {
     private var clients = mutableListOf<Client>()
-    private var selectedClient: Client? = null
-    private var lastLocation: Location? = null
+    private var lastLocation: Location?  = null
     private lateinit var binding: ActivityMainBinding
     private lateinit var suggestionUiController: SuggestionUiController
     private lateinit var trackingUiController: TrackingUiController
@@ -117,7 +116,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        suggestionUiController = SuggestionUiController(binding, viewModel)
+        suggestionUiController = SuggestionUiController(binding, viewModel,
+            onSuggestionTapped = { suggestion -> showClientActionDialog(suggestion.client) })
         trackingUiController = TrackingUiController(
             activity = this,
             viewModel = viewModel,
@@ -176,7 +176,6 @@ class MainActivity : AppCompatActivity() {
                     viewModel.uiState.collect { state ->
                         clients.clear()
                         clients.addAll(state.clients)
-                        selectedClient = state.selectedClient
                         sheetsUrl = state.sheetsReadUrl
                         if (state.sheetsWriteUrl != SheetsWriteBack.webAppUrl) {
                             SheetsWriteBack.webAppUrl = state.sheetsWriteUrl
@@ -185,7 +184,6 @@ class MainActivity : AppCompatActivity() {
                             binding.summaryText.text = state.summaryText
                         }
                         binding.statusText.text = state.statusText
-                        binding.clientDetailsText.text = state.selectedClientDetails
 
                         val previousClientCount = lastObservedClientCount
                         lastObservedClientCount = state.clients.size
@@ -206,10 +204,7 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             getString(R.string.start_tracking)
                         }
-                        binding.visitNotesLayout.visibility = if (state.arrivalStartedAtMillis != null) View.VISIBLE else View.GONE
-                        if (state.arrivalStartedAtMillis == null) {
-                            clearVisitNotesInput()
-                        }
+
                         if (state.errandsModeEnabled) {
                             binding.errandsBanner.visibility = View.VISIBLE
                             binding.errandsBanner.text = getString(
@@ -427,38 +422,7 @@ class MainActivity : AppCompatActivity() {
             suggestNextClients()
         }
 
-        binding.tileSelected.setOnClickListener {
-            if (viewModel.uiState.value.arrivalStartedAtMillis != null) {
-                viewModel.cancelArrival()
-                return@setOnClickListener
-            }
-            lastLocation = getCurrentLocation()
-            viewModel.startArrivalForSelected(lastLocation)
-        }
 
-        binding.mapsButton.setOnLongClickListener {
-            openSelectedInMaps()
-            true
-        }
-        binding.skipButton.setOnLongClickListener {
-            viewModel.skipSelectedClientToday()
-            true
-        }
-        binding.editNotesButton.setOnLongClickListener {
-            viewModel.editSelectedClientNotes()
-            true
-        }
-        binding.propertyButton.setOnLongClickListener {
-            Snackbar.make(binding.root, "Property stats coming soon", Snackbar.LENGTH_SHORT).show()
-            true
-        }
-        binding.confirmButton.setOnLongClickListener {
-            confirmSelectedClientService()
-            true
-        }
-
-        binding.propertyButton.isEnabled = false
-        binding.propertyButton.alpha = 0.4f
     }
 
     private fun suggestNextClients() {
@@ -471,13 +435,7 @@ class MainActivity : AppCompatActivity() {
         suggestionUiController.showCurrentPage()
     }
 
-    private fun openSelectedInMaps() {
-        val client = selectedClient
-        if (client == null) {
-            viewModel.postStatus(getString(R.string.status_pick_client))
-            return
-        }
-
+    private fun openClientInMaps(client: Client) {
         val uri = if (client.latitude != null && client.longitude != null) {
             Uri.parse("google.navigation:q=${client.latitude},${client.longitude}")
         } else {
@@ -498,21 +456,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun readVisitNotesText(): String {
-        return binding.visitNotesInput.text?.toString().orEmpty()
-    }
-
-    private fun clearVisitNotesInput() {
-        binding.visitNotesInput.text?.clear()
-    }
-
-    private fun confirmSelectedClientService() {
+    private fun confirmServiceForSelectedClient(visitNotes: String = "") {
         val current = getCurrentLocation()
         lastLocation = current
         val types = viewModel.uiState.value.selectedServiceTypes.ifEmpty { setOf(ServiceType.ROUND_1) }
         viewModel.setServiceTypes(types)
-        val notes = readVisitNotesText()
-        viewModel.confirmSelectedClientService(current, notes)
+        viewModel.confirmSelectedClientService(current, visitNotes)
+    }
+
+    private fun showClientActionDialog(client: Client) {
+        val state = viewModel.uiState.value
+        DialogFactory.showClientActionDialog(
+            context = this,
+            clientName = client.name,
+            details = state.selectedClientDetails,
+            arrivalActive = state.arrivalStartedAtMillis != null,
+            onArrive = {
+                lastLocation = getCurrentLocation()
+                viewModel.startArrivalForSelected(lastLocation)
+            },
+            onCancelArrival = { viewModel.cancelArrival() },
+            onMaps = { openClientInMaps(client) },
+            onSkip = { viewModel.skipSelectedClientToday() },
+            onConfirm = { notes -> confirmServiceForSelectedClient(notes) },
+            onEditNotes = { viewModel.editSelectedClientNotes() }
+        )
     }
 
     private fun showDailySummaryDialog(summary: String) {
@@ -557,8 +525,7 @@ class MainActivity : AppCompatActivity() {
             onMarkComplete = {
                 val location = getCurrentLocation()
                 lastLocation = location
-                val notes = readVisitNotesText()
-                viewModel.resolveStaleArrival(markComplete = true, currentLocation = location, visitNotes = notes)
+                viewModel.resolveStaleArrival(markComplete = true, currentLocation = location, visitNotes = "")
             },
             onDiscard = {
                 viewModel.resolveStaleArrival(markComplete = false)
@@ -796,7 +763,7 @@ class MainActivity : AppCompatActivity() {
                 // Use the real arrival time captured by the tracking service
                 lastLocation = location
                 viewModel.markArrivalForClient(client, location, arrivedAtMillis)
-                confirmSelectedClientService()
+                confirmServiceForSelectedClient()
                 // Dismiss the completion notification for this client
                 trackingUiController.dismissNotification(3000 + client.id.hashCode())
             }
