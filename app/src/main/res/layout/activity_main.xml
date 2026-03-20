@@ -23,14 +23,23 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <!-- Gradient background -->
+        <!-- Gradient background (hidden for transparent hero) -->
         <ImageView
             android:id="@+id/heroBackground"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:src="@drawable/bg_hero_gradient"
             android:scaleType="fitXY"
-            android:importantForAccessibility="no" />
+            android:importantForAccessibility="no"
+            android:visibility="gone" />
+
+        <!-- Top scrim gradient (dark overlay for weather/countdown visibility) -->
+        <View
+            android:id="@+id/heroScrimTop"
+            android:layout_width="match_parent"
+            android:layout_height="80dp"
+            android:layout_gravity="top"
+            android:background="@drawable/bg_hero_scrim_top" />
 
         <!-- Weather block (top-left, large icon + small temp) -->
         <LinearLayout
