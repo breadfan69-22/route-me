@@ -7,8 +7,11 @@ import com.routeme.app.CreateNonClientStopRequest
 import com.routeme.app.NonClientStopDao
 import com.routeme.app.NonClientStopEntity
 import com.routeme.app.NonClientStopTracker
+import com.routeme.app.SHOP_LAT
+import com.routeme.app.SHOP_LNG
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.network.GeocodingHelper
+import com.routeme.app.util.AppConfig
 
 class NonClientStopLogger(
     private val tag: String,
@@ -81,22 +84,30 @@ class NonClientStopLogger(
         logDebug(
             "Non-client stop detected! Stationary ${request.elapsedMillis / 60_000}min at (${request.lat}, ${request.lng})"
         )
+
+        val shopResults = FloatArray(1)
+        Location.distanceBetween(request.lat, request.lng, SHOP_LAT, SHOP_LNG, shopResults)
+        val isAtShop = shopResults[0] <= AppConfig.Tracking.NON_CLIENT_SHOP_LABEL_RADIUS_METERS
+
         val entity = NonClientStopEntity(
             lat = request.lat,
             lng = request.lng,
-            arrivedAtMillis = request.arrivedAtMillis
+            arrivedAtMillis = request.arrivedAtMillis,
+            label = if (isAtShop) "Shop" else null
         )
 
         launchAsync {
             try {
                 val id = nonClientStopDao.insertStop(entity)
                 nonClientStopTracker.onStopInserted(id, request.lat, request.lng, request.arrivedAtMillis)
-                logDebug("Non-client stop #$id inserted")
+                logDebug("Non-client stop #$id inserted${if (isAtShop) " (shop)" else ""}")
 
-                val address = reverseGeocode(request.lat, request.lng)
-                if (address != null) {
-                    nonClientStopDao.updateAddress(id, address)
-                    logDebug("Non-client stop #$id address: $address")
+                if (!isAtShop) {
+                    val address = reverseGeocode(request.lat, request.lng)
+                    if (address != null) {
+                        nonClientStopDao.updateAddress(id, address)
+                        logDebug("Non-client stop #$id address: $address")
+                    }
                 }
             } catch (e: Exception) {
                 logWarn("Failed to log non-client stop: ${e.message}")

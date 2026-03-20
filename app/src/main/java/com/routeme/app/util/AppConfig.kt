@@ -21,8 +21,9 @@ object AppConfig {
         const val GPS_WEAK_ACCURACY_METERS = 45f
         const val PROVIDER_REFRESH_COOLDOWN_MS = 30_000L
 
-        const val NON_CLIENT_STOP_RADIUS_METERS = 60f
-        const val NON_CLIENT_DEPART_RADIUS_METERS = 80f
+        const val NON_CLIENT_STOP_RADIUS_METERS = 150f
+        const val NON_CLIENT_DEPART_RADIUS_METERS = 200f
+        const val NON_CLIENT_SHOP_LABEL_RADIUS_METERS = 100f
 
         const val DESTINATION_RADIUS_METERS = 150f
         const val DESTINATION_DWELL_MS = 3 * 60 * 1000L
