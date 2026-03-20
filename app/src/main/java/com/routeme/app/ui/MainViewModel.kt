@@ -85,27 +85,30 @@ class MainViewModel(
      */
     private fun resolveInitialSteps(): Set<ServiceType> {
         // 1. SavedStateHandle survives config changes / process death
-        val fromSavedState = savedStateHandle.get<String>(KEY_SERVICE_TYPE)
+        val fromSavedState = parseServiceTypes(savedStateHandle.get<String>(KEY_SERVICE_TYPE))
+        if (fromSavedState != null) return fromSavedState
+
+        // 2. SharedPreferences survives full app close — use if saved today
+        val fromPrefs = resolveTodaySavedStepsFromPrefs()
+        if (fromPrefs != null) return fromPrefs
+
+        // 3. New day or first launch — auto-select from seasonal date windows
+        return suggestedStepsForDate() ?: setOf(ServiceType.ROUND_1)
+    }
+
+    private fun resolveTodaySavedStepsFromPrefs(): Set<ServiceType>? {
+        val todayEpochDay = System.currentTimeMillis() / 86_400_000L
+        val savedDate = preferencesRepository.selectedStepsDate
+        if (savedDate != todayEpochDay) return null
+        return parseServiceTypes(preferencesRepository.selectedSteps)
+    }
+
+    private fun parseServiceTypes(rawValue: String?): Set<ServiceType>? {
+        return rawValue
             ?.split(",")
             ?.mapNotNull { runCatching { ServiceType.valueOf(it.trim()) }.getOrNull() }
             ?.toSet()
             ?.ifEmpty { null }
-        if (fromSavedState != null) return fromSavedState
-
-        // 2. SharedPreferences survives full app close — use if saved today
-        val todayEpochDay = System.currentTimeMillis() / 86_400_000L
-        val savedDate = preferencesRepository.selectedStepsDate
-        if (savedDate == todayEpochDay) {
-            val fromPrefs = preferencesRepository.selectedSteps
-                .split(",")
-                .mapNotNull { runCatching { ServiceType.valueOf(it.trim()) }.getOrNull() }
-                .toSet()
-                .ifEmpty { null }
-            if (fromPrefs != null) return fromPrefs
-        }
-
-        // 3. New day or first launch — auto-select from seasonal date windows
-        return suggestedStepsForDate() ?: setOf(ServiceType.ROUND_1)
     }
 
     private val _uiState = MutableStateFlow(
@@ -233,47 +236,75 @@ class MainViewModel(
         viewModelScope.launch {
             setLoading(true)
             setStatus("Syncing from Google Sheets…", emitSnackbar = false)
-            var shouldEmitSyncComplete = false
-            var shouldAutoGeocode = false
+            var postActions = SyncPostActions()
             try {
                 when (val result = syncSettingsUseCase.syncFromSheets(url)) {
                     is SyncSettingsUseCase.SyncFromSheetsResult.Error -> {
-                        setStatus(result.message)
+                        handleSyncFromSheetsError(result)
                     }
 
                     is SyncSettingsUseCase.SyncFromSheetsResult.Success -> {
-                        setStatus(result.statusMessage)
-                        val syncedClients = result.syncedClients
-                        if (syncedClients != null) {
-                            _uiState.update { current ->
-                                current.withUpdatedClients(syncedClients)
-                                    .withClearedArrival()
-                                    .copy(
-                                        suggestions = emptyList(),
-                                        suggestionOffset = 0,
-                                        selectedClient = null,
-                                        selectedClientDetails = ""
-                                    )
-                            }
-                            persistCriticalState(_uiState.value)
-                            if (_uiState.value.isTracking) {
-                                _events.emit(MainEvent.RefreshTrackingClients)
-                            }
-                            shouldEmitSyncComplete = true
-                            shouldAutoGeocode = result.shouldAutoGeocode
-                        }
+                        postActions = handleSyncFromSheetsSuccess(result)
                     }
                 }
             } finally {
                 setLoading(false)
             }
 
-            if (shouldEmitSyncComplete) {
-                _events.emit(MainEvent.SyncComplete)
-            }
-            if (shouldAutoGeocode) {
-                geocodeMissingClientCoordinates()
-            }
+            emitPostSyncActions(postActions)
+        }
+    }
+
+    private data class SyncPostActions(
+        val shouldEmitSyncComplete: Boolean = false,
+        val shouldAutoGeocode: Boolean = false
+    )
+
+    private suspend fun handleSyncFromSheetsError(result: SyncSettingsUseCase.SyncFromSheetsResult.Error) {
+        setStatus(result.message)
+    }
+
+    private suspend fun handleSyncFromSheetsSuccess(
+        result: SyncSettingsUseCase.SyncFromSheetsResult.Success
+    ): SyncPostActions {
+        setStatus(result.statusMessage)
+        val syncedClients = result.syncedClients ?: return SyncPostActions()
+
+        applySyncedClientsToState(syncedClients)
+        refreshTrackingClientsIfNeeded()
+
+        return SyncPostActions(
+            shouldEmitSyncComplete = true,
+            shouldAutoGeocode = result.shouldAutoGeocode
+        )
+    }
+
+    private fun applySyncedClientsToState(syncedClients: List<Client>) {
+        _uiState.update { current ->
+            current.withUpdatedClients(syncedClients)
+                .withClearedArrival()
+                .copy(
+                    suggestions = emptyList(),
+                    suggestionOffset = 0,
+                    selectedClient = null,
+                    selectedClientDetails = ""
+                )
+        }
+        persistCriticalState(_uiState.value)
+    }
+
+    private suspend fun refreshTrackingClientsIfNeeded() {
+        if (_uiState.value.isTracking) {
+            _events.emit(MainEvent.RefreshTrackingClients)
+        }
+    }
+
+    private suspend fun emitPostSyncActions(postActions: SyncPostActions) {
+        if (postActions.shouldEmitSyncComplete) {
+            _events.emit(MainEvent.SyncComplete)
+        }
+        if (postActions.shouldAutoGeocode) {
+            geocodeMissingClientCoordinates()
         }
     }
 
@@ -1130,6 +1161,18 @@ class MainViewModel(
         stateBeforeConfirm: MainUiState,
         onSuccess: (() -> Unit)?
     ) {
+        applyConfirmSelectedState(result, stateBeforeConfirm)
+        emitConfirmSelectedPrimaryStatus(result)
+        emitConfirmSelectedEvents(result)
+        emitConfirmSelectedSheetFeedback(result)
+
+        onSuccess?.invoke()
+    }
+
+    private fun applyConfirmSelectedState(
+        result: ServiceCompletionUseCase.ConfirmSelectedResult.Success,
+        stateBeforeConfirm: MainUiState
+    ) {
         _uiState.update { current ->
             current.withUpdatedClients(result.updatedClients)
                 .withClearedArrival(currentStopClientName = null)
@@ -1141,11 +1184,20 @@ class MainViewModel(
                 )
         }
         persistCriticalState(_uiState.value)
+    }
 
+    private suspend fun emitConfirmSelectedPrimaryStatus(
+        result: ServiceCompletionUseCase.ConfirmSelectedResult.Success
+    ) {
         setStatus(result.statusMessage)
         if (result.retryDrainSucceeded > 0) {
             setStatus("Retried ${result.retryDrainSucceeded} queued sheet write(s)", emitSnackbar = false)
         }
+    }
+
+    private suspend fun emitConfirmSelectedEvents(
+        result: ServiceCompletionUseCase.ConfirmSelectedResult.Success
+    ) {
         _events.emit(MainEvent.ServiceConfirmed)
         _events.emit(
             MainEvent.UndoConfirmation(
@@ -1154,15 +1206,17 @@ class MainViewModel(
                 result.finishedAt
             )
         )
+    }
 
+    private suspend fun emitConfirmSelectedSheetFeedback(
+        result: ServiceCompletionUseCase.ConfirmSelectedResult.Success
+    ) {
         result.sheetSnackbarMessage?.let { message ->
             _events.emit(MainEvent.ShowSnackbar(message))
         }
         result.sheetStatusMessage?.let { message ->
             setStatus(message)
         }
-
-        onSuccess?.invoke()
     }
 
     /**
@@ -1499,38 +1553,49 @@ class MainViewModel(
 
     private fun buildDailySummaryText(rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
         val sb = StringBuilder()
-        val totalStops = rows.size
-        val totalMinutes = rows.sumOf { it.durationMinutes }
-        val hours = totalMinutes / 60
-        val mins = totalMinutes % 60
-        val durationLabel = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+        appendDailySummaryHeader(sb, rows)
+        sb.appendLine()
+        appendDailyRows(sb, rows)
 
+        appendNonClientStopsSummary(sb, nonClientStops)
+        return sb.toString()
+    }
+
+    private fun appendDailySummaryHeader(sb: StringBuilder, rows: List<ClientStopRow>) {
         sb.appendLine("Today's Route Summary")
         sb.appendLine("─────────────────────")
 
-        // First/last stop clock window
+        appendDailyTimeWindow(sb, rows)
+
+        val totalStops = rows.size
+        val totalMinutes = rows.sumOf { it.durationMinutes }
+        sb.appendLine("$totalStops stops  •  ${formatDurationLabel(totalMinutes)} total")
+    }
+
+    private fun appendDailyTimeWindow(sb: StringBuilder, rows: List<ClientStopRow>) {
         val firstArrival = rows.mapNotNull { it.arrivedAtMillis }.minOrNull()
         val lastEnd = rows.maxOfOrNull { it.endedAtMillis }
         if (firstArrival != null && lastEnd != null) {
             sb.appendLine("${DateUtils.formatTime(firstArrival)} – ${DateUtils.formatTime(lastEnd)}")
         }
-        sb.appendLine("$totalStops stops  •  $durationLabel total")
-        sb.appendLine()
+    }
 
+    private fun appendDailyRows(sb: StringBuilder, rows: List<ClientStopRow>) {
         rows.forEachIndexed { index, row ->
-            val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
-            val endStr = DateUtils.formatTime(row.endedAtMillis)
-            sb.appendLine("${index + 1}. ${row.clientName}")
-            sb.appendLine("   ${formatClientStopDetail(row)}")
-            sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
-            if (row.notes.isNotBlank()) {
-                sb.appendLine("   \uD83D\uDCDD ${row.notes}")
-            }
-            if (index < rows.size - 1) sb.appendLine()
+            appendDailyRow(sb, index, row, rows.lastIndex)
         }
+    }
 
-        appendNonClientStopsSummary(sb, nonClientStops)
-        return sb.toString()
+    private fun appendDailyRow(sb: StringBuilder, index: Int, row: ClientStopRow, lastIndex: Int) {
+        val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
+        val endStr = DateUtils.formatTime(row.endedAtMillis)
+        sb.appendLine("${index + 1}. ${row.clientName}")
+        sb.appendLine("   ${formatClientStopDetail(row)}")
+        sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
+        if (row.notes.isNotBlank()) {
+            sb.appendLine("   \uD83D\uDCDD ${row.notes}")
+        }
+        if (index < lastIndex) sb.appendLine()
     }
 
     // ─── Route History ─────────────────────────────────────────
@@ -1602,19 +1667,27 @@ class MainViewModel(
 
     private fun buildHistorySummaryText(@Suppress("UNUSED_PARAMETER") dateMillis: Long, rows: List<ClientStopRow>, nonClientStops: List<NonClientStop> = emptyList()): String {
         val sb = StringBuilder()
+        appendHistorySummaryHeader(sb, rows)
+        appendHistoryStepBreakdown(sb, rows)
+        sb.appendLine()
+        appendHistoryRows(sb, rows)
+
+        appendNonClientStopsSummary(sb, nonClientStops)
+        return sb.toString()
+    }
+
+    private fun appendHistorySummaryHeader(sb: StringBuilder, rows: List<ClientStopRow>) {
         val totalStops = rows.size
         val totalMinutes = rows.sumOf { it.durationMinutes }
-        val hours = totalMinutes / 60
-        val mins = totalMinutes % 60
-        val durationLabel = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+        sb.appendLine("$totalStops stops  •  ${formatDurationLabel(totalMinutes)} total")
+    }
 
-        sb.appendLine("$totalStops stops  •  $durationLabel total")
-
-        // Step breakdown
+    private fun appendHistoryStepBreakdown(sb: StringBuilder, rows: List<ClientStopRow>) {
         val stepCounts = rows
             .flatMap { row -> row.serviceTypes.split(",").map { it.trim() }.filter { it.isNotBlank() } }
             .groupingBy { it }
             .eachCount()
+
         if (stepCounts.isNotEmpty()) {
             val parts = stepCounts.map { (type, count) ->
                 val label = runCatching { ServiceType.valueOf(type).label }.getOrElse { type }
@@ -1622,25 +1695,27 @@ class MainViewModel(
             }
             sb.appendLine(parts.joinToString("  •  "))
         }
-        sb.appendLine()
+    }
 
+    private fun appendHistoryRows(sb: StringBuilder, rows: List<ClientStopRow>) {
         rows.forEachIndexed { index, row ->
-            val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
-            val endStr = DateUtils.formatTime(row.endedAtMillis)
-            sb.appendLine("${index + 1}. ${row.clientName}")
-            sb.appendLine("   ${formatClientStopDetail(row)}")
-            formatHistoryWeatherDetail(row)?.let { weatherLine ->
-                sb.appendLine("   $weatherLine")
-            }
-            sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
-            if (row.notes.isNotBlank()) {
-                sb.appendLine("   \uD83D\uDCDD ${row.notes}")
-            }
-            if (index < rows.size - 1) sb.appendLine()
+            appendHistoryRow(sb, index, row, rows.lastIndex)
         }
+    }
 
-        appendNonClientStopsSummary(sb, nonClientStops)
-        return sb.toString()
+    private fun appendHistoryRow(sb: StringBuilder, index: Int, row: ClientStopRow, lastIndex: Int) {
+        val timeStr = row.arrivedAtMillis?.let { DateUtils.formatTime(it) } ?: "—"
+        val endStr = DateUtils.formatTime(row.endedAtMillis)
+        sb.appendLine("${index + 1}. ${row.clientName}")
+        sb.appendLine("   ${formatClientStopDetail(row)}")
+        formatHistoryWeatherDetail(row)?.let { weatherLine ->
+            sb.appendLine("   $weatherLine")
+        }
+        sb.appendLine("   $timeStr → $endStr  (${row.durationMinutes}m)")
+        if (row.notes.isNotBlank()) {
+            sb.appendLine("   \uD83D\uDCDD ${row.notes}")
+        }
+        if (index < lastIndex) sb.appendLine()
     }
 
     private fun formatClientStopDetail(row: ClientStopRow): String {
@@ -1783,46 +1858,52 @@ class MainViewModel(
         val breakStops = nonClientStops.filter { it.label == null }
 
         if (destinationStops.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-            sb.appendLine("Destination Stops \uD83D\uDCE6")
-            sb.appendLine()
-            val destMinutes = destinationStops.sumOf { it.durationMinutes }
-            val dHours = destMinutes / 60
-            val dMins = destMinutes % 60
-            val destLabel = if (dHours > 0) "${dHours}h ${dMins}m" else "${dMins}m"
-            sb.appendLine("${destinationStops.size} destination(s)  •  $destLabel total")
-            sb.appendLine()
-            destinationStops.forEachIndexed { i, stop ->
-                val name = stop.label ?: "Destination"
-                val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
-                val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
-                sb.appendLine("\uD83D\uDCCD $name")
-                sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
-                if (i < destinationStops.size - 1) sb.appendLine()
-            }
+            appendDestinationStopsSection(sb, destinationStops)
         }
 
         if (breakStops.isNotEmpty()) {
-            sb.appendLine()
-            sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
-            sb.appendLine("Breaks / Non-Client Stops")
-            sb.appendLine()
-            val breakMinutes = breakStops.sumOf { it.durationMinutes }
-            val bHours = breakMinutes / 60
-            val bMins = breakMinutes % 60
-            val breakLabel = if (bHours > 0) "${bHours}h ${bMins}m" else "${bMins}m"
-            sb.appendLine("${breakStops.size} break(s)  •  $breakLabel total")
-            sb.appendLine()
-            breakStops.forEachIndexed { i, stop ->
-                val addr = stop.address ?: "Unknown location"
-                val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
-                val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
-                sb.appendLine("☕ $addr")
-                sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
-                if (i < breakStops.size - 1) sb.appendLine()
-            }
+            appendBreakStopsSection(sb, breakStops)
         }
+    }
+
+    private fun appendDestinationStopsSection(sb: StringBuilder, destinationStops: List<NonClientStop>) {
+        appendNonClientSectionHeader(sb, "Destination Stops \uD83D\uDCE6")
+        val totalMinutes = destinationStops.sumOf { it.durationMinutes }
+        sb.appendLine("${destinationStops.size} destination(s)  •  ${formatDurationLabel(totalMinutes)} total")
+        sb.appendLine()
+
+        destinationStops.forEachIndexed { index, stop ->
+            val name = stop.label ?: "Destination"
+            appendNonClientStopRow(sb, "\uD83D\uDCCD $name", stop)
+            if (index < destinationStops.size - 1) sb.appendLine()
+        }
+    }
+
+    private fun appendBreakStopsSection(sb: StringBuilder, breakStops: List<NonClientStop>) {
+        appendNonClientSectionHeader(sb, "Breaks / Non-Client Stops")
+        val totalMinutes = breakStops.sumOf { it.durationMinutes }
+        sb.appendLine("${breakStops.size} break(s)  •  ${formatDurationLabel(totalMinutes)} total")
+        sb.appendLine()
+
+        breakStops.forEachIndexed { index, stop ->
+            val address = stop.address ?: "Unknown location"
+            appendNonClientStopRow(sb, "☕ $address", stop)
+            if (index < breakStops.size - 1) sb.appendLine()
+        }
+    }
+
+    private fun appendNonClientSectionHeader(sb: StringBuilder, title: String) {
+        sb.appendLine()
+        sb.appendLine("┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+        sb.appendLine(title)
+        sb.appendLine()
+    }
+
+    private fun appendNonClientStopRow(sb: StringBuilder, title: String, stop: NonClientStop) {
+        val arriveStr = DateUtils.formatTime(stop.arrivedAtMillis)
+        val departStr = stop.departedAtMillis?.let { DateUtils.formatTime(it) } ?: "ongoing"
+        sb.appendLine(title)
+        sb.appendLine("   $arriveStr → $departStr  (${stop.durationMinutes}m)")
     }
 
     private fun persistCriticalState(state: MainUiState) {
