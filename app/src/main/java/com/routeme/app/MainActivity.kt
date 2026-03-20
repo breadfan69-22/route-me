@@ -274,6 +274,7 @@ class MainActivity : AppCompatActivity() {
                         binding.upcomingIcon.setImageResource(R.drawable.ic_event_available)
                         binding.upcomingStatusText.text = getString(R.string.tile_upcoming_status_none)
 
+                        binding.tileDirection.isActive = state.routeDirection == RouteDirection.HOMEWARD
                         binding.tileTracking.isActive = state.isTracking
                         binding.trackingButton.setImageResource(
                             if (state.isTracking) R.drawable.ic_wrong_location else R.drawable.ic_location_on
