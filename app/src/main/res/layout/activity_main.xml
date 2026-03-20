@@ -52,6 +52,35 @@
             android:maxWidth="320dp"
             android:visibility="gone" />
 
+        <!-- Weather block (top-left, large icon + small temp) -->
+        <LinearLayout
+            android:id="@+id/heroWeatherChip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="12dp"
+            android:layout_marginTop="8dp"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/heroWeatherIcon"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:importantForAccessibility="no" />
+
+            <TextView
+                android:id="@+id/heroWeatherTemp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:layout_marginTop="2dp" />
+
+        </LinearLayout>
+
         <!-- Right-justified countdown row (top-right) -->
         <LinearLayout
             android:id="@+id/heroCountdownRow"
@@ -134,30 +163,6 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:paddingBottom="8dp">
-
-            <!-- Weather chip -->
-            <LinearLayout
-                android:id="@+id/heroWeatherChip"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:background="@drawable/bg_metric_chip"
-                android:visibility="gone">
-                <ImageView
-                    android:id="@+id/heroWeatherIcon"
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:importantForAccessibility="no" />
-                <TextView
-                    android:id="@+id/heroWeatherTemp"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:textColor="#FFFFFF" />
-            </LinearLayout>
 
             <!-- Step label chip -->
             <LinearLayout
