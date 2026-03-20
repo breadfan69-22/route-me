@@ -37,7 +37,7 @@ val appModule = module {
     factory { MapsExportUseCase() }
     single { TrackingEventBus() }
     single { WriteBackRetryQueue(get()) }
-    factory { ServiceCompletionUseCase(get(), get(), get()) }
+    factory { ServiceCompletionUseCase(get(), get()) }
     factory { SyncSettingsUseCase(get(), get(), get()) }
 
     viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }

@@ -5,7 +5,6 @@ import com.routeme.app.ClientStopStatus
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
-import com.routeme.app.data.WeatherRepository
 import com.routeme.app.data.WriteBackRetryQueue
 import com.routeme.app.network.SheetsWriteBack
 import java.util.Calendar
@@ -13,7 +12,6 @@ import java.util.Calendar
 class ServiceCompletionUseCase(
     private val clientRepository: ClientRepository,
     private val retryQueue: WriteBackRetryQueue,
-    private val weatherRepository: WeatherRepository? = null,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     data class GeoPoint(

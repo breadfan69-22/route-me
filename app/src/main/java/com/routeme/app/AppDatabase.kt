@@ -35,7 +35,17 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "routeme_database"
                 )
-                    .addMigrations(*AppDatabaseMigrations.ALL)
+                    .addMigrations(
+                        AppDatabaseMigrations.MIGRATION_1_2,
+                        AppDatabaseMigrations.MIGRATION_2_3,
+                        AppDatabaseMigrations.MIGRATION_3_4,
+                        AppDatabaseMigrations.MIGRATION_4_5,
+                        AppDatabaseMigrations.MIGRATION_5_6,
+                        AppDatabaseMigrations.MIGRATION_6_7,
+                        AppDatabaseMigrations.MIGRATION_7_8,
+                        AppDatabaseMigrations.MIGRATION_8_9,
+                        AppDatabaseMigrations.MIGRATION_9_10
+                    )
                     .build()
                 INSTANCE = instance
                 instance
