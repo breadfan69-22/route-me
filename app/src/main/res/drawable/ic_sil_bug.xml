@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Body -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M12,6 A4,6 0 1,0 12,18 A4,6 0 1,0 12,6 Z"/>
+    <!-- Head -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M10,6 A2,1.5 0 1,1 14,6"/>
+    <!-- Wing split -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="0.8"
+        android:pathData="M12,6 L12,18"/>
+    <!-- Antennae -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1"
+        android:pathData="M10,6 Q8,3 7,2"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1"
+        android:pathData="M14,6 Q16,3 17,2"/>
+    <!-- Legs -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1"
+        android:pathData="M8,9 L5,8 M8,12 L4.5,12 M8,15 L5,16"/>
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="1"
+        android:pathData="M16,9 L19,8 M16,12 L19.5,12 M16,15 L19,16"/>
+    <!-- Crosshair -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="0.6"
+        android:pathData="M12,3 L12,21 M3,12 L21,12"/>
+</vector>

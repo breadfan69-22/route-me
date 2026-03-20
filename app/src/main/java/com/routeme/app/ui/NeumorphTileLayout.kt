@@ -28,6 +28,7 @@ class NeumorphTileLayout @JvmOverloads constructor(
         set(value) {
             if (field != value) {
                 field = value
+                updateShadowPaints()
                 invalidate()
             }
         }
@@ -86,6 +87,8 @@ class NeumorphTileLayout @JvmOverloads constructor(
             color = activeBorderColor
         }
 
+        updateShadowPaints()
+
         // Padding so children don't overlap the shadow bleed zone
         val inset = (shadowRadius + shadowOffset).toInt()
         setPadding(
@@ -94,6 +97,18 @@ class NeumorphTileLayout @JvmOverloads constructor(
             paddingRight.coerceAtLeast(inset),
             paddingBottom.coerceAtLeast(inset)
         )
+    }
+
+    private fun updateShadowPaints() {
+        if (isActive) {
+            // Sunken: dark top-left, light bottom-right
+            darkShadowPaint.setShadowLayer(shadowRadius, -shadowOffset, -shadowOffset, darkShadowColor)
+            lightShadowPaint.setShadowLayer(shadowRadius, shadowOffset, shadowOffset, lightShadowColor)
+        } else {
+            // Raised: dark bottom-right, light top-left
+            darkShadowPaint.setShadowLayer(shadowRadius, shadowOffset, shadowOffset, darkShadowColor)
+            lightShadowPaint.setShadowLayer(shadowRadius, -shadowOffset, -shadowOffset, lightShadowColor)
+        }
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {

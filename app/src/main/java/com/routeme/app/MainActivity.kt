@@ -257,11 +257,31 @@ class MainActivity : AppCompatActivity() {
                         lastObservedServiceTypes = state.selectedServiceTypes
 
                         binding.stepLabel.text = formatStepLabel(state.selectedServiceTypes)
-                        binding.tileTracking.isActive = state.isTracking
-                        binding.trackingButton.text = if (state.isTracking) {
-                            getString(R.string.stop_tracking)
+                        binding.stepIcon.setImageResource(resolveStepTileIcon(state))
+
+                        // Sync tile icon
+                        val sheetLoaded = state.sheetsReadUrl.isNotBlank()
+                        binding.syncIcon.setImageResource(
+                            if (sheetLoaded) R.drawable.ic_cloud_download else R.drawable.ic_cloud_off
+                        )
+                        binding.syncStatusText.text = if (sheetLoaded) {
+                            getString(R.string.tile_sync_status_loaded)
                         } else {
-                            getString(R.string.start_tracking)
+                            getString(R.string.tile_sync_status_none)
+                        }
+
+                        // Upcoming events tile icon (feature to come — always "no events" for now)
+                        binding.upcomingIcon.setImageResource(R.drawable.ic_event_available)
+                        binding.upcomingStatusText.text = getString(R.string.tile_upcoming_status_none)
+
+                        binding.tileTracking.isActive = state.isTracking
+                        binding.trackingButton.setImageResource(
+                            if (state.isTracking) R.drawable.ic_wrong_location else R.drawable.ic_location_on
+                        )
+                        binding.trackingStatusText.text = if (state.isTracking) {
+                            getString(R.string.tile_tracking_status_active)
+                        } else {
+                            getString(R.string.tile_tracking_status_idle)
                         }
 
                         if (state.errandsModeEnabled) {
@@ -380,6 +400,23 @@ class MainActivity : AppCompatActivity() {
 
         if (icons.isEmpty()) return listOf(R.drawable.ic_hero_default)
         return icons.take(2)
+    }
+
+    private fun resolveStepTileIcon(state: com.routeme.app.ui.MainUiState): Int {
+        if (state.errandsModeEnabled) return R.drawable.ic_sil_notepad
+        val types = state.selectedServiceTypes
+        val hasBug = types.any { it == ServiceType.GRUB || it == ServiceType.INCIDENTAL }
+        val hasSprayer = types.any { it == ServiceType.ROUND_2 || it == ServiceType.ROUND_5 }
+        val hasSpreader = types.any {
+            it == ServiceType.ROUND_1 || it == ServiceType.ROUND_3 ||
+                it == ServiceType.ROUND_4 || it == ServiceType.ROUND_6
+        }
+        return when {
+            hasSpreader -> R.drawable.ic_sil_spreader
+            hasSprayer -> R.drawable.ic_sil_sprayer
+            hasBug -> R.drawable.ic_sil_bug
+            else -> R.drawable.ic_sil_default
+        }
     }
 
     private fun applyHeroIconLayout(primaryRes: Int, secondaryRes: Int) {

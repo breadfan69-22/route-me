@@ -65,7 +65,7 @@
                 android:layout_height="wrap_content"
                 android:textSize="12sp"
                 android:textStyle="bold"
-                android:textColor="#FFFFFF"
+                android:textColor="@color/hero_weather_temp_color"
                 android:layout_marginTop="2dp" />
 
         </LinearLayout>
@@ -295,15 +295,8 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
+                            android:gravity="center_vertical|end"
                             android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_tracking_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                             <ImageView
                                 android:id="@+id/badgeTracking"
@@ -316,14 +309,28 @@
                                 app:tint="?attr/colorPrimary" />
                         </LinearLayout>
 
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/trackingButton"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
+                        <LinearLayout
                             android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:id="@+id/trackingButton"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:background="?attr/selectableItemBackgroundBorderless"
+                                android:contentDescription="@string/start_tracking"
+                                android:src="@drawable/ic_location_on"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/trackingStatusText"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            android:text="@string/start_tracking"
-                            android:textSize="12sp" />
+                            android:text="@string/tile_tracking_status_idle"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
                     </LinearLayout>
                 </com.routeme.app.ui.NeumorphTileLayout>
 
@@ -343,15 +350,8 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
+                            android:gravity="center_vertical|end"
                             android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_direction_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                             <ImageView
                                 android:id="@+id/badgeDirection"
@@ -428,15 +428,8 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
+                            android:gravity="center_vertical|end"
                             android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_upcoming_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                             <ImageView
                                 android:id="@+id/badgeUpcoming"
@@ -448,6 +441,28 @@
                                 android:src="@drawable/ic_more_horiz"
                                 app:tint="?attr/colorPrimary" />
                         </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:id="@+id/upcomingIcon"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:contentDescription="@string/tile_upcoming_title"
+                                android:src="@drawable/ic_event_available"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/upcomingStatusText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/tile_upcoming_status_none"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
                     </LinearLayout>
                 </com.routeme.app.ui.NeumorphTileLayout>
 
@@ -468,15 +483,8 @@
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
+                            android:gravity="center_vertical|end"
                             android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="@string/tile_sync_title"
-                                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
 
                             <ImageView
                                 android:id="@+id/badgeSync"
@@ -488,6 +496,28 @@
                                 android:src="@drawable/ic_more_horiz"
                                 app:tint="?attr/colorPrimary" />
                         </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:id="@+id/syncIcon"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:contentDescription="@string/tile_sync_title"
+                                android:src="@drawable/ic_cloud_off"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/syncStatusText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/tile_sync_status_none"
+                            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
                     </LinearLayout>
                 </com.routeme.app.ui.NeumorphTileLayout>
 
@@ -504,17 +534,25 @@
                         android:orientation="vertical"
                         android:padding="10dp">
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/tile_step_title"
-                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:gravity="center">
+
+                            <ImageView
+                                android:id="@+id/stepIcon"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:contentDescription="@string/tile_step_title"
+                                android:src="@drawable/ic_sil_spreader"
+                                app:tint="?attr/colorPrimary" />
+                        </LinearLayout>
 
                         <TextView
                             android:id="@+id/stepLabel"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
                             android:text="@string/tile_step_placeholder"
                             android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
 

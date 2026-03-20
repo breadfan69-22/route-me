@@ -51,4 +51,6 @@
     <color name="neumorph_surface">#E8EBE5</color>
     <color name="neumorph_shadow_dark">#B8BDB5</color>
     <color name="neumorph_shadow_light">#FFFFFF</color>
+    <!-- Hero header -->
+    <color name="hero_weather_temp_color">#37474F</color>
 </resources>
