@@ -1313,6 +1313,10 @@ class MainViewModel(
         return preferencesRepository.getGranularRate(serviceType)
     }
 
+    fun buildClientDetailsFor(client: com.routeme.app.Client): String {
+        return routingEngine.buildClientDetails(client)
+    }
+
     fun confirmSelectedClientService(
         currentLocation: Location?,
         visitNotes: String = "",

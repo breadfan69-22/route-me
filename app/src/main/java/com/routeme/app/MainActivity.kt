@@ -812,7 +812,7 @@ class MainActivity : AppCompatActivity() {
         DialogFactory.showClientActionDialog(
             context = this,
             clientName = client.name,
-            details = state.selectedClientDetails,
+            details = viewModel.buildClientDetailsFor(client),
             arrivalActive = state.arrivalStartedAtMillis != null,
             serviceTypes = state.selectedServiceTypes,
             granularRate = viewModel.getGranularRate(primaryType),
