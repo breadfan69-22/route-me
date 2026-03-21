@@ -121,6 +121,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val weeklyPlannerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == com.routeme.app.ui.WeeklyPlannerActivity.RESULT_REGENERATE) {
+            viewModel.showWeeklyPlanner()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -581,7 +589,7 @@ class MainActivity : AppCompatActivity() {
             is MainEvent.EditClientNotes -> showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
             is MainEvent.ShowRouteHistory -> showRouteHistoryDialog(event)
             is MainEvent.ShowWeekSummary -> showWeekSummaryDialog(event.summary)
-            is MainEvent.ShowWeeklyPlanner -> showWeeklyPlannerDialog(event.summary)
+            is MainEvent.ShowWeeklyPlanner -> launchWeeklyPlannerScreen(event.plan)
             MainEvent.RefreshTrackingClients -> trackingUiController.refreshTrackedClients()
             MainEvent.ServiceConfirmed -> rerunSuggestionsIfVisible()
             MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
@@ -876,8 +884,10 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showWeeklyPlannerDialog(summary: String) {
-        DialogFactory.showWeeklyPlannerDialog(this, summary)
+    private fun launchWeeklyPlannerScreen(plan: com.routeme.app.model.WeekPlan) {
+        weeklyPlannerLauncher.launch(
+            com.routeme.app.ui.WeeklyPlannerActivity.createIntent(this, plan)
+        )
     }
 
     private fun showEditNotesDialog(clientId: String, clientName: String, currentNotes: String) {

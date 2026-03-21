@@ -84,8 +84,8 @@ sealed interface MainEvent {
     ) : MainEvent
     /** Week summary dialog. */
     data class ShowWeekSummary(val summary: String) : MainEvent
-    /** Weather-aware weekly planner dialog. */
-    data class ShowWeeklyPlanner(val summary: String) : MainEvent
+    /** Weather-aware weekly planner — launch full-screen Activity. */
+    data class ShowWeeklyPlanner(val plan: com.routeme.app.model.WeekPlan) : MainEvent
     data class StaleArrivalPrompt(val clientName: String, val minutesElapsed: Long) : MainEvent
     /** Prompt user to batch-confirm 2+ clients that were in the same location cluster. */
     data class ClusterCompletePrompt(val members: List<com.routeme.app.ClusterMember>) : MainEvent

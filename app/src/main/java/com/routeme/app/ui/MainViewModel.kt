@@ -23,6 +23,8 @@ import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.domain.ArrivalUseCase
 import com.routeme.app.data.WeatherRepository
+import com.routeme.app.data.db.WeekPlanDao
+import com.routeme.app.data.db.SavedWeekPlanEntity
 import com.routeme.app.domain.DestinationQueueUseCase
 import com.routeme.app.domain.MapsExportUseCase
 import com.routeme.app.domain.RouteHistoryUseCase
@@ -61,6 +63,7 @@ class MainViewModel(
     private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue),
     private val weatherRepository: WeatherRepository? = null,
     private val weeklyPlannerUseCase: WeeklyPlannerUseCase? = null,
+    private val weekPlanDao: WeekPlanDao? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
     companion object {
@@ -1518,6 +1521,7 @@ class MainViewModel(
         emitConfirmSelectedEvents(result)
         emitConfirmSelectedSheetFeedback(result)
         emitPropertyNudgeIfNeeded(result.selectedClient)
+        removeClientFromSavedPlan(result.selectedClient.id)
 
         onSuccess?.invoke()
     }
@@ -1588,6 +1592,25 @@ class MainViewModel(
         }
     }
 
+    private fun removeClientFromSavedPlan(clientId: String) {
+        val dao = weekPlanDao ?: return
+        viewModelScope.launch(ioDispatcher) {
+            val entity = dao.loadPlan() ?: return@launch
+            val plan = runCatching { WeekPlan.fromJson(org.json.JSONObject(entity.planJson)) }.getOrNull() ?: return@launch
+            val updated = plan.copy(
+                days = plan.days.map { day ->
+                    day.copy(clients = day.clients.filter { it.client.id != clientId })
+                }
+            )
+            dao.savePlan(
+                SavedWeekPlanEntity(
+                    planJson = updated.toJson().toString(),
+                    generatedAtMillis = updated.generatedAtMillis
+                )
+            )
+        }
+    }
+
     /**
      * Batch-confirm a cluster of 2+ clients that were all nearby.
      * [selectedMembers] is the subset the user checked in the dialog.
@@ -1650,6 +1673,7 @@ class MainViewModel(
         emitClusterTransientFailureStatuses(result)
         applyConfirmClusterState(result)
         emitConfirmClusterCompletion(result)
+        result.confirmedIds.forEach { removeClientFromSavedPlan(it) }
     }
 
     private suspend fun emitClusterTransientFailureStatuses(
@@ -2259,7 +2283,7 @@ class MainViewModel(
 
             result
                 .onSuccess { weekPlan ->
-                    _events.emit(MainEvent.ShowWeeklyPlanner(buildWeeklyPlannerText(weekPlan)))
+                    _events.emit(MainEvent.ShowWeeklyPlanner(weekPlan))
                 }
                 .onFailure { error ->
                     val message = error.message?.takeIf { it.isNotBlank() } ?: "Unknown error"

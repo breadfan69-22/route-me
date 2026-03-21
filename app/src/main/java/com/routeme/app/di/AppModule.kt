@@ -28,6 +28,7 @@ val appModule = module {
     single { get<AppDatabase>().weatherDao() }
     single { get<AppDatabase>().forecastDao() }
     single { get<AppDatabase>().geocodeCacheDao() }
+    single { get<AppDatabase>().weekPlanDao() }
 
     single { ClientRepository(androidContext(), get(), get(), get(), get()) }
     single { PreferencesRepository(androidContext()) }
@@ -44,5 +45,5 @@ val appModule = module {
     factory { SyncSettingsUseCase(get(), get(), get()) }
     factory { WeeklyPlannerUseCase(get(), get(), get(), get()) }
 
-    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }
