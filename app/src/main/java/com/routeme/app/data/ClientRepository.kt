@@ -299,7 +299,8 @@ class ClientRepository(
     }
 
     suspend fun getDistinctServiceDates(): List<Long> = withContext(Dispatchers.IO) {
-        clientDao.getDistinctServiceDates()
+        val tzOffsetMs = java.util.TimeZone.getDefault().rawOffset.toLong()
+        clientDao.getDistinctServiceDates(tzOffsetMs)
     }
 
     suspend fun getClientStops(startMillis: Long, endMillis: Long): List<ClientStopRow> = withContext(Dispatchers.IO) {
@@ -307,7 +308,8 @@ class ClientRepository(
     }
 
     suspend fun getDistinctClientStopDates(): List<Long> = withContext(Dispatchers.IO) {
-        clientDao.getDistinctClientStopDates()
+        val tzOffsetMs = java.util.TimeZone.getDefault().rawOffset.toLong()
+        clientDao.getDistinctClientStopDates(tzOffsetMs)
     }
 
     suspend fun deleteServiceRecord(clientId: String, completedAtMillis: Long) = withContext(Dispatchers.IO) {
@@ -329,6 +331,7 @@ class ClientRepository(
     }
 
     suspend fun getDistinctNonClientStopDates(): List<Long> = withContext(Dispatchers.IO) {
-        nonClientStopDao.getDistinctStopDates()
+        val tzOffsetMs = java.util.TimeZone.getDefault().rawOffset.toLong()
+        nonClientStopDao.getDistinctStopDates(tzOffsetMs)
     }
 }

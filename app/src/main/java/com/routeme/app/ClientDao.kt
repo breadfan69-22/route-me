@@ -71,8 +71,8 @@ interface ClientDao {
     )
     suspend fun getRecordsForDateRange(startMillis: Long, endMillis: Long): List<DailyRecordRow>
 
-    @Query("SELECT DISTINCT (completedAtMillis / 86400000) * 86400000 AS dayMillis FROM service_records ORDER BY dayMillis DESC")
-    suspend fun getDistinctServiceDates(): List<Long>
+    @Query("SELECT DISTINCT ((completedAtMillis + :tzOffsetMs) / 86400000) * 86400000 - :tzOffsetMs AS dayMillis FROM service_records ORDER BY dayMillis DESC")
+    suspend fun getDistinctServiceDates(tzOffsetMs: Long): List<Long>
 
     @Query(
         """
@@ -95,8 +95,8 @@ interface ClientDao {
     )
     suspend fun getClientStopsForDateRange(startMillis: Long, endMillis: Long): List<ClientStopRow>
 
-    @Query("SELECT DISTINCT (endedAtMillis / 86400000) * 86400000 AS dayMillis FROM client_stop_events ORDER BY dayMillis DESC")
-    suspend fun getDistinctClientStopDates(): List<Long>
+    @Query("SELECT DISTINCT ((endedAtMillis + :tzOffsetMs) / 86400000) * 86400000 - :tzOffsetMs AS dayMillis FROM client_stop_events ORDER BY dayMillis DESC")
+    suspend fun getDistinctClientStopDates(tzOffsetMs: Long): List<Long>
 
     @Query("SELECT id FROM clients")
     suspend fun getAllClientIds(): List<String>
