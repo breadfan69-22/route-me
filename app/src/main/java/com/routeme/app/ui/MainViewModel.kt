@@ -2304,6 +2304,14 @@ class MainViewModel(
             sb.appendLine()
         }
 
+        if (plan.noteOnlyClients.isNotEmpty()) {
+            sb.appendLine("─────────────────────────────")
+            sb.appendLine("Pending Notes")
+            for (client in plan.noteOnlyClients.sortedBy { it.name }) {
+                sb.appendLine("  • ${client.name}: ${client.notes.trim()}")
+            }
+        }
+
         return sb.toString().trimEnd()
     }
 

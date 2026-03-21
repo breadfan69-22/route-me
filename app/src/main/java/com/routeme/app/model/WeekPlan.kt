@@ -7,7 +7,8 @@ data class WeekPlan(
     val days: List<PlannedDay>,
     val generatedAtMillis: Long,
     val totalClients: Int,
-    val unassignedCount: Int
+    val unassignedCount: Int,
+    val noteOnlyClients: List<Client> = emptyList()
 )
 
 data class PlannedDay(

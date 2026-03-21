@@ -40,6 +40,10 @@ class WeeklyPlannerUseCase(
         val allClients = clientRepository.loadAllClients()
         val propertyMap = allClients.mapNotNull { client -> client.property?.let { client.id to it } }.toMap()
 
+        val noteOnlyClients = allClients.filter {
+            it.subscribedSteps.isEmpty() && !it.hasGrub && it.notes.isNotBlank()
+        }
+
         val eligibleSuggestions = routingEngine.rankClients(
             clients = allClients,
             serviceTypes = serviceTypes,
@@ -73,7 +77,8 @@ class WeeklyPlannerUseCase(
                 days = dayBuilders.map { it.build() },
                 generatedAtMillis = nowProvider(),
                 totalClients = eligibleSuggestions.size,
-                unassignedCount = eligibleSuggestions.size
+                unassignedCount = eligibleSuggestions.size,
+                noteOnlyClients = noteOnlyClients
             )
         }
 
@@ -169,7 +174,8 @@ class WeeklyPlannerUseCase(
             days = dayBuilders.map { it.build() },
             generatedAtMillis = nowProvider(),
             totalClients = eligibleSuggestions.size,
-            unassignedCount = (eligibleSuggestions.size - assignedCount).coerceAtLeast(0)
+            unassignedCount = (eligibleSuggestions.size - assignedCount).coerceAtLeast(0),
+            noteOnlyClients = noteOnlyClients
         )
     }
 
