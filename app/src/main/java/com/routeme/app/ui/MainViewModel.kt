@@ -153,25 +153,49 @@ class MainViewModel(
         loadSyncSettings()
         loadClients()
         loadSavedDestinations()
-        fetchStartupWeather()
+        // Weather will be fetched once location is available via fetchWeatherAtLocation()
     }
 
-    private fun fetchStartupWeather() {
+    /**
+     * Fetch current observation + hourly forecast at the given location.
+     * Called by MainActivity once GPS location is available.
+     */
+    fun fetchWeatherAtLocation(lat: Double, lng: Double) {
         val repo = weatherRepository ?: return
         viewModelScope.launch {
-            val daily = withContext(ioDispatcher) {
-                runCatching { repo.getWeatherForDay(System.currentTimeMillis(), SHOP_LAT, SHOP_LNG) }.getOrNull()
-            } ?: return@launch
-            val isDaytime = com.routeme.app.util.SunCalc.isDaytime(SHOP_LAT, SHOP_LNG)
+            val isDaytime = com.routeme.app.util.SunCalc.isDaytime(lat, lng)
+            
+            // Fetch current observation
+            val snapshot = withContext(ioDispatcher) {
+                runCatching { repo.fetchCurrentSnapshot(lat, lng) }.getOrNull()
+            }
+            
+            // Fetch hourly forecast
+            val hourly = withContext(ioDispatcher) {
+                runCatching { com.routeme.app.network.NwsWeatherService.fetchNextHourForecast(lat, lng) }.getOrNull()
+            }
+            
             _uiState.update {
-                if (it.currentWeatherTempF != null) return@update it
                 it.copy(
-                    currentWeatherTempF = daily.highTempF,
-                    currentWeatherIconDesc = daily.description,
+                    currentWeatherTempF = snapshot?.tempF ?: it.currentWeatherTempF,
+                    currentWeatherIconDesc = snapshot?.description ?: it.currentWeatherIconDesc,
+                    currentWeatherWindMph = snapshot?.windMph ?: it.currentWeatherWindMph,
+                    currentWeatherWindGust = snapshot?.windGustMph ?: it.currentWeatherWindGust,
+                    currentWeatherWindDirection = snapshot?.windDirection ?: it.currentWeatherWindDirection,
+                    forecastTempF = hourly?.tempF,
+                    forecastIconDesc = hourly?.description,
+                    forecastWindMph = hourly?.windSpeedMph,
+                    forecastWindDirection = hourly?.windDirection,
+                    forecastTimeLabel = hourly?.timeLabel,
                     isDaytime = isDaytime
                 )
             }
         }
+    }
+
+    /** Toggle between showing current weather and hourly forecast. */
+    fun toggleWeatherDisplay() {
+        _uiState.update { it.copy(showCurrentWeather = !it.showCurrentWeather) }
     }
 
     fun loadClients() {

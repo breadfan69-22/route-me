@@ -79,6 +79,7 @@ object NwsWeatherService {
 
     /**
      * Fetch the next hour's forecast near [lat],[lng].
+     * Returns the first forecast period that starts AFTER the current time.
      * Returns null on failure.
      * Must be called on a background thread.
      */
@@ -89,10 +90,41 @@ object NwsWeatherService {
             val periods = json.optJSONObject("properties")?.optJSONArray("periods")
             if (periods == null || periods.length() == 0) return null
 
-            // First period is the next hour
+            val now = java.time.OffsetDateTime.now()
+
+            // Find the first period that starts AFTER the current time
+            for (i in 0 until periods.length()) {
+                val period = periods.getJSONObject(i)
+                val startTime = period.optString("startTime", "")
+                val periodStart = try {
+                    java.time.OffsetDateTime.parse(startTime)
+                } catch (e: Exception) {
+                    continue
+                }
+
+                // Skip periods that have already started
+                if (periodStart.isBefore(now) || periodStart.isEqual(now)) continue
+
+                val tempF = period.optInt("temperature", 0)
+                val windSpeed = period.optString("windSpeed", "") // e.g. "10 mph"
+                val windSpeedMph = windSpeed.replace(Regex("[^0-9]"), "").toIntOrNull()
+                val windDir = period.optString("windDirection", "").ifBlank { null }
+                val desc = period.optString("shortForecast", "").ifBlank { "Unknown" }
+                val timeLabel = parseHourLabel(startTime)
+
+                return HourlyForecast(
+                    tempF = tempF,
+                    windSpeedMph = windSpeedMph,
+                    windDirection = windDir,
+                    description = desc,
+                    timeLabel = timeLabel
+                )
+            }
+
+            // Fallback to first period if all have started (shouldn't happen)
             val period = periods.getJSONObject(0)
             val tempF = period.optInt("temperature", 0)
-            val windSpeed = period.optString("windSpeed", "") // e.g. "10 mph"
+            val windSpeed = period.optString("windSpeed", "")
             val windSpeedMph = windSpeed.replace(Regex("[^0-9]"), "").toIntOrNull()
             val windDir = period.optString("windDirection", "").ifBlank { null }
             val desc = period.optString("shortForecast", "").ifBlank { "Unknown" }
