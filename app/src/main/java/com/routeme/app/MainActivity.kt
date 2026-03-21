@@ -1078,6 +1078,13 @@ class MainActivity : AppCompatActivity() {
                 confirmServiceForSelectedClient()
                 // Dismiss the completion notification for this client
                 trackingUiController.dismissNotification(3000 + client.id.hashCode())
+                // Offer property stats update after confirming service
+                DialogFactory.showPropertyStatsDialog(
+                    context = this,
+                    clientName = client.name,
+                    onSave = { property -> viewModel.writePropertyStats(client.name, property) },
+                    onSkip = {}
+                )
             }
             .setNegativeButton(R.string.dialog_not_yet) { _, _ ->
                 viewModel.recordCancelledClientStop(
