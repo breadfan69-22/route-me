@@ -92,7 +92,13 @@ class ClientRepository(
         clientDao.updateClientCoordinates(clientId, lat, lng)
     }
 
-    suspend fun syncFromSheets(url: String): GoogleSheetsSync.SyncResult = withContext(Dispatchers.IO) {
+    data class SyncResult(
+        val clients: List<Client>,
+        val message: String,
+        val newlyAddedClients: List<Client>
+    )
+
+    suspend fun syncFromSheets(url: String): SyncResult = withContext(Dispatchers.IO) {
         val result = GoogleSheetsSync.fetch(url)
         if (result.clients.isNotEmpty()) {
             val existingClients = clientDao.getAllClients()
@@ -115,6 +121,8 @@ class ClientRepository(
                     )
                 }
             )
+
+            val newlyAdded = result.clients.filter { it.name.lowercase() !in existingCoords }
 
             val mergedByNameClients = result.clients.map { client ->
                 if (client.latitude == null || client.longitude == null) {
@@ -141,9 +149,13 @@ class ClientRepository(
 
             upsertGeocodeCacheEntries(cacheEntriesFrom(mergedClients))
 
-            return@withContext result.copy(clients = mergedClients)
+            return@withContext SyncResult(
+                clients = mergedClients,
+                message = result.message,
+                newlyAddedClients = newlyAdded
+            )
         }
-        result
+        SyncResult(clients = result.clients, message = result.message, newlyAddedClients = emptyList())
     }
 
     suspend fun writeBackServiceCompletion(
@@ -168,6 +180,13 @@ class ClientRepository(
         value: String
     ): SheetsWriteBack.WriteResult = withContext(Dispatchers.IO) {
         SheetsWriteBack.postPropertyRaw(clientName, column, value)
+    }
+
+    suspend fun writeBackAddPropertyClientRow(
+        clientName: String,
+        address: String
+    ): SheetsWriteBack.WriteResult = withContext(Dispatchers.IO) {
+        SheetsWriteBack.addPropertyClientRow(clientName, address)
     }
 
     suspend fun updateClientLawnSize(clientId: String, sqFt: Int) = withContext(Dispatchers.IO) {

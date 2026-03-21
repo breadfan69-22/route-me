@@ -124,6 +124,34 @@ object SheetsWriteBack {
     }
 
     /**
+     * Appends a new client row to the Property Stats sheet (idempotent — skips if already exists).
+     * Must be called on a background thread.
+     */
+    fun addPropertyClientRow(clientName: String, address: String): WriteResult {
+        if (propertyWebAppUrl.isBlank()) {
+            return WriteResult(false, "No Property Stats Apps Script URL configured.")
+        }
+        return try {
+            val json = JSONObject().apply {
+                put("action", "addClientRow")
+                put("clientName", clientName)
+                put("address", address)
+            }
+            val http = postJsonWithRedirects(json, "add property client row", propertyWebAppUrl)
+            if (http.code in 200..299) {
+                WriteResult(true, "Added property row for $clientName")
+            } else if (http.transportError) {
+                WriteResult(false, http.body)
+            } else {
+                WriteResult(false, "HTTP ${http.code}: ${http.body.take(100)}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Add property client row failed", e)
+            WriteResult(false, "${e.javaClass.simpleName}: ${e.message?.take(80)}")
+        }
+    }
+
+    /**
      * Posts a completion to the Google Sheet.
      * Must be called on a background thread.
      *

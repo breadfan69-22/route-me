@@ -100,7 +100,7 @@ class SyncSettingsUseCaseTest {
         val useCase = SyncSettingsUseCase(repository, prefs, retryQueue)
         val synced = listOf(testClient("1"))
 
-        coEvery { repository.syncFromSheets("https://sheet") } returns GoogleSheetsSync.SyncResult(synced, "Synced")
+        coEvery { repository.syncFromSheets("https://sheet") } returns ClientRepository.SyncResult(synced, "Synced", emptyList())
 
         val result = useCase.syncFromSheets("https://sheet")
 

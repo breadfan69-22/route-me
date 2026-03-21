@@ -54,7 +54,8 @@ class SyncSettingsUseCase(
         data class Success(
             val statusMessage: String,
             val syncedClients: List<Client>?,
-            val shouldAutoGeocode: Boolean
+            val shouldAutoGeocode: Boolean,
+            val newlyAddedClients: List<Client> = emptyList()
         ) : SyncFromSheetsResult
 
         data class Error(val message: String) : SyncFromSheetsResult
@@ -111,7 +112,8 @@ class SyncSettingsUseCase(
             SyncFromSheetsResult.Success(
                 statusMessage = syncResult.message,
                 syncedClients = if (didSyncClients) syncResult.clients else null,
-                shouldAutoGeocode = didSyncClients
+                shouldAutoGeocode = didSyncClients,
+                newlyAddedClients = syncResult.newlyAddedClients
             )
         } catch (e: Exception) {
             SyncFromSheetsResult.Error("Sync failed: ${e.message ?: "Unknown error"}")

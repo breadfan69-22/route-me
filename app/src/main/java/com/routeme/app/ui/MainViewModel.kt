@@ -299,6 +299,18 @@ class MainViewModel(
         applySyncedClientsToState(syncedClients)
         refreshTrackingClientsIfNeeded()
 
+        if (result.newlyAddedClients.isNotEmpty() &&
+            com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+            for (client in result.newlyAddedClients) {
+                runCatching {
+                    clientRepository.writeBackAddPropertyClientRow(
+                        client.name,
+                        client.address
+                    )
+                }
+            }
+        }
+
         return SyncPostActions(
             shouldEmitSyncComplete = true,
             shouldAutoGeocode = result.shouldAutoGeocode
