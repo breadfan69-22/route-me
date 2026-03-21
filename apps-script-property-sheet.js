@@ -1,0 +1,143 @@
+/**
+ * RouteMe Property Specs Google Sheets Script
+ *
+ * Deploy this on a separate Google Sheet that tracks property attributes.
+ * The app writes estimated lawn sizes here after completing a service.
+ *
+ * EXPECTED COLUMNS (row 1 headers):
+ *   A: Client Name (must match route sheet names exactly)
+ *   B: Lawn Size (sqft, written by the app)
+ *   ... add more property columns as needed
+ *
+ * HOW LAWN SIZE IS CALCULATED:
+ *   Spray steps (2 & 5) — fixed method rates:
+ *     Hose  = 1 gal / 1,000 sqft
+ *     PG    = 1 gal / 5,500 sqft
+ *     sqft  = (hoseGal × 1,000) + (pgGal × 5,500)
+ *     Both methods can be used on one jobsite.
+ *
+ *   Granular steps (1, 3, 4, 6, Grub) — configurable rate:
+ *     sqft  = (lbsUsed / rate) × 1,000
+ *     where rate = lbs/1,000sqft set in app's Application Rates dialog.
+ *
+ * DEPLOYMENT (same as route sheet script):
+ * 1. Open your Property Specs Google Sheet
+ * 2. Extensions → Apps Script
+ * 3. Paste this code (replace any existing code)
+ * 4. Click "Deploy" → "New deployment"
+ * 5. Type: "Web app"
+ * 6. Execute as: "Me"
+ * 7. Who has access: "Anyone"
+ * 8. Click "Deploy" and copy the URL
+ * 9. (Future) Paste into RouteMe's property sheet URL field
+ *
+ * NOTE: Currently the app writes Lawn Size through the main route sheet
+ * script's writeBackRaw(clientName, "Lawn Size", value). If you want a
+ * dedicated property sheet, deploy this script on that sheet and point
+ * the app at the new URL once a property-sheet URL setting is added.
+ */
+
+function doGet(e) {
+    try {
+        if (e.parameter && e.parameter.clientName && e.parameter.column && e.parameter.value) {
+            var data = {
+                clientName: e.parameter.clientName,
+                column: e.parameter.column,
+                value: e.parameter.value
+            };
+            var result = updateCell(data);
+            return jsonResponse(result);
+        }
+        return jsonResponse({
+            status: "ok",
+            message: "RouteMe Property Sheet script is running.",
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        return jsonResponse({ status: "error", message: error.message });
+    }
+}
+
+function doPost(e) {
+    try {
+        if (!e.postData || !e.postData.contents) {
+            return jsonResponse({ status: "error", message: "No POST data" });
+        }
+        var data = JSON.parse(e.postData.contents);
+        if (!data.clientName || !data.column || !data.value) {
+            return jsonResponse({ status: "error", message: "Missing clientName, column, or value" });
+        }
+        return jsonResponse(updateCell(data));
+    } catch (error) {
+        return jsonResponse({ status: "error", message: error.message });
+    }
+}
+
+function updateCell(data) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheets()[0];
+
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var colIndex = -1;
+    var searchColumn = data.column.toString().trim().toLowerCase();
+
+    for (var i = 0; i < headers.length; i++) {
+        var header = headers[i].toString().trim().toLowerCase().replace(/[√✓]/g, "").trim();
+        if (header === searchColumn) {
+            colIndex = i + 1;
+            break;
+        }
+    }
+
+    if (colIndex === -1) {
+        return {
+            status: "error",
+            message: "Column not found: " + data.column,
+            availableColumns: headers.filter(function (h) { return h.toString().trim() !== ""; })
+        };
+    }
+
+    var names = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+    var rowIndex = -1;
+    var searchName = data.clientName.toString().trim().toLowerCase();
+
+    for (var r = 1; r < names.length; r++) {
+        var cellName = names[r][0].toString().trim().toLowerCase();
+        if (cellName === searchName) {
+            rowIndex = r + 1;
+            break;
+        }
+    }
+
+    if (rowIndex === -1) {
+        for (var r = 1; r < names.length; r++) {
+            var cellName = names[r][0].toString().trim().toLowerCase();
+            if (cellName.indexOf(searchName) !== -1 || searchName.indexOf(cellName) !== -1) {
+                rowIndex = r + 1;
+                break;
+            }
+        }
+    }
+
+    if (rowIndex === -1) {
+        return { status: "error", message: "Client not found: " + data.clientName };
+    }
+
+    var cell = sheet.getRange(rowIndex, colIndex);
+    var oldValue = cell.getValue();
+    cell.setValue(data.value);
+
+    return {
+        status: "ok",
+        message: "Updated",
+        row: rowIndex,
+        col: colIndex,
+        oldValue: oldValue.toString(),
+        newValue: data.value
+    };
+}
+
+function jsonResponse(obj) {
+    return ContentService.createTextOutput(JSON.stringify(obj))
+        .setMimeType(ContentService.MimeType.JSON);
+}

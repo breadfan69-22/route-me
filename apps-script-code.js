@@ -88,7 +88,7 @@ function doGet(e) {
     });
   } catch (error) {
     Logger.log("doGet error: " + error.message);
-    return jsonResponse({status: "error", message: "Script error: " + error.message});
+    return jsonResponse({ status: "error", message: "Script error: " + error.message });
   }
 }
 
@@ -102,18 +102,23 @@ function doPost(e) {
     Logger.log("postData: " + (e.postData ? e.postData.contents : "none"));
 
     if (!e.postData || !e.postData.contents) {
-      return jsonResponse({status: "error", message: "No POST data received"});
+      return jsonResponse({ status: "error", message: "No POST data received" });
     }
 
     var data;
     try {
       data = JSON.parse(e.postData.contents);
     } catch (parseError) {
-      return jsonResponse({status: "error", message: "Invalid JSON: " + parseError.message});
+      return jsonResponse({ status: "error", message: "Invalid JSON: " + parseError.message });
     }
 
     // Validate required fields
     if (!data.clientName || !data.column || !data.value) {
+      // Check if this is an addClientRow action
+      if (data.action === "addClientRow") {
+        var result = addClientRow(data);
+        return jsonResponse(result);
+      }
       return jsonResponse({
         status: "error",
         message: "Missing required fields. Need: clientName, column, value"
@@ -125,7 +130,7 @@ function doPost(e) {
 
   } catch (error) {
     Logger.log("doPost error: " + error.message);
-    return jsonResponse({status: "error", message: "Script error: " + error.message});
+    return jsonResponse({ status: "error", message: "Script error: " + error.message });
   }
 }
 
@@ -159,7 +164,7 @@ function updateCell(data) {
     return {
       status: "error",
       message: "Column not found: " + data.column,
-      availableColumns: headers.filter(function(h) { return h.toString().trim() !== ""; })
+      availableColumns: headers.filter(function (h) { return h.toString().trim() !== ""; })
     };
   }
 
@@ -220,4 +225,50 @@ function updateCell(data) {
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * Adds a new client row to the Property Stats sheet if they don't already exist.
+ * Expected data: { action: "addClientRow", clientName: "...", address: "..." }
+ * Columns: Name | Address | Lawn Size | Sun/Shade | Wind Exposure | Steep Slopes | Irrigation | Notes | Last Updated
+ * Safe to call multiple times — idempotent (won't add duplicates).
+ */
+function addClientRow(data) {
+  if (!data.clientName || data.clientName.toString().trim() === "") {
+    return { status: "error", message: "Missing clientName for addClientRow" };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheets()[0];
+  var searchName = data.clientName.toString().trim().toLowerCase();
+
+  // Check if already exists
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < names.length; i++) {
+      if (names[i][0].toString().trim().toLowerCase() === searchName) {
+        Logger.log("addClientRow: '" + data.clientName + "' already exists at row " + (i + 2) + " — skipping");
+        return { status: "ok", message: "Client already exists — no row added", skipped: true };
+      }
+    }
+  }
+
+  // Append new row: Name | Address | (7 empty columns)
+  var newRow = [
+    data.clientName.toString().trim(),
+    (data.address || "").toString().trim(),
+    "", // Lawn Size
+    "", // Sun/Shade
+    "", // Wind Exposure
+    "", // Steep Slopes
+    "", // Irrigation
+    "", // Notes
+    ""  // Last Updated
+  ];
+  var appendRow = sheet.getLastRow() + 1;
+  sheet.getRange(appendRow, 1, 1, newRow.length).setValues([newRow]);
+
+  Logger.log("addClientRow: Added '" + data.clientName + "' at row " + appendRow);
+  return { status: "ok", message: "Added client row for " + data.clientName, row: appendRow };
 }

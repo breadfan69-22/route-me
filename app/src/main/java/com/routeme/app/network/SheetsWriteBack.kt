@@ -24,8 +24,8 @@ object SheetsWriteBack {
     /** Set this to the deployed Apps Script web app URL */
     var webAppUrl: String = ""
 
-    /** Set this to the Property Stats Apps Script web app URL */
-    var propertyWebAppUrl: String = ""
+    /** Property Stats Apps Script web app URL (hardcoded; can be overridden by preference) */
+    var propertyWebAppUrl: String = "https://script.google.com/macros/s/AKfycbwTNiYfKK69jugL-PxhJk-aZaAlzw9DXyjZrs7SX6ZaAxjYymDpBKJZUieKmo-9xsqHQg/exec"
 
     data class WriteResult(
         val success: Boolean,
