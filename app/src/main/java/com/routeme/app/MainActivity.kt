@@ -582,7 +582,7 @@ class MainActivity : AppCompatActivity() {
             is MainEvent.ShowRouteHistory -> showRouteHistoryDialog(event)
             is MainEvent.ShowWeekSummary -> showWeekSummaryDialog(event.summary)
             MainEvent.RefreshTrackingClients -> trackingUiController.refreshTrackedClients()
-            MainEvent.ServiceConfirmed -> Unit
+            MainEvent.ServiceConfirmed -> rerunSuggestionsIfVisible()
             MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
         }
     }
@@ -822,7 +822,7 @@ class MainActivity : AppCompatActivity() {
             },
             onCancelArrival = { viewModel.cancelArrival() },
             onMaps = { openClientInMaps(client) },
-            onSkip = { viewModel.skipSelectedClientToday() },
+            onSkip = { viewModel.skipSelectedClientToday(); rerunSuggestionsIfVisible() },
             onConfirm = { notes, amt1, amt2, prop -> confirmServiceForSelectedClient(notes, amt1, amt2, prop) },
             onSavePropertyStats = { property -> viewModel.writePropertyStats(client.name, property) },
             onEditNotes = { viewModel.editSelectedClientNotes() }
