@@ -110,13 +110,25 @@ object SheetsWriteBack {
                 put("value", value)
             }
             val http = postJsonWithRedirects(json, "property raw", propertyWebAppUrl)
-            if (http.code in 200..299) {
-                WriteResult(true, "Updated $column for $clientName (property)")
-            } else if (http.transportError) {
-                WriteResult(false, http.body)
-            } else {
-                WriteResult(false, "HTTP ${http.code}: ${http.body.take(100)}")
+            if (http.transportError) {
+                return WriteResult(false, http.body)
             }
+            if (http.code in 200..299) {
+                // Apps Script always returns HTTP 200, even for errors — check JSON status
+                return try {
+                    val resp = JSONObject(http.body)
+                    val status = resp.optString("status")
+                    if (status == "ok") {
+                        WriteResult(true, "Updated $column for $clientName (property)")
+                    } else {
+                        WriteResult(false, resp.optString("message", "Script error (no message)"))
+                    }
+                } catch (_: Exception) {
+                    // If we can't parse the response, assume success
+                    WriteResult(true, "Updated $column for $clientName (property)")
+                }
+            }
+            WriteResult(false, "HTTP ${http.code}: ${http.body.take(100)}")
         } catch (e: Exception) {
             Log.e(TAG, "Property raw write-back failed", e)
             WriteResult(false, "${e.javaClass.simpleName}: ${e.message?.take(80)}")

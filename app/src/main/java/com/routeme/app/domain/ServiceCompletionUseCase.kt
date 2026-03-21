@@ -241,17 +241,29 @@ class ServiceCompletionUseCase(
         val prop = request.property
         if (prop.hasAnyData && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
             val name = updatedClient.name
+            val address = updatedClient.address
+            
+            // Ensure row exists first (idempotent — skips if already exists)
+            val rowResult = runCatching { clientRepository.writeBackAddPropertyClientRow(name, address) }.getOrNull()
+            if (rowResult != null && !rowResult.success) {
+                android.util.Log.w("ServiceCompletion", "Failed to ensure property row: ${rowResult.message}")
+            }
+            
             if (prop.sunShade.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(name, "Sun/Shade", prop.sunShade) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(name, "Sun/Shade", prop.sunShade) }.getOrNull()
+                if (r != null && !r.success) android.util.Log.w("ServiceCompletion", "Sun/Shade write failed: ${r.message}")
             }
             if (prop.windExposure.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(name, "Wind Exposure", prop.windExposure) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(name, "Wind Exposure", prop.windExposure) }.getOrNull()
+                if (r != null && !r.success) android.util.Log.w("ServiceCompletion", "Wind Exposure write failed: ${r.message}")
             }
             if (prop.steepSlopes.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(name, "Steep Slopes", prop.steepSlopes) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(name, "Steep Slopes", prop.steepSlopes) }.getOrNull()
+                if (r != null && !r.success) android.util.Log.w("ServiceCompletion", "Steep Slopes write failed: ${r.message}")
             }
             if (prop.irrigation.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(name, "Irrigation", prop.irrigation) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(name, "Irrigation", prop.irrigation) }.getOrNull()
+                if (r != null && !r.success) android.util.Log.w("ServiceCompletion", "Irrigation write failed: ${r.message}")
             }
             val cal = Calendar.getInstance()
             val dateStr = "%d-%02d-%02d".format(

@@ -1104,18 +1104,64 @@ class MainActivity : AppCompatActivity() {
     private fun showCompletionDialog(client: Client, timeOnSiteMillis: Long, arrivedAtMillis: Long, location: Location) {
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
         val stepsLabel = formatStepLabel(viewModel.uiState.value.selectedServiceTypes)
+        val primaryType = viewModel.uiState.value.selectedServiceTypes.firstOrNull() ?: ServiceType.ROUND_1
+        val isSprayer = primaryType.isSpray
+        val granularRate = viewModel.getGranularRate(primaryType)
+        val dp = resources.displayMetrics.density
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            val pad = (20 * dp).toInt()
+            setPadding(pad, (pad / 2), pad, 0)
+        }
+        container.addView(android.widget.TextView(this).apply {
+            text = getString(R.string.dialog_complete_message, client.address, minutesOnSite, stepsLabel)
+            setPadding(0, 0, 0, (12 * dp).toInt())
+        })
+
+        val amount1Input = android.widget.EditText(this).apply {
+            hint = if (isSprayer) "Hose (gal)" else "Lbs used"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        container.addView(amount1Input)
+
+        val amount2Input = android.widget.EditText(this).apply {
+            hint = "PG (gal)"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            visibility = if (isSprayer) View.VISIBLE else View.GONE
+        }
+        container.addView(amount2Input)
+
+        val estLabel = android.widget.TextView(this).apply {
+            visibility = View.GONE
+            setPadding(0, (4 * dp).toInt(), 0, 0)
+        }
+        container.addView(estLabel)
+
+        val watcher = object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val a1 = amount1Input.text?.toString()?.toDoubleOrNull()
+                val a2 = amount2Input.text?.toString()?.toDoubleOrNull()
+                val est = if (isSprayer) estimateSpraySqFt(a1, a2) else estimateGranularSqFt(a1, granularRate)
+                if (est != null) { estLabel.text = "≈ %,d sqft".format(est); estLabel.visibility = View.VISIBLE }
+                else estLabel.visibility = View.GONE
+            }
+        }
+        amount1Input.addTextChangedListener(watcher)
+        amount2Input.addTextChangedListener(watcher)
 
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.dialog_complete_title, client.name))
-            .setMessage(getString(R.string.dialog_complete_message, client.address, minutesOnSite, stepsLabel))
+            .setView(container)
             .setPositiveButton(R.string.dialog_yes_complete) { _, _ ->
-                // Use the real arrival time captured by the tracking service
+                val amt1 = amount1Input.text?.toString()?.toDoubleOrNull()
+                val amt2 = amount2Input.text?.toString()?.toDoubleOrNull()
                 lastLocation = location
                 viewModel.markArrivalForClient(client, location, arrivedAtMillis)
-                confirmServiceForSelectedClient()
-                // Dismiss the completion notification for this client
+                confirmServiceForSelectedClient(amountUsed = amt1, amountUsed2 = amt2)
                 trackingUiController.dismissNotification(3000 + client.id.hashCode())
-                // Offer property stats update after confirming service
                 DialogFactory.showPropertyStatsDialog(
                     context = this,
                     clientName = client.name,

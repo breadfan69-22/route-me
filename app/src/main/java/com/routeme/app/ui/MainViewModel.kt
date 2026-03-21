@@ -1348,17 +1348,33 @@ class MainViewModel(
         if (!property.hasAnyData) return
         viewModelScope.launch {
             if (com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isBlank()) return@launch
+            
+            // Ensure row exists first - look up address from clients list
+            val client = _uiState.value.clients.find { it.name == clientName }
+            val address = client?.address ?: ""
+            if (address.isNotEmpty()) {
+                val rowResult = runCatching { clientRepository.writeBackAddPropertyClientRow(clientName, address) }
+                if (rowResult.isFailure) {
+                    android.util.Log.w("MainViewModel", "Failed to ensure property row: ${rowResult.exceptionOrNull()?.message}")
+                }
+            }
+            
+            var anyFailed = false
             if (property.sunShade.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Sun/Shade", property.sunShade) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(clientName, "Sun/Shade", property.sunShade) }
+                if (r.isFailure) { anyFailed = true; android.util.Log.w("MainViewModel", "Sun/Shade write failed: ${r.exceptionOrNull()?.message}") }
             }
             if (property.windExposure.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Wind Exposure", property.windExposure) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(clientName, "Wind Exposure", property.windExposure) }
+                if (r.isFailure) { anyFailed = true; android.util.Log.w("MainViewModel", "Wind Exposure write failed: ${r.exceptionOrNull()?.message}") }
             }
             if (property.steepSlopes.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Steep Slopes", property.steepSlopes) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(clientName, "Steep Slopes", property.steepSlopes) }
+                if (r.isFailure) { anyFailed = true; android.util.Log.w("MainViewModel", "Steep Slopes write failed: ${r.exceptionOrNull()?.message}") }
             }
             if (property.irrigation.isNotEmpty()) {
-                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Irrigation", property.irrigation) }
+                val r = runCatching { clientRepository.writeBackPropertyRaw(clientName, "Irrigation", property.irrigation) }
+                if (r.isFailure) { anyFailed = true; android.util.Log.w("MainViewModel", "Irrigation write failed: ${r.exceptionOrNull()?.message}") }
             }
             val cal = java.util.Calendar.getInstance()
             val dateStr = "%d-%02d-%02d".format(
@@ -1367,7 +1383,12 @@ class MainViewModel(
                 cal.get(java.util.Calendar.DAY_OF_MONTH)
             )
             runCatching { clientRepository.writeBackPropertyRaw(clientName, "Last Updated", dateStr) }
-            setStatus("Property stats saved for $clientName")
+            
+            if (anyFailed) {
+                setStatus("Property stats partially saved for $clientName (some writes failed)")
+            } else {
+                setStatus("Property stats saved for $clientName")
+            }
         }
     }
 

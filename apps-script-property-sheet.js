@@ -64,6 +64,16 @@ function doPost(e) {
             return jsonResponse({ status: "error", message: "No POST data" });
         }
         var data = JSON.parse(e.postData.contents);
+
+        // Handle "addClientRow" action — adds a new row if client doesn't exist
+        if (data.action === "addClientRow") {
+            if (!data.clientName) {
+                return jsonResponse({ status: "error", message: "Missing clientName for addClientRow" });
+            }
+            return jsonResponse(addClientRow(data.clientName, data.address || ""));
+        }
+
+        // Default: update a cell (requires clientName, column, value)
         if (!data.clientName || !data.column || !data.value) {
             return jsonResponse({ status: "error", message: "Missing clientName, column, or value" });
         }
@@ -71,6 +81,46 @@ function doPost(e) {
     } catch (error) {
         return jsonResponse({ status: "error", message: error.message });
     }
+}
+
+/**
+ * Adds a new client row if it doesn't already exist.
+ * Idempotent — returns success if row already exists.
+ */
+function addClientRow(clientName, address) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheets()[0];
+
+    // Check if client already exists
+    var names = sheet.getRange(1, 1, sheet.getLastRow(), 1).getValues();
+    var searchName = clientName.toString().trim().toLowerCase();
+
+    for (var r = 1; r < names.length; r++) {
+        var cellName = names[r][0].toString().trim().toLowerCase();
+        if (cellName === searchName) {
+            return { status: "ok", message: "Client already exists", row: r + 1 };
+        }
+    }
+
+    // Find the Address column (if any)
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var addressColIndex = -1;
+    for (var i = 0; i < headers.length; i++) {
+        var header = headers[i].toString().trim().toLowerCase();
+        if (header === "address") {
+            addressColIndex = i + 1;
+            break;
+        }
+    }
+
+    // Add new row at the end
+    var newRow = sheet.getLastRow() + 1;
+    sheet.getRange(newRow, 1).setValue(clientName);
+    if (addressColIndex > 0 && address) {
+        sheet.getRange(newRow, addressColIndex).setValue(address);
+    }
+
+    return { status: "ok", message: "Added new client row", row: newRow };
 }
 
 function updateCell(data) {
