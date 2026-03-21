@@ -1,9 +1,13 @@
 package com.routeme.app.domain
 
 import com.routeme.app.Client
+import com.routeme.app.ClientProperty
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
 import com.routeme.app.ServiceType
+import com.routeme.app.SunShade
+import com.routeme.app.WindExposure
+import com.routeme.app.model.DailyWeather
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -35,7 +39,6 @@ class SuggestionUseCaseTest {
             )
         } returns listOf(suggestion)
         every { routingEngine.buildClientDetails(client) } returns "details"
-
         val result = useCase.suggestNextClients(
             clients = listOf(client),
             selectedServiceTypes = setOf(ServiceType.ROUND_1),
@@ -108,7 +111,6 @@ class SuggestionUseCaseTest {
                 destination = null
             )
         } returns listOf(suggestion)
-
         nowMillis = 86_400_000L
 
         val result = useCase.suggestNextClients(
@@ -142,6 +144,69 @@ class SuggestionUseCaseTest {
         assertFalse(useCase.canShowPreviousSuggestions(0))
         assertEquals(2, useCase.remainingSuggestionCount(5, suggestions.size))
         assertEquals(0, useCase.remainingSuggestionCount(10, suggestions.size))
+    }
+
+    @Test
+    fun `suggestNextClients appends weather fit details when weather and property apply`() {
+        val routingEngine = mockk<RoutingEngine>()
+        val useCase = SuggestionUseCase(routingEngine)
+
+        val client = testClient("1")
+        val suggestion = testSuggestion(client).apply {
+            weatherFitSummary = "Wind-exposed on windy day"
+        }
+        val weather = DailyWeather(
+            dateMillis = System.currentTimeMillis(),
+            highTempF = 72,
+            lowTempF = 50,
+            windSpeedMph = 25,
+            windGustMph = 35,
+            windDirection = "W",
+            precipitationInches = 0.0,
+            description = "Windy"
+        )
+        val property = ClientProperty(
+            clientId = client.id,
+            lawnSizeSqFt = 18000,
+            sunShade = SunShade.UNKNOWN,
+            windExposure = WindExposure.EXPOSED,
+            hasSteepSlopes = false,
+            hasIrrigation = false,
+            propertyNotes = "",
+            updatedAtMillis = System.currentTimeMillis()
+        )
+
+        every {
+            routingEngine.rankClients(
+                clients = listOf(client),
+                serviceTypes = setOf(ServiceType.ROUND_1),
+                minDays = 21,
+                lastLocation = null,
+                cuOverrideEnabled = false,
+                routeDirection = RouteDirection.OUTWARD,
+                skippedClientIds = any(),
+                destination = null,
+                weather = weather,
+                recentPrecipInches = 0.0,
+                propertyMap = mapOf(client.id to property)
+            )
+        } returns listOf(suggestion)
+        every { routingEngine.buildClientDetails(client) } returns "details"
+        val result = useCase.suggestNextClients(
+            clients = listOf(client),
+            selectedServiceTypes = setOf(ServiceType.ROUND_1),
+            minDays = 21,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD,
+            activeDestination = null,
+            currentLocation = null,
+            weather = weather,
+            recentPrecipInches = 0.0,
+            propertyMap = mapOf(client.id to property)
+        )
+
+        assertTrue(result.selectedClientDetails.contains("Weather fit: Wind-exposed on windy day"))
+        assertTrue(result.statusMessage.contains("Wind-exposed on windy day"))
     }
 
     private fun testSuggestion(client: Client): ClientSuggestion {

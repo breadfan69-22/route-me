@@ -1,9 +1,13 @@
 package com.routeme.app.domain
 
 import com.routeme.app.Client
+import com.routeme.app.ClientProperty
 import com.routeme.app.RouteDirection
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
+import com.routeme.app.SunShade
+import com.routeme.app.WindExposure
+import com.routeme.app.model.DailyWeather
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -106,6 +110,108 @@ class RoutingEngineTest {
         assertTrue(days != null)
         assertTrue(days!! >= 9)
         assertTrue(days <= 11)
+    }
+
+    @Test
+    fun `rankClients penalizes exposed properties in high wind`() {
+        val exposed = testClient(id = "exposed")
+        val sheltered = testClient(id = "sheltered")
+        val weather = DailyWeather(
+            dateMillis = System.currentTimeMillis(),
+            highTempF = 70,
+            lowTempF = 50,
+            windSpeedMph = 22,
+            windGustMph = 35,
+            windDirection = "W",
+            precipitationInches = 0.0,
+            description = "Windy"
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(exposed, sheltered),
+            serviceTypes = setOf(ServiceType.ROUND_1),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD,
+            weather = weather,
+            recentPrecipInches = 0.0,
+            propertyMap = mapOf(
+                exposed.id to ClientProperty(
+                    clientId = exposed.id,
+                    lawnSizeSqFt = 20000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.EXPOSED,
+                    hasSteepSlopes = false,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                ),
+                sheltered.id to ClientProperty(
+                    clientId = sheltered.id,
+                    lawnSizeSqFt = 20000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.SHELTERED,
+                    hasSteepSlopes = false,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+        )
+
+        assertEquals("sheltered", results.first().client.id)
+    }
+
+    @Test
+    fun `rankClients penalizes steep slopes with recent rain`() {
+        val steep = testClient(id = "steep")
+        val flat = testClient(id = "flat")
+        val weather = DailyWeather(
+            dateMillis = System.currentTimeMillis(),
+            highTempF = 68,
+            lowTempF = 45,
+            windSpeedMph = 6,
+            windGustMph = null,
+            windDirection = "N",
+            precipitationInches = 0.0,
+            description = "Cloudy"
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(steep, flat),
+            serviceTypes = setOf(ServiceType.ROUND_1),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD,
+            weather = weather,
+            recentPrecipInches = 0.4,
+            propertyMap = mapOf(
+                steep.id to ClientProperty(
+                    clientId = steep.id,
+                    lawnSizeSqFt = 10000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.UNKNOWN,
+                    hasSteepSlopes = true,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                ),
+                flat.id to ClientProperty(
+                    clientId = flat.id,
+                    lawnSizeSqFt = 10000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.UNKNOWN,
+                    hasSteepSlopes = false,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            )
+        )
+
+        assertEquals("flat", results.first().client.id)
     }
 
     private fun testClient(

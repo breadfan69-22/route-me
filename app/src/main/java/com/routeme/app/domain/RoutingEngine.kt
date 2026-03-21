@@ -2,6 +2,7 @@ package com.routeme.app.domain
 
 import android.location.Location
 import com.routeme.app.Client
+import com.routeme.app.ClientProperty
 import com.routeme.app.ClientProximityHelper
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
@@ -9,6 +10,9 @@ import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
+import com.routeme.app.SunShade
+import com.routeme.app.WindExposure
+import com.routeme.app.model.DailyWeather
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.util.AppConfig
@@ -17,6 +21,11 @@ import java.util.Calendar
 import java.util.Locale
 
 class RoutingEngine {
+    private data class WeatherImpactResult(
+        val scoreAdjustment: Double,
+        val reasons: List<String>
+    )
+
     private data class ScoredSuggestion(
         val suggestion: ClientSuggestion,
         val score: Double
@@ -70,7 +79,10 @@ class RoutingEngine {
         cuOverrideEnabled: Boolean,
         routeDirection: RouteDirection,
         skippedClientIds: Set<String> = emptySet(),
-        destination: SavedDestination? = null
+        destination: SavedDestination? = null,
+        weather: DailyWeather? = null,
+        recentPrecipInches: Double? = null,
+        propertyMap: Map<String, ClientProperty> = emptyMap()
     ): List<ClientSuggestion> {
         val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
         val destLat = destination?.lat ?: SHOP_LAT
@@ -113,7 +125,7 @@ class RoutingEngine {
                 // CU override flag: true if any eligible step is CU-blocked
                 val requiresCuOverride = eligible.any { isCuBlockedForService(client, it) }
 
-                ClientSuggestion(
+                val suggestion = ClientSuggestion(
                     client = client,
                     daysSinceLast = mostOverdueDays?.let { if (it == Int.MAX_VALUE) null else it },
                     distanceMiles = distance,
@@ -122,6 +134,13 @@ class RoutingEngine {
                     requiresCuOverride = requiresCuOverride,
                     eligibleSteps = eligible
                 )
+                suggestion.weatherFitSummary = buildWeatherImpactSummary(
+                    suggestion = suggestion,
+                    weather = weather,
+                    recentPrecipInches = recentPrecipInches,
+                    property = propertyMap[client.id]
+                )
+                suggestion
             }
             .map {
                 ScoredSuggestion(
@@ -131,7 +150,10 @@ class RoutingEngine {
                         routeDirection = routeDirection,
                         userDistanceToShopMiles = userDistanceToShopMiles,
                         minDays = minDays,
-                        today = today
+                        today = today,
+                        weather = weather,
+                        recentPrecipInches = recentPrecipInches,
+                        property = propertyMap[it.client.id]
                     )
                 )
             }
@@ -273,7 +295,10 @@ class RoutingEngine {
         routeDirection: RouteDirection,
         userDistanceToShopMiles: Double?,
         minDays: Int,
-        today: Int
+        today: Int,
+        weather: DailyWeather? = null,
+        recentPrecipInches: Double? = null,
+        property: ClientProperty? = null
     ): Double {
         var score = 0.0
 
@@ -348,7 +373,123 @@ class RoutingEngine {
             score -= AppConfig.Routing.CU_OVERRIDE_PENALTY
         }
 
+        score += weatherPropertyAdjustment(
+            suggestion = suggestion,
+            weather = weather,
+            recentPrecipInches = recentPrecipInches,
+            property = property
+        )
+
         return score
+    }
+
+    private fun weatherPropertyAdjustment(
+        suggestion: ClientSuggestion,
+        weather: DailyWeather?,
+        recentPrecipInches: Double?,
+        property: ClientProperty?
+    ): Double {
+        return evaluateWeatherPropertyImpact(
+            suggestion = suggestion,
+            weather = weather,
+            recentPrecipInches = recentPrecipInches,
+            property = property
+        ).scoreAdjustment
+    }
+
+    fun buildWeatherImpactSummary(
+        suggestion: ClientSuggestion,
+        weather: DailyWeather?,
+        recentPrecipInches: Double?,
+        property: ClientProperty?
+    ): String? {
+        val result = evaluateWeatherPropertyImpact(
+            suggestion = suggestion,
+            weather = weather,
+            recentPrecipInches = recentPrecipInches,
+            property = property
+        )
+        if (result.reasons.isEmpty()) return null
+        return result.reasons.joinToString("; ")
+    }
+
+    private fun evaluateWeatherPropertyImpact(
+        suggestion: ClientSuggestion,
+        weather: DailyWeather?,
+        recentPrecipInches: Double?,
+        property: ClientProperty?
+    ): WeatherImpactResult {
+        val weatherData = weather ?: return WeatherImpactResult(0.0, emptyList())
+        val propertyData = property ?: return WeatherImpactResult(0.0, emptyList())
+
+        var adjustment = 0.0
+        val reasons = mutableListOf<String>()
+        val windSpeed = weatherData.windSpeedMph
+        val windGust = weatherData.windGustMph
+        val highTemp = weatherData.highTempF
+        val todayPrecip = weatherData.precipitationInches
+
+        if (propertyData.windExposure == WindExposure.EXPOSED) {
+            val windy = (windSpeed != null && windSpeed >= AppConfig.Routing.WEATHER_WIND_THRESHOLD_MPH) ||
+                (windGust != null && windGust >= AppConfig.Routing.WEATHER_WIND_GUST_THRESHOLD_MPH)
+            if (windy) {
+                adjustment += AppConfig.Routing.WEATHER_WIND_EXPOSED_PENALTY
+                reasons += "Wind-exposed on windy day"
+            }
+
+            val calm = windSpeed != null && windSpeed <= AppConfig.Routing.WEATHER_CALM_THRESHOLD_MPH
+            val largeLawn = propertyData.lawnSizeSqFt >= AppConfig.Routing.WEATHER_CALM_LARGE_LAWN_SQFT
+            if (calm && largeLawn) {
+                adjustment += AppConfig.Routing.WEATHER_CALM_EXPOSED_BONUS
+                reasons += "Large exposed lawn on calm day"
+            }
+        }
+
+        if (
+            highTemp != null && highTemp >= AppConfig.Routing.WEATHER_HOT_THRESHOLD_F &&
+            (propertyData.sunShade == SunShade.FULL_SHADE || propertyData.sunShade == SunShade.PARTIAL_SHADE)
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_SHADE_HOT_BONUS
+            reasons += "Shaded yard favored in heat"
+        }
+
+        if (
+            propertyData.hasSteepSlopes &&
+            recentPrecipInches != null &&
+            recentPrecipInches >= AppConfig.Routing.WEATHER_SLOPE_RAIN_THRESHOLD_INCHES
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_SLOPE_RAIN_PENALTY
+            reasons += "Steep slopes penalized after rain"
+        }
+
+        if (todayPrecip != null && todayPrecip >= AppConfig.Routing.WEATHER_RAIN_LIGHT_THRESHOLD) {
+            val servicePenalty = suggestion.eligibleSteps.maxOfOrNull(::rainPenaltyForServiceType)
+                ?: AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY
+            adjustment += servicePenalty
+            reasons += "Rain risk for selected service"
+        }
+
+        if (
+            propertyData.hasIrrigation &&
+            highTemp != null && highTemp >= AppConfig.Routing.WEATHER_DRY_HOT_THRESHOLD_F &&
+            (todayPrecip == null || todayPrecip == 0.0)
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_IRRIGATED_DRY_BONUS
+            reasons += "Irrigated property favored in dry heat"
+        }
+
+        return WeatherImpactResult(
+            scoreAdjustment = adjustment,
+            reasons = reasons
+        )
+    }
+
+    private fun rainPenaltyForServiceType(serviceType: ServiceType): Double {
+        return when (serviceType) {
+            ServiceType.ROUND_2, ServiceType.ROUND_5 -> AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY - 15.0
+            ServiceType.INCIDENTAL -> AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY + 20.0
+            else -> AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY
+        }
     }
 
     private fun mowWindowAdjustment(today: Int, mowDay: Int): Double {

@@ -10,6 +10,7 @@ import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
+import com.routeme.app.ClientProperty
 import com.routeme.app.PropertyInput
 import com.routeme.app.ServiceType
 import com.routeme.app.SHOP_LAT
@@ -29,6 +30,8 @@ import com.routeme.app.domain.RoutingEngine
 import com.routeme.app.domain.ServiceCompletionUseCase
 import com.routeme.app.domain.SuggestionUseCase
 import com.routeme.app.domain.SyncSettingsUseCase
+import com.routeme.app.domain.WeeklyPlannerUseCase
+import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.DateUtils
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +44,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
 
 class MainViewModel(
     private val clientRepository: ClientRepository,
@@ -56,6 +60,7 @@ class MainViewModel(
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
     private val syncSettingsUseCase: SyncSettingsUseCase = SyncSettingsUseCase(clientRepository, preferencesRepository, retryQueue),
     private val weatherRepository: WeatherRepository? = null,
+    private val weeklyPlannerUseCase: WeeklyPlannerUseCase? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) : ViewModel() {
     companion object {
@@ -692,6 +697,10 @@ class MainViewModel(
         currentLocation: Location?
     ): SuggestionUseCase.SuggestNextResult {
         val latestState = _uiState.value
+        val weatherInputs = loadSuggestionWeatherInputs()
+        val propertyMap = latestState.clients
+            .mapNotNull { client -> client.property?.let { client.id to it } }
+            .toMap()
 
         withContext(ioDispatcher) {
             routingEngine.precomputeClusterDrivingDistances(latestState.clients)
@@ -704,8 +713,38 @@ class MainViewModel(
             cuOverrideEnabled = latestState.cuOverrideEnabled,
             routeDirection = latestState.routeDirection,
             activeDestination = latestState.activeDestination,
-            currentLocation = currentLocation
+            currentLocation = currentLocation,
+            weather = weatherInputs.today,
+            recentPrecipInches = weatherInputs.recentPrecipInches,
+            propertyMap = propertyMap
         )
+    }
+
+    private data class SuggestionWeatherInputs(
+        val today: com.routeme.app.model.DailyWeather?,
+        val recentPrecipInches: Double?
+    )
+
+    private suspend fun loadSuggestionWeatherInputs(): SuggestionWeatherInputs {
+        val repo = weatherRepository ?: return SuggestionWeatherInputs(today = null, recentPrecipInches = null)
+
+        return withContext(ioDispatcher) {
+            val dayStartMillis = startOfTodayMillis()
+            val today = runCatching { repo.getWeatherForDay(dayStartMillis) }.getOrNull()
+            val recentPrecip = runCatching {
+                repo.getRecentPrecip(com.routeme.app.util.AppConfig.Routing.WEATHER_RAIN_LOOKBACK_DAYS)
+            }.getOrNull()
+            SuggestionWeatherInputs(today = today, recentPrecipInches = recentPrecip)
+        }
+    }
+
+    private fun startOfTodayMillis(): Long {
+        val calendar = Calendar.getInstance()
+        calendar.set(Calendar.HOUR_OF_DAY, 0)
+        calendar.set(Calendar.MINUTE, 0)
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
     }
 
     private suspend fun applySuggestionResult(result: SuggestionUseCase.SuggestNextResult) {
@@ -1351,10 +1390,17 @@ class MainViewModel(
     fun writePropertyStats(clientName: String, property: PropertyInput) {
         if (!property.hasAnyData) return
         viewModelScope.launch {
+            val client = _uiState.value.clients.find { it.name == clientName }
+            if (client != null) {
+                runCatching {
+                    clientRepository.saveClientPropertyInput(client.id, property)
+                }
+                refreshClientFromRepository(client.id)
+            }
+
             if (com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isBlank()) return@launch
             
             // Ensure row exists first - look up address from clients list
-            val client = _uiState.value.clients.find { it.name == clientName }
             val address = client?.address ?: ""
             if (address.isNotEmpty()) {
                 val rowResult = runCatching { clientRepository.writeBackAddPropertyClientRow(clientName, address) }
@@ -1393,6 +1439,25 @@ class MainViewModel(
             } else {
                 setStatus("Property stats saved for $clientName")
             }
+        }
+    }
+
+    private suspend fun refreshClientFromRepository(clientId: String) {
+        val refreshedClient = runCatching { clientRepository.loadClientById(clientId) }.getOrNull() ?: return
+
+        _uiState.update { state ->
+            val updatedClients = state.clients.map { client ->
+                if (client.id == clientId) refreshedClient else client
+            }
+            val updatedSelectedClient = if (state.selectedClient?.id == clientId) refreshedClient else state.selectedClient
+            state.withUpdatedClients(updatedClients).copy(
+                selectedClient = updatedSelectedClient,
+                selectedClientDetails = if (updatedSelectedClient?.id == clientId) {
+                    routingEngine.buildClientDetails(updatedSelectedClient)
+                } else {
+                    state.selectedClientDetails
+                }
+            )
         }
     }
 
@@ -1441,6 +1506,7 @@ class MainViewModel(
         onSuccess: (() -> Unit)?
     ) {
         applyConfirmSelectedState(result, stateBeforeConfirm)
+        refreshClientFromRepository(result.selectedClient.id)
         emitConfirmSelectedPrimaryStatus(result)
         emitConfirmSelectedEvents(result)
         emitConfirmSelectedSheetFeedback(result)
@@ -2149,6 +2215,35 @@ class MainViewModel(
         }
     }
 
+    /** Generate and show a weather-aware plan for the next 7 days. */
+    fun showWeeklyPlanner() {
+        val planner = weeklyPlannerUseCase ?: run {
+            viewModelScope.launch { setStatus("Weekly planner is not available") }
+            return
+        }
+
+        viewModelScope.launch {
+            setStatus("Generating weekly weather plan…", emitSnackbar = false)
+            val state = _uiState.value
+            val selectedTypes = state.selectedServiceTypes.ifEmpty { ServiceType.entries.toSet() }
+            val result = runCatching {
+                planner.generateWeekPlan(
+                    serviceTypes = selectedTypes,
+                    minDays = state.minDays
+                )
+            }
+
+            result
+                .onSuccess { weekPlan ->
+                    _events.emit(MainEvent.ShowWeeklyPlanner(buildWeeklyPlannerText(weekPlan)))
+                }
+                .onFailure { error ->
+                    val message = error.message?.takeIf { it.isNotBlank() } ?: "Unknown error"
+                    setStatus("Failed to generate weekly planner: $message")
+                }
+        }
+    }
+
     private fun buildWeekSummaryText(week: RouteHistoryUseCase.WeekData): String {
         val sb = StringBuilder()
         val startLabel = DateUtils.formatDate(week.startMillis)
@@ -2170,6 +2265,53 @@ class MainViewModel(
         appendWeekDailyBreakdown(sb, week)
 
         return sb.toString()
+    }
+
+    private fun buildWeeklyPlannerText(plan: WeekPlan): String {
+        val sb = StringBuilder()
+        sb.appendLine("Weekly Planner (Weather-Aware)")
+        sb.appendLine("════════════════════════════")
+        sb.appendLine("Generated: ${DateUtils.formatTimestamp(plan.generatedAtMillis)}")
+        sb.appendLine("Clients: ${plan.totalClients}  •  Unassigned: ${plan.unassignedCount}")
+        sb.appendLine()
+
+        for (day in plan.days) {
+            appendPlannedDaySummary(sb, day)
+            sb.appendLine()
+        }
+
+        return sb.toString().trimEnd()
+    }
+
+    private fun appendPlannedDaySummary(sb: StringBuilder, day: com.routeme.app.model.PlannedDay) {
+        val icon = if (day.isWorkDay) "✅" else "⛔"
+        val dateLabel = DateUtils.formatDate(day.dateMillis)
+        sb.appendLine("$icon ${day.dayName} ($dateLabel)  •  ${day.dayScoreLabel} (${day.dayScore})")
+        sb.appendLine("   ${formatPlannedDayWeather(day)}")
+
+        if (!day.isWorkDay) {
+            sb.appendLine("   Not scheduled as work day")
+            return
+        }
+
+        if (day.clients.isEmpty()) {
+            sb.appendLine("   No assignments")
+            return
+        }
+
+        day.clients.forEachIndexed { index, planned ->
+            val overdue = planned.daysOverdue?.let { " • ${it}d overdue" } ?: ""
+            sb.appendLine(
+                "   ${index + 1}. ${planned.client.name} — ${planned.fitnessLabel} (${planned.fitnessScore})$overdue"
+            )
+            sb.appendLine("      ${planned.primaryReason}")
+        }
+    }
+
+    private fun formatPlannedDayWeather(day: com.routeme.app.model.PlannedDay): String {
+        val forecast = day.forecast ?: return "Forecast unavailable"
+        val wind = forecast.windGustMph ?: forecast.windSpeedMph
+        return "H/L ${forecast.highTempF}°/${forecast.lowTempF}° • Rain ${forecast.precipProbabilityPct}% • Wind ${wind} mph"
     }
 
     private fun appendWeekStepTotals(sb: StringBuilder, week: RouteHistoryUseCase.WeekData) {

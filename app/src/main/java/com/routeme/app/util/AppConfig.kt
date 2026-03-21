@@ -1,6 +1,42 @@
 package com.routeme.app.util
 
 object AppConfig {
+    object WeeklyPlanner {
+        const val IDEAL_TEMP_LOW_F = 50
+        const val IDEAL_TEMP_HIGH_F = 85
+        const val TEMP_PENALTY_PER_DEGREE = 2
+
+        const val WIND_CALM_MPH = 8
+        const val WIND_MODERATE_MPH = 15
+        const val WIND_HIGH_MPH = 20
+        const val WIND_CALM_SCORE = 25
+        const val WIND_MODERATE_PENALTY = -15
+        const val WIND_HIGH_PENALTY = -35
+        const val WIND_SEVERE_PENALTY = -50
+
+        const val PRECIP_LOW_PCT = 20
+        const val PRECIP_MODERATE_PCT = 50
+        const val PRECIP_HIGH_PCT = 80
+        const val PRECIP_LOW_SCORE = 25
+        const val PRECIP_MODERATE_PENALTY = -15
+        const val PRECIP_HIGH_PENALTY = -40
+        const val PRECIP_SEVERE_PENALTY = -60
+
+        const val SEVERE_WEATHER_FLOOR = 10
+
+        const val SATURDAY_SCORE_THRESHOLD = 60
+        const val SUNDAY_EXCLUDED = true
+
+        const val FITNESS_GREAT_THRESHOLD = 80
+        const val FITNESS_GOOD_THRESHOLD = 60
+        const val FITNESS_FAIR_THRESHOLD = 40
+
+        const val PRECIP_PROB_TO_INCHES_THRESHOLD_PCT = 50
+        const val PRECIP_PROB_ESTIMATED_INCHES = 0.25
+
+        const val WORKDAY_SEVERE_WEATHER_MIN_SCORE = 20
+    }
+
     object Tracking {
         const val ARRIVAL_RADIUS_METERS = 60f
         const val ONSITE_RADIUS_METERS = 150f
@@ -136,5 +172,21 @@ object AppConfig {
         // Applied when a candidate shares a street name with the last-picked stop,
         // even if outside cluster radius. Breaks ties between near-equal distances.
         const val SAME_STREET_BONUS = 20.0
+
+        const val WEATHER_WIND_EXPOSED_PENALTY = -80.0
+        const val WEATHER_WIND_THRESHOLD_MPH = 20
+        const val WEATHER_WIND_GUST_THRESHOLD_MPH = 30
+        const val WEATHER_CALM_EXPOSED_BONUS = 40.0
+        const val WEATHER_CALM_THRESHOLD_MPH = 8
+        const val WEATHER_CALM_LARGE_LAWN_SQFT = 15_000
+        const val WEATHER_SHADE_HOT_BONUS = 25.0
+        const val WEATHER_HOT_THRESHOLD_F = 90
+        const val WEATHER_SLOPE_RAIN_PENALTY = -70.0
+        const val WEATHER_RAIN_LOOKBACK_DAYS = 2
+        const val WEATHER_SLOPE_RAIN_THRESHOLD_INCHES = 0.25
+        const val WEATHER_RAIN_SERVICE_PENALTY = -50.0
+        const val WEATHER_RAIN_LIGHT_THRESHOLD = 0.10
+        const val WEATHER_IRRIGATED_DRY_BONUS = 10.0
+        const val WEATHER_DRY_HOT_THRESHOLD_F = 85
     }
 }

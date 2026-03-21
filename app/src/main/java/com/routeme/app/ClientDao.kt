@@ -14,8 +14,15 @@ interface ClientDao {
     @Query("SELECT * FROM clients ORDER BY name")
     suspend fun getAllClientsWithRecords(): List<ClientWithRecords>
 
+    @Transaction
+    @Query("SELECT * FROM clients WHERE id = :clientId LIMIT 1")
+    suspend fun getClientWithRecordsById(clientId: String): ClientWithRecords?
+
     @Query("SELECT * FROM clients ORDER BY name")
     suspend fun getAllClients(): List<ClientEntity>
+
+    @Query("SELECT * FROM clients WHERE id = :clientId LIMIT 1")
+    suspend fun getClientById(clientId: String): ClientEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertClient(client: ClientEntity)
@@ -40,6 +47,24 @@ interface ClientDao {
 
     @Query("UPDATE clients SET lawnSizeSqFt = :sqFt WHERE id = :clientId")
     suspend fun updateClientLawnSize(clientId: String, sqFt: Int)
+
+    @Query(
+        """
+        UPDATE clients
+        SET lawnSizeSqFt = :lawnSizeSqFt,
+            sunShade = :sunShade,
+            terrain = :terrain,
+            windExposure = :windExposure
+        WHERE id = :clientId
+        """
+    )
+    suspend fun updateClientPropertyFields(
+        clientId: String,
+        lawnSizeSqFt: Int,
+        sunShade: String,
+        terrain: String,
+        windExposure: String
+    )
 
     @Query("DELETE FROM clients")
     suspend fun deleteAllClients()

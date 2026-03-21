@@ -17,5 +17,6 @@ data class Client(
     val cuFallPending: Boolean = false,
     val latitude: Double?,
     val longitude: Double?,
-    val records: List<ServiceRecord> = emptyList()
+    val records: List<ServiceRecord> = emptyList(),
+    val property: ClientProperty? = null
 )

@@ -31,6 +31,10 @@ object GoogleSheetsSync {
         mowKeys = listOf("mow", "mowday"),
         latitudeKeys = listOf("lat"),
         longitudeKeys = listOf("lng"),
+        lawnSizeKeys = listOf("lawn size", "lawnsize", "lawn_size", "sqft"),
+        sunShadeKeys = listOf("sun/shade", "sun shade", "sunshade", "sun_shade"),
+        terrainKeys = listOf("terrain", "slope", "slopes"),
+        windExposureKeys = listOf("wind exposure", "windexposure", "wind_exposure"),
         parseEmbeddedStepDate = true,
         skipStatusKeywordsInStepDate = true
     )

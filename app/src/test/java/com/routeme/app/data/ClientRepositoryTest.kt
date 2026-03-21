@@ -4,8 +4,11 @@ import android.content.Context
 import com.routeme.app.Client
 import com.routeme.app.ClientDao
 import com.routeme.app.ClientEntity
+import com.routeme.app.ClientPropertyDao
+import com.routeme.app.ClientPropertyEntity
 import com.routeme.app.ClientWithRecords
 import com.routeme.app.NonClientStopDao
+import com.routeme.app.PropertyInput
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceRecordEntity
 import com.routeme.app.ServiceType
@@ -30,6 +33,7 @@ import org.junit.Test
 class ClientRepositoryTest {
     private lateinit var appContext: Context
     private lateinit var dao: ClientDao
+    private lateinit var propertyDao: ClientPropertyDao
     private lateinit var nonClientStopDao: NonClientStopDao
     private lateinit var repository: ClientRepository
 
@@ -37,8 +41,9 @@ class ClientRepositoryTest {
     fun setup() {
         appContext = mockk(relaxed = true)
         dao = mockk(relaxed = true)
+        propertyDao = mockk(relaxed = true)
         nonClientStopDao = mockk(relaxed = true)
-        repository = ClientRepository(appContext, dao, nonClientStopDao)
+        repository = ClientRepository(appContext, dao, propertyDao, nonClientStopDao)
     }
 
     @After
@@ -78,7 +83,8 @@ class ClientRepositoryTest {
                         lat = null,
                         lng = null
                     )
-                )
+                ),
+                property = null
             )
         )
 
@@ -87,6 +93,48 @@ class ClientRepositoryTest {
         assertEquals(1, clients.size)
         assertEquals("1", clients.first().id)
         assertEquals(1, clients.first().records.size)
+    }
+
+    @Test
+    fun `loadClientById maps relation including property`() = runTest {
+        val now = System.currentTimeMillis()
+        coEvery { dao.getClientWithRecordsById("1") } returns ClientWithRecords(
+            client = ClientEntity(
+                id = "1",
+                name = "Test",
+                address = "123 St",
+                zone = "KAL",
+                notes = "",
+                subscribedSteps = "1,2",
+                hasGrub = false,
+                mowDayOfWeek = 0,
+                lawnSizeSqFt = 0,
+                sunShade = "",
+                terrain = "",
+                windExposure = "",
+                cuSpringPending = false,
+                cuFallPending = false,
+                latitude = 42.0,
+                longitude = -85.0
+            ),
+            records = emptyList(),
+            property = ClientPropertyEntity(
+                clientId = "1",
+                lawnSizeSqFt = 5000,
+                sunShade = "FULL_SUN",
+                windExposure = "EXPOSED",
+                hasSteepSlopes = true,
+                hasIrrigation = false,
+                propertyNotes = "note",
+                updatedAtMillis = now
+            )
+        )
+
+        val client = repository.loadClientById("1")
+
+        assertEquals("1", client?.id)
+        assertEquals(5000, client?.property?.lawnSizeSqFt)
+        assertEquals(true, client?.property?.hasSteepSlopes)
     }
 
     @Test
@@ -112,6 +160,7 @@ class ClientRepositoryTest {
     fun `syncFromSheets replaces db and returns result`() = runTest {
         mockkObject(GoogleSheetsSync)
         val syncedClient = testClient("sync-1")
+        coEvery { dao.getAllClients() } returns emptyList()
         every { GoogleSheetsSync.fetch("url") } returns GoogleSheetsSync.SyncResult(
             clients = listOf(syncedClient),
             message = "ok"
@@ -156,6 +205,58 @@ class ClientRepositoryTest {
 
         assertEquals(1, result.size)
         assertEquals("2", result.first().clientId)
+    }
+
+    @Test
+    fun `saveClientPropertyInput updates property table and legacy fields`() = runTest {
+        coEvery { dao.getClientById("1") } returns ClientEntity(
+            id = "1",
+            name = "Test",
+            address = "123 St",
+            zone = "KAL",
+            notes = "",
+            subscribedSteps = "1",
+            hasGrub = false,
+            mowDayOfWeek = 0,
+            lawnSizeSqFt = 6000,
+            sunShade = "",
+            terrain = "",
+            windExposure = "",
+            cuSpringPending = false,
+            cuFallPending = false,
+            latitude = null,
+            longitude = null
+        )
+        coEvery { propertyDao.getPropertyForClient("1") } returns null
+
+        repository.saveClientPropertyInput(
+            clientId = "1",
+            property = PropertyInput(
+                sunShade = "Full Sun",
+                windExposure = "Exposed",
+                steepSlopes = "Yes",
+                irrigation = "No"
+            )
+        )
+
+        coVerify {
+            propertyDao.upsertProperty(match {
+                it.clientId == "1" &&
+                    it.sunShade == "FULL_SUN" &&
+                    it.windExposure == "EXPOSED" &&
+                    it.hasSteepSlopes &&
+                    !it.hasIrrigation
+            })
+        }
+        coVerify {
+            dao.updateClientPropertyFields(
+                clientId = "1",
+                lawnSizeSqFt = 6000,
+                sunShade = "Full Sun",
+                terrain = "Steep Slopes",
+                windExposure = "Exposed"
+            )
+        }
     }
 
     private fun testClient(id: String): Client {

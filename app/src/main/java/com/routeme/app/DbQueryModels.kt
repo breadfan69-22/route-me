@@ -9,7 +9,12 @@ data class ClientWithRecords(
         parentColumn = "id",
         entityColumn = "clientId"
     )
-    val records: List<ServiceRecordEntity>
+    val records: List<ServiceRecordEntity>,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "clientId"
+    )
+    val property: ClientPropertyEntity?
 )
 
 data class DailyRecordRow(

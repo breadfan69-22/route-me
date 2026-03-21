@@ -4,9 +4,12 @@ import android.content.Context
 import android.net.Uri
 import com.routeme.app.Client
 import com.routeme.app.ClientDao
+import com.routeme.app.ClientPropertyDao
+import com.routeme.app.ClientPropertyEntity
 import com.routeme.app.ClientStopEventEntity
 import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientImportParser
+import com.routeme.app.PropertyInput
 import com.routeme.app.DailyRecordRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.ImportResult
@@ -15,6 +18,8 @@ import com.routeme.app.NonClientStopDao
 import com.routeme.app.NonClientStopEntity
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
+import com.routeme.app.SunShade
+import com.routeme.app.WindExposure
 import com.routeme.app.data.db.GeocodeCacheEntity
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
@@ -28,6 +33,7 @@ import kotlinx.coroutines.withContext
 class ClientRepository(
     private val appContext: Context,
     private val clientDao: ClientDao,
+    private val clientPropertyDao: ClientPropertyDao,
     private val nonClientStopDao: NonClientStopDao,
     private val geocodeCacheDao: com.routeme.app.data.db.GeocodeCacheDao? = null
 ) {
@@ -35,11 +41,35 @@ class ClientRepository(
         clientDao.getAllClientsWithRecords().map { it.toDomain() }
     }
 
+    suspend fun loadClientById(clientId: String): Client? = withContext(Dispatchers.IO) {
+        clientDao.getClientWithRecordsById(clientId)?.toDomain()
+    }
+
     suspend fun saveClients(clients: List<Client>) = withContext(Dispatchers.IO) {
         val clientsToSave = applyCachedCoordinates(clients)
 
         for (client in clientsToSave) {
-            clientDao.insertClient(client.toEntity())
+            val existing = clientDao.getClientById(client.id)
+            val merged = if (existing != null) {
+                client.copy(
+                    lawnSizeSqFt = if (client.lawnSizeSqFt > 0) client.lawnSizeSqFt else existing.lawnSizeSqFt,
+                    sunShade = if (SunShade.fromStorage(client.sunShade) != SunShade.UNKNOWN) {
+                        client.sunShade
+                    } else {
+                        existing.sunShade
+                    },
+                    windExposure = if (WindExposure.fromStorage(client.windExposure) != WindExposure.UNKNOWN) {
+                        client.windExposure
+                    } else {
+                        existing.windExposure
+                    },
+                    terrain = client.terrain.ifBlank { existing.terrain }
+                )
+            } else {
+                client
+            }
+
+            clientDao.insertClient(merged.toEntity())
             for (record in client.records) {
                 clientDao.insertServiceRecord(record.toEntity(client.id))
             }
@@ -102,6 +132,8 @@ class ClientRepository(
         val result = GoogleSheetsSync.fetch(url)
         if (result.clients.isNotEmpty()) {
             val existingClients = clientDao.getAllClients()
+            val existingPropertiesByClientKey = existingPropertiesByClientKey(existingClients)
+            val existingByName = existingClients.associateBy { it.name.lowercase() }
 
             // Preserve existing coordinates so a re-sync doesn't lose geocoded data
             val existingCoords = existingClients.associate { entity ->
@@ -125,20 +157,52 @@ class ClientRepository(
             val newlyAdded = result.clients.filter { it.name.lowercase() !in existingCoords }
 
             val mergedByNameClients = result.clients.map { client ->
+                val existing = existingByName[client.name.lowercase()]
+                val mergedLawnSize = if (client.lawnSizeSqFt > 0) client.lawnSizeSqFt else existing?.lawnSizeSqFt ?: 0
+                val mergedSunShade = if (SunShade.fromStorage(client.sunShade) != SunShade.UNKNOWN) {
+                    client.sunShade
+                } else {
+                    existing?.sunShade ?: ""
+                }
+                val mergedWindExposure = if (WindExposure.fromStorage(client.windExposure) != WindExposure.UNKNOWN) {
+                    client.windExposure
+                } else {
+                    existing?.windExposure ?: ""
+                }
+                val mergedTerrain = client.terrain.ifBlank { existing?.terrain.orEmpty() }
+
                 if (client.latitude == null || client.longitude == null) {
                     val saved = existingCoords[client.name.lowercase()]
                     if (saved != null) {
-                        client.copy(latitude = saved.first, longitude = saved.second)
+                        client.copy(
+                            latitude = saved.first,
+                            longitude = saved.second,
+                            lawnSizeSqFt = mergedLawnSize,
+                            sunShade = mergedSunShade,
+                            windExposure = mergedWindExposure,
+                            terrain = mergedTerrain
+                        )
                     } else {
-                        client
+                        client.copy(
+                            lawnSizeSqFt = mergedLawnSize,
+                            sunShade = mergedSunShade,
+                            windExposure = mergedWindExposure,
+                            terrain = mergedTerrain
+                        )
                     }
                 } else {
-                    client
+                    client.copy(
+                        lawnSizeSqFt = mergedLawnSize,
+                        sunShade = mergedSunShade,
+                        windExposure = mergedWindExposure,
+                        terrain = mergedTerrain
+                    )
                 }
             }
 
             val mergedClients = applyCachedCoordinates(mergedByNameClients)
 
+            clientPropertyDao.deleteAllProperties()
             clientDao.deleteAllClients()
             for (client in mergedClients) {
                 clientDao.insertClient(client.toEntity())
@@ -146,6 +210,7 @@ class ClientRepository(
                     clientDao.insertServiceRecord(record.toEntity(client.id))
                 }
             }
+            upsertImportedProperties(mergedClients, existingPropertiesByClientKey)
 
             upsertGeocodeCacheEntries(cacheEntriesFrom(mergedClients))
 
@@ -191,12 +256,79 @@ class ClientRepository(
 
     suspend fun updateClientLawnSize(clientId: String, sqFt: Int) = withContext(Dispatchers.IO) {
         clientDao.updateClientLawnSize(clientId, sqFt)
+
+        val existing = clientPropertyDao.getPropertyForClient(clientId)
+        clientPropertyDao.upsertProperty(
+            ClientPropertyEntity(
+                clientId = clientId,
+                lawnSizeSqFt = sqFt.coerceAtLeast(0),
+                sunShade = existing?.sunShade ?: SunShade.UNKNOWN.name,
+                windExposure = existing?.windExposure ?: WindExposure.UNKNOWN.name,
+                hasSteepSlopes = existing?.hasSteepSlopes ?: false,
+                hasIrrigation = existing?.hasIrrigation ?: false,
+                propertyNotes = existing?.propertyNotes ?: "",
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun saveClientPropertyInput(clientId: String, property: PropertyInput) = withContext(Dispatchers.IO) {
+        if (!property.hasAnyData) return@withContext
+
+        val existingClient = clientDao.getClientById(clientId)
+        val existing = clientPropertyDao.getPropertyForClient(clientId)
+        val parsedSunShade = SunShade.fromStorage(property.sunShade)
+        val parsedWindExposure = WindExposure.fromStorage(property.windExposure)
+        val parsedSteepSlopes = parseYesNo(property.steepSlopes)
+        val parsedIrrigation = parseYesNo(property.irrigation)
+
+        val effectiveSunShadeStorage = if (parsedSunShade != SunShade.UNKNOWN) {
+            parsedSunShade.name
+        } else {
+            existing?.sunShade ?: SunShade.UNKNOWN.name
+        }
+        val effectiveWindExposureStorage = if (parsedWindExposure != WindExposure.UNKNOWN) {
+            parsedWindExposure.name
+        } else {
+            existing?.windExposure ?: WindExposure.UNKNOWN.name
+        }
+
+        clientPropertyDao.upsertProperty(
+            ClientPropertyEntity(
+                clientId = clientId,
+                lawnSizeSqFt = existing?.lawnSizeSqFt ?: 0,
+                sunShade = effectiveSunShadeStorage,
+                windExposure = effectiveWindExposureStorage,
+                hasSteepSlopes = parsedSteepSlopes ?: existing?.hasSteepSlopes ?: false,
+                hasIrrigation = parsedIrrigation ?: existing?.hasIrrigation ?: false,
+                propertyNotes = existing?.propertyNotes ?: "",
+                updatedAtMillis = System.currentTimeMillis()
+            )
+        )
+
+        if (existingClient != null) {
+            val legacyTerrain = when (parsedSteepSlopes) {
+                true -> "Steep Slopes"
+                false -> "Flat"
+                null -> existingClient.terrain
+            }
+
+            clientDao.updateClientPropertyFields(
+                clientId = clientId,
+                lawnSizeSqFt = existingClient.lawnSizeSqFt,
+                sunShade = storageToDisplaySunShade(effectiveSunShadeStorage),
+                terrain = legacyTerrain,
+                windExposure = storageToDisplayWindExposure(effectiveWindExposureStorage)
+            )
+        }
     }
 
     suspend fun importFromUri(uri: Uri): ImportResult {
         val result = ClientImportParser.parse(appContext, uri)
         if (result.clients.isNotEmpty()) {
+            val existingPropertiesByClientKey = existingPropertiesByClientKey(clientDao.getAllClients())
             saveClients(result.clients)
+            upsertImportedProperties(result.clients, existingPropertiesByClientKey)
         }
         return result
     }
@@ -280,6 +412,129 @@ class ClientRepository(
     private suspend fun upsertGeocodeCacheEntries(entries: List<GeocodeCacheEntity>) {
         if (entries.isEmpty()) return
         geocodeCacheDao?.upsertAll(entries)
+    }
+
+    private suspend fun existingPropertiesByClientKey(clients: List<com.routeme.app.ClientEntity>): Map<String, ClientPropertyEntity> {
+        if (clients.isEmpty()) return emptyMap()
+
+        val existingByClientId = clientPropertyDao
+            .getPropertiesForClients(clients.map { it.id })
+            .associateBy { it.clientId }
+
+        return clients.mapNotNull { client ->
+            val key = clientKey(client.name, client.address) ?: return@mapNotNull null
+            val property = existingByClientId[client.id] ?: return@mapNotNull null
+            key to property
+        }.toMap()
+    }
+
+    private suspend fun upsertImportedProperties(
+        clients: List<Client>,
+        existingByClientKey: Map<String, ClientPropertyEntity>
+    ) {
+        if (clients.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val entities = clients.mapNotNull { client ->
+            val key = clientKey(client.name, client.address)
+            val existing = key?.let { existingByClientKey[it] }
+
+            val importedLawnSize = client.lawnSizeSqFt.takeIf { it > 0 }
+            val importedSunShade = SunShade.fromStorage(client.sunShade)
+            val importedWindExposure = WindExposure.fromStorage(client.windExposure)
+            val hasImportedTerrain = client.terrain.isNotBlank()
+
+            val hasImportData =
+                importedLawnSize != null ||
+                    importedSunShade != SunShade.UNKNOWN ||
+                    importedWindExposure != WindExposure.UNKNOWN ||
+                    hasImportedTerrain
+
+            if (!hasImportData && existing == null) {
+                return@mapNotNull null
+            }
+
+            ClientPropertyEntity(
+                clientId = client.id,
+                lawnSizeSqFt = importedLawnSize ?: existing?.lawnSizeSqFt ?: 0,
+                sunShade = if (importedSunShade != SunShade.UNKNOWN) {
+                    importedSunShade.name
+                } else {
+                    existing?.sunShade ?: SunShade.UNKNOWN.name
+                },
+                windExposure = if (importedWindExposure != WindExposure.UNKNOWN) {
+                    importedWindExposure.name
+                } else {
+                    existing?.windExposure ?: WindExposure.UNKNOWN.name
+                },
+                hasSteepSlopes = if (hasImportedTerrain) {
+                    inferHasSteepSlopes(client.terrain)
+                } else {
+                    existing?.hasSteepSlopes ?: false
+                },
+                hasIrrigation = existing?.hasIrrigation ?: false,
+                propertyNotes = existing?.propertyNotes ?: "",
+                updatedAtMillis = now
+            )
+        }
+
+        if (entities.isNotEmpty()) {
+            clientPropertyDao.upsertProperties(entities)
+        }
+    }
+
+    private fun clientKey(name: String, address: String): String? {
+        val normalizedName = name
+            .lowercase()
+            .replace(WHITESPACE_REGEX, " ")
+            .trim()
+        val normalizedAddress = address
+            .lowercase()
+            .replace(WHITESPACE_REGEX, " ")
+            .trim()
+
+        if (normalizedName.isBlank() || normalizedAddress.isBlank()) {
+            return null
+        }
+
+        return "$normalizedName|$normalizedAddress"
+    }
+
+    private fun inferHasSteepSlopes(terrain: String): Boolean {
+        val normalized = terrain.lowercase().trim()
+        if (normalized.isBlank()) return false
+
+        if (normalized.contains("flat") || normalized.contains("level") || normalized.contains("no slope")) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun parseYesNo(value: String): Boolean? {
+        return when (value.lowercase().trim()) {
+            "yes", "y", "true", "1" -> true
+            "no", "n", "false", "0" -> false
+            else -> null
+        }
+    }
+
+    private fun storageToDisplaySunShade(value: String): String {
+        return when (SunShade.fromStorage(value)) {
+            SunShade.FULL_SUN -> "Full Sun"
+            SunShade.PARTIAL_SHADE -> "Partial Shade"
+            SunShade.FULL_SHADE -> "Full Shade"
+            SunShade.UNKNOWN -> ""
+        }
+    }
+
+    private fun storageToDisplayWindExposure(value: String): String {
+        return when (WindExposure.fromStorage(value)) {
+            WindExposure.EXPOSED -> "Exposed"
+            WindExposure.SHELTERED -> "Sheltered"
+            WindExposure.MIXED -> "Mixed"
+            WindExposure.UNKNOWN -> ""
+        }
     }
 
     companion object {

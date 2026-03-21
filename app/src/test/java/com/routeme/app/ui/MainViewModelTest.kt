@@ -2,6 +2,7 @@ package com.routeme.app.ui
 
 import app.cash.turbine.test
 import com.routeme.app.Client
+import com.routeme.app.PropertyInput
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
 import com.routeme.app.ServiceRecord
@@ -11,6 +12,8 @@ import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WriteBackRetryQueue
 import com.routeme.app.domain.RouteHistoryUseCase
 import com.routeme.app.domain.RoutingEngine
+import com.routeme.app.domain.WeeklyPlannerUseCase
+import com.routeme.app.model.WeekPlan
 import com.routeme.app.network.SheetsWriteBack
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -41,6 +44,7 @@ class MainViewModelTest {
     private lateinit var routingEngine: RoutingEngine
     private lateinit var retryQueue: WriteBackRetryQueue
     private lateinit var routeHistoryUseCase: RouteHistoryUseCase
+    private lateinit var weeklyPlannerUseCase: WeeklyPlannerUseCase
 
     @Before
     fun setup() {
@@ -49,6 +53,7 @@ class MainViewModelTest {
         routingEngine = mockk(relaxed = true)
         retryQueue = mockk(relaxed = true)
         routeHistoryUseCase = mockk(relaxed = true)
+        weeklyPlannerUseCase = mockk(relaxed = true)
 
         every { prefs.sheetsReadUrl } returns ""
         every { prefs.sheetsWriteUrl } returns ""
@@ -240,6 +245,71 @@ class MainViewModelTest {
         assertTrue(export != null)
         val uri = export!!.first
         assertTrue(uri.contains("destination=42.2478%2C-85.564"))
+    }
+
+    @Test
+    fun `writePropertyStats saves and refreshes client from repository`() = runTest {
+        val original = testClient("41")
+        val refreshed = original.copy(sunShade = "Full Sun", windExposure = "Exposed", terrain = "Steep Slopes")
+
+        coEvery { repository.loadAllClients() } returns listOf(original)
+        coEvery { repository.saveClientPropertyInput("41", any()) } returns Unit
+        coEvery { repository.loadClientById("41") } returns refreshed
+
+        val vm = MainViewModel(repository, prefs, routingEngine, SavedStateHandle(), retryQueue, ioDispatcher = testDispatcher, routeHistoryUseCase = routeHistoryUseCase)
+        advanceUntilIdle()
+
+        vm.writePropertyStats(
+            clientName = "Client-41",
+            property = PropertyInput(sunShade = "Full Sun", windExposure = "Exposed", steepSlopes = "Yes")
+        )
+        advanceUntilIdle()
+
+        coVerify { repository.saveClientPropertyInput("41", any()) }
+        coVerify { repository.loadClientById("41") }
+        assertEquals("Full Sun", vm.uiState.value.clients.first().sunShade)
+    }
+
+    @Test
+    fun `showWeeklyPlanner emits planner dialog event`() = runTest {
+        val client = testClient("50")
+        val weekPlan = WeekPlan(
+            days = emptyList(),
+            generatedAtMillis = System.currentTimeMillis(),
+            totalClients = 1,
+            unassignedCount = 0
+        )
+
+        coEvery { repository.loadAllClients() } returns listOf(client)
+        coEvery {
+            weeklyPlannerUseCase.generateWeekPlan(
+                serviceTypes = any(),
+                minDays = any(),
+                lat = any(),
+                lng = any()
+            )
+        } returns weekPlan
+
+        val vm = MainViewModel(
+            repository,
+            prefs,
+            routingEngine,
+            SavedStateHandle(),
+            retryQueue,
+            routeHistoryUseCase = routeHistoryUseCase,
+            weeklyPlannerUseCase = weeklyPlannerUseCase,
+            ioDispatcher = testDispatcher
+        )
+        advanceUntilIdle()
+
+        vm.events.test {
+            vm.showWeeklyPlanner()
+            advanceUntilIdle()
+
+            val event = awaitItem()
+            assertTrue(event is MainEvent.ShowWeeklyPlanner)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private fun testClient(id: String): Client {

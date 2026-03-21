@@ -239,6 +239,11 @@ class ServiceCompletionUseCase(
 
         // Write property stats to property sheet
         val prop = request.property
+        if (prop.hasAnyData) {
+            runCatching {
+                clientRepository.saveClientPropertyInput(updatedClient.id, prop)
+            }
+        }
         if (prop.hasAnyData && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
             val name = updatedClient.name
             val address = updatedClient.address

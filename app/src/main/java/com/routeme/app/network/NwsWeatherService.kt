@@ -2,6 +2,7 @@ package com.routeme.app.network
 
 import android.util.Log
 import com.routeme.app.model.DailyWeather
+import com.routeme.app.model.ForecastDay
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -37,6 +38,7 @@ object NwsWeatherService {
 
     /** Cached hourly forecast URL keyed by "%.2f,%.2f" (lat/lng rounded to 0.01°, ~1 km). */
     private val forecastUrlCache = ConcurrentHashMap<String, String>()
+    private val dailyForecastUrlCache = ConcurrentHashMap<String, String>()
 
     /**
      * Fetch a daily weather summary for the given location and date.
@@ -51,6 +53,83 @@ object NwsWeatherService {
         } catch (e: Exception) {
             Log.w(TAG, "Weather fetch failed: ${e.message}")
             null
+        }
+    }
+
+    fun fetchDailyForecast(lat: Double, lng: Double, dayCount: Int = 7): List<ForecastDay> {
+        return try {
+            if (dayCount <= 0) return emptyList()
+            val forecastUrl = resolveDailyForecastUrl(lat, lng) ?: return emptyList()
+            val json = httpGet(forecastUrl) ?: return emptyList()
+            val periods = json.optJSONObject("properties")?.optJSONArray("periods") ?: return emptyList()
+            if (periods.length() == 0) return emptyList()
+
+            data class Aggregate(
+                var highTempF: Int = Int.MIN_VALUE,
+                var lowTempF: Int = Int.MAX_VALUE,
+                var maxWindSpeedMph: Int = 0,
+                var maxWindGustMph: Int? = null,
+                var maxPrecipProbabilityPct: Int = 0,
+                var shortForecast: String = "",
+                var detailedForecast: String = ""
+            )
+
+            val byDate = linkedMapOf<LocalDate, Aggregate>()
+
+            for (index in 0 until periods.length()) {
+                val period = periods.getJSONObject(index)
+                val start = period.optString("startTime", "")
+                val date = parseLocalDate(start) ?: continue
+
+                val aggregate = byDate.getOrPut(date) { Aggregate() }
+                val tempF = period.optInt("temperature", Int.MIN_VALUE)
+                if (tempF != Int.MIN_VALUE) {
+                    aggregate.highTempF = maxOf(aggregate.highTempF, tempF)
+                    aggregate.lowTempF = minOf(aggregate.lowTempF, tempF)
+                }
+
+                val windSpeedMph = period.optString("windSpeed", "")
+                    .split(" ")
+                    .firstOrNull()
+                    ?.split("-")
+                    ?.lastOrNull()
+                    ?.toIntOrNull() ?: 0
+                aggregate.maxWindSpeedMph = maxOf(aggregate.maxWindSpeedMph, windSpeedMph)
+
+                val precipProbability = period
+                    .optJSONObject("probabilityOfPrecipitation")
+                    ?.optInt("value", 0) ?: 0
+                aggregate.maxPrecipProbabilityPct = maxOf(aggregate.maxPrecipProbabilityPct, precipProbability)
+
+                val short = period.optString("shortForecast", "").trim()
+                if (aggregate.shortForecast.isBlank() && short.isNotBlank()) {
+                    aggregate.shortForecast = short
+                }
+
+                val detailed = period.optString("detailedForecast", "").trim()
+                if (aggregate.detailedForecast.isBlank() && detailed.isNotBlank()) {
+                    aggregate.detailedForecast = detailed
+                }
+            }
+
+            val zone = ZoneId.systemDefault()
+            byDate.entries
+                .take(dayCount)
+                .map { (date, aggregate) ->
+                    ForecastDay(
+                        dateMillis = date.atStartOfDay(zone).toInstant().toEpochMilli(),
+                        highTempF = if (aggregate.highTempF == Int.MIN_VALUE) 0 else aggregate.highTempF,
+                        lowTempF = if (aggregate.lowTempF == Int.MAX_VALUE) 0 else aggregate.lowTempF,
+                        windSpeedMph = aggregate.maxWindSpeedMph,
+                        windGustMph = aggregate.maxWindGustMph,
+                        precipProbabilityPct = aggregate.maxPrecipProbabilityPct,
+                        shortForecast = aggregate.shortForecast.ifBlank { "Unknown" },
+                        detailedForecast = aggregate.detailedForecast.ifBlank { aggregate.shortForecast.ifBlank { "Unknown" } }
+                    )
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Daily forecast fetch failed: ${e.message}")
+            emptyList()
         }
     }
 
@@ -177,6 +256,31 @@ object NwsWeatherService {
 
         forecastUrlCache[cacheKey] = forecastUrl
         return forecastUrl
+    }
+
+    private fun resolveDailyForecastUrl(lat: Double, lng: Double): String? {
+        val cacheKey = "%.2f,%.2f".format(lat, lng)
+        dailyForecastUrlCache[cacheKey]?.let { return it }
+
+        val latStr = "%.4f".format(lat)
+        val lngStr = "%.4f".format(lng)
+        val url = "$BASE_URL/points/$latStr,$lngStr"
+
+        val json = httpGet(url) ?: return null
+        val properties = json.optJSONObject("properties") ?: return null
+        val forecastUrl = properties.optString("forecast", "")
+        if (forecastUrl.isBlank()) return null
+
+        dailyForecastUrlCache[cacheKey] = forecastUrl
+        return forecastUrl
+    }
+
+    private fun parseLocalDate(startTimeIso: String): LocalDate? {
+        return try {
+            java.time.OffsetDateTime.parse(startTimeIso).toLocalDate()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**

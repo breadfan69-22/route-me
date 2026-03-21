@@ -581,6 +581,7 @@ class MainActivity : AppCompatActivity() {
             is MainEvent.EditClientNotes -> showEditNotesDialog(event.clientId, event.clientName, event.currentNotes)
             is MainEvent.ShowRouteHistory -> showRouteHistoryDialog(event)
             is MainEvent.ShowWeekSummary -> showWeekSummaryDialog(event.summary)
+            is MainEvent.ShowWeeklyPlanner -> showWeeklyPlannerDialog(event.summary)
             MainEvent.RefreshTrackingClients -> trackingUiController.refreshTrackedClients()
             MainEvent.ServiceConfirmed -> rerunSuggestionsIfVisible()
             MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
@@ -816,6 +817,7 @@ class MainActivity : AppCompatActivity() {
             arrivalActive = state.arrivalStartedAtMillis != null,
             serviceTypes = state.selectedServiceTypes,
             granularRate = viewModel.getGranularRate(primaryType),
+            initialProperty = propertyInputFor(client),
             onArrive = {
                 lastLocation = getCurrentLocation()
                 viewModel.startArrivalForSelected(lastLocation)
@@ -850,7 +852,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showWeekSummaryDialog(summary: String) {
-        DialogFactory.showWeekSummaryDialog(this, summary)
+        DialogFactory.showWeekSummaryDialog(
+            context = this,
+            summary = summary,
+            onWeeklyPlanner = { viewModel.showWeeklyPlanner() }
+        )
+    }
+
+    private fun showWeeklyPlannerDialog(summary: String) {
+        DialogFactory.showWeeklyPlannerDialog(this, summary)
     }
 
     private fun showEditNotesDialog(clientId: String, clientName: String, currentNotes: String) {
@@ -1166,6 +1176,7 @@ class MainActivity : AppCompatActivity() {
                 DialogFactory.showPropertyStatsDialog(
                     context = this,
                     clientName = client.name,
+                    initialProperty = propertyInputFor(client),
                     onSave = { property -> viewModel.writePropertyStats(client.name, property) },
                     onSkip = {}
                 )
@@ -1212,6 +1223,7 @@ class MainActivity : AppCompatActivity() {
         DialogFactory.showPropertyStatsDialog(
             context = this,
             clientName = member.client.name,
+            initialProperty = propertyInputFor(member.client),
             onSave = { property ->
                 viewModel.writePropertyStats(member.client.name, property)
                 showNextClusterPropertyDialog(members, index + 1)
@@ -1266,6 +1278,7 @@ class MainActivity : AppCompatActivity() {
             DialogFactory.showPropertyStatsDialog(
                 context = this,
                 clientName = client.name,
+                initialProperty = propertyInputFor(client),
                 onSave = { property -> viewModel.writePropertyStats(client.name, property) }
             )
             // Clear only the action extra so tapping the notification body still works
@@ -1362,6 +1375,49 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearIntentExtras(intent: Intent, vararg keys: String) {
         keys.forEach(intent::removeExtra)
+    }
+
+    private fun propertyInputFor(client: Client): PropertyInput {
+        val property = client.property
+
+        val sunShade = when {
+            property == null -> client.sunShade
+            property.sunShade == SunShade.FULL_SUN -> "Full Sun"
+            property.sunShade == SunShade.PARTIAL_SHADE -> "Partial Shade"
+            property.sunShade == SunShade.FULL_SHADE -> "Full Shade"
+            else -> client.sunShade
+        }
+
+        val windExposure = when {
+            property == null -> client.windExposure
+            property.windExposure == WindExposure.EXPOSED -> "Exposed"
+            property.windExposure == WindExposure.SHELTERED -> "Sheltered"
+            property.windExposure == WindExposure.MIXED -> "Mixed"
+            else -> client.windExposure
+        }
+
+        val steepSlopes = when {
+            property != null && property.hasSteepSlopes -> "Yes"
+            property != null && !property.hasSteepSlopes -> "No"
+            client.terrain.isBlank() -> ""
+            client.terrain.lowercase().contains("flat") ||
+                client.terrain.lowercase().contains("level") ||
+                client.terrain.lowercase().contains("no slope") -> "No"
+            else -> "Yes"
+        }
+
+        val irrigation = when {
+            property == null -> ""
+            property.hasIrrigation -> "Yes"
+            else -> "No"
+        }
+
+        return PropertyInput(
+            sunShade = sunShade,
+            windExposure = windExposure,
+            steepSlopes = steepSlopes,
+            irrigation = irrigation
+        )
     }
 
 }

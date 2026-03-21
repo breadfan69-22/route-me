@@ -22,6 +22,7 @@ data class ClientSuggestion(
     val requiresCuOverride: Boolean = false,
     var drivingTime: String? = null,
     var drivingDistance: String? = null,
+    var weatherFitSummary: String? = null,
     /** Which of the active service types this client is actually due for. */
     val eligibleSteps: Set<ServiceType> = emptySet()
 )

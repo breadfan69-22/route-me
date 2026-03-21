@@ -19,6 +19,17 @@ fun Client.toEntity(): ClientEntity = ClientEntity(
     longitude = longitude
 )
 
+fun ClientProperty.toEntity(): ClientPropertyEntity = ClientPropertyEntity(
+    clientId = clientId,
+    lawnSizeSqFt = lawnSizeSqFt,
+    sunShade = sunShade.name,
+    windExposure = windExposure.name,
+    hasSteepSlopes = hasSteepSlopes,
+    hasIrrigation = hasIrrigation,
+    propertyNotes = propertyNotes,
+    updatedAtMillis = updatedAtMillis
+)
+
 fun ServiceRecord.toEntity(clientId: String): ServiceRecordEntity = ServiceRecordEntity(
     clientId = clientId,
     serviceType = serviceType.name,
@@ -87,5 +98,17 @@ fun ClientWithRecords.toDomain(): Client = Client(
             amountUsed = rec.amountUsed,
             amountUsed2 = rec.amountUsed2
         )
-    }
+    },
+    property = property?.toDomain()
+)
+
+fun ClientPropertyEntity.toDomain(): ClientProperty = ClientProperty(
+    clientId = clientId,
+    lawnSizeSqFt = lawnSizeSqFt,
+    sunShade = SunShade.fromStorage(sunShade),
+    windExposure = WindExposure.fromStorage(windExposure),
+    hasSteepSlopes = hasSteepSlopes,
+    hasIrrigation = hasIrrigation,
+    propertyNotes = propertyNotes,
+    updatedAtMillis = updatedAtMillis
 )

@@ -216,9 +216,24 @@ object DialogFactory {
         }
     }
 
-    fun showWeekSummaryDialog(context: Context, summary: String) {
+    fun showWeekSummaryDialog(
+        context: Context,
+        summary: String,
+        onWeeklyPlanner: () -> Unit = {}
+    ) {
         AlertDialog.Builder(context)
-            .setTitle("Week Summary")
+            .setTitle(context.getString(R.string.dialog_week_summary_title))
+            .setMessage(summary)
+            .setNeutralButton(context.getString(R.string.dialog_weekly_planner_button)) { _, _ ->
+                onWeeklyPlanner()
+            }
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    fun showWeeklyPlannerDialog(context: Context, summary: String) {
+        AlertDialog.Builder(context)
+            .setTitle(context.getString(R.string.dialog_weekly_planner_title))
             .setMessage(summary)
             .setPositiveButton(android.R.string.ok, null)
             .show()
@@ -369,6 +384,7 @@ object DialogFactory {
         arrivalActive: Boolean,
         serviceTypes: Set<ServiceType>,
         granularRate: Double,
+        initialProperty: PropertyInput = PropertyInput(),
         onArrive: () -> Unit,
         onCancelArrival: () -> Unit,
         onMaps: () -> Unit,
@@ -415,6 +431,16 @@ object DialogFactory {
         setupSpinner(windSpinner, PropertyInput.WIND_OPTIONS)
         setupSpinner(slopesSpinner, PropertyInput.YES_NO_OPTIONS)
         setupSpinner(irrigationSpinner, PropertyInput.YES_NO_OPTIONS)
+
+        fun preselect(spinner: Spinner, options: List<String>, value: String) {
+            val index = options.indexOf(value).takeIf { it >= 0 } ?: 0
+            spinner.setSelection(index)
+        }
+
+        preselect(sunShadeSpinner, PropertyInput.SUN_SHADE_OPTIONS, initialProperty.sunShade)
+        preselect(windSpinner, PropertyInput.WIND_OPTIONS, initialProperty.windExposure)
+        preselect(slopesSpinner, PropertyInput.YES_NO_OPTIONS, initialProperty.steepSlopes)
+        preselect(irrigationSpinner, PropertyInput.YES_NO_OPTIONS, initialProperty.irrigation)
 
         nameText.text = clientName
         detailsText.text = details
@@ -518,6 +544,7 @@ object DialogFactory {
             showPropertyStatsDialog(
                 context = context,
                 clientName = clientName,
+                initialProperty = property,
                 onSave = onSavePropertyStats,
                 onSkip = {}
             )
@@ -528,6 +555,12 @@ object DialogFactory {
             showPropertyStatsDialog(
                 context = context,
                 clientName = clientName,
+                initialProperty = PropertyInput(
+                    sunShade = sunShadeSpinner.selectedItem?.toString().orEmpty(),
+                    windExposure = windSpinner.selectedItem?.toString().orEmpty(),
+                    steepSlopes = slopesSpinner.selectedItem?.toString().orEmpty(),
+                    irrigation = irrigationSpinner.selectedItem?.toString().orEmpty()
+                ),
                 onSave = onSavePropertyStats,
                 onSkip = {}
             )
@@ -544,6 +577,7 @@ object DialogFactory {
     fun showPropertyStatsDialog(
         context: Context,
         clientName: String,
+        initialProperty: PropertyInput = PropertyInput(),
         onSave: (PropertyInput) -> Unit,
         onSkip: (() -> Unit)? = null
     ) {
@@ -590,6 +624,16 @@ object DialogFactory {
         val windSpinner = addSpinnerRow("Wind", PropertyInput.WIND_OPTIONS)
         val slopesSpinner = addSpinnerRow("Steep Slopes", PropertyInput.YES_NO_OPTIONS)
         val irrigationSpinner = addSpinnerRow("Irrigation", PropertyInput.YES_NO_OPTIONS)
+
+        fun preselect(spinner: android.widget.Spinner, options: List<String>, value: String) {
+            val index = options.indexOf(value).takeIf { it >= 0 } ?: 0
+            spinner.setSelection(index)
+        }
+
+        preselect(sunShadeSpinner, PropertyInput.SUN_SHADE_OPTIONS, initialProperty.sunShade)
+        preselect(windSpinner, PropertyInput.WIND_OPTIONS, initialProperty.windExposure)
+        preselect(slopesSpinner, PropertyInput.YES_NO_OPTIONS, initialProperty.steepSlopes)
+        preselect(irrigationSpinner, PropertyInput.YES_NO_OPTIONS, initialProperty.irrigation)
 
         AlertDialog.Builder(context)
             .setTitle("Property Stats — $clientName")

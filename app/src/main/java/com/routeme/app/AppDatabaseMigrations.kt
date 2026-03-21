@@ -139,6 +139,85 @@ object AppDatabaseMigrations {
         }
     }
 
+    val MIGRATION_12_13 = object : Migration(12, 13) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS client_properties (
+                    clientId TEXT NOT NULL PRIMARY KEY,
+                    lawnSizeSqFt INTEGER NOT NULL DEFAULT 0,
+                    sunShade TEXT NOT NULL DEFAULT 'UNKNOWN',
+                    windExposure TEXT NOT NULL DEFAULT 'UNKNOWN',
+                    hasSteepSlopes INTEGER NOT NULL DEFAULT 0,
+                    hasIrrigation INTEGER NOT NULL DEFAULT 0,
+                    propertyNotes TEXT NOT NULL DEFAULT '',
+                    updatedAtMillis INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(clientId) REFERENCES clients(id)
+                )
+                """.trimIndent()
+            )
+
+            db.execSQL(
+                """
+                INSERT OR REPLACE INTO client_properties (
+                    clientId,
+                    lawnSizeSqFt,
+                    sunShade,
+                    windExposure,
+                    hasSteepSlopes,
+                    hasIrrigation,
+                    propertyNotes,
+                    updatedAtMillis
+                )
+                SELECT
+                    id,
+                    CASE WHEN lawnSizeSqFt > 0 THEN lawnSizeSqFt ELSE 0 END,
+                    CASE
+                        WHEN LOWER(TRIM(sunShade)) = 'full sun' THEN 'FULL_SUN'
+                        WHEN LOWER(TRIM(sunShade)) = 'partial shade' THEN 'PARTIAL_SHADE'
+                        WHEN LOWER(TRIM(sunShade)) = 'full shade' THEN 'FULL_SHADE'
+                        ELSE 'UNKNOWN'
+                    END,
+                    CASE
+                        WHEN LOWER(TRIM(windExposure)) = 'exposed' THEN 'EXPOSED'
+                        WHEN LOWER(TRIM(windExposure)) = 'sheltered' THEN 'SHELTERED'
+                        WHEN LOWER(TRIM(windExposure)) = 'mixed' THEN 'MIXED'
+                        ELSE 'UNKNOWN'
+                    END,
+                    CASE WHEN TRIM(COALESCE(terrain, '')) <> '' THEN 1 ELSE 0 END,
+                    0,
+                    '',
+                    0
+                FROM clients
+                WHERE lawnSizeSqFt > 0
+                   OR TRIM(COALESCE(sunShade, '')) <> ''
+                   OR TRIM(COALESCE(windExposure, '')) <> ''
+                   OR TRIM(COALESCE(terrain, '')) <> ''
+                """.trimIndent()
+            )
+        }
+    }
+
+    val MIGRATION_13_14 = object : Migration(13, 14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS forecast_days (
+                    dateMillis INTEGER NOT NULL PRIMARY KEY,
+                    highTempF INTEGER NOT NULL,
+                    lowTempF INTEGER NOT NULL,
+                    windSpeedMph INTEGER NOT NULL,
+                    windGustMph INTEGER,
+                    precipProbabilityPct INTEGER NOT NULL,
+                    shortForecast TEXT NOT NULL,
+                    detailedForecast TEXT NOT NULL,
+                    fetchedAtMillis INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -150,6 +229,8 @@ object AppDatabaseMigrations {
         MIGRATION_8_9,
         MIGRATION_9_10,
         MIGRATION_10_11,
-        MIGRATION_11_12
+        MIGRATION_11_12,
+        MIGRATION_12_13,
+        MIGRATION_13_14
     )
 }

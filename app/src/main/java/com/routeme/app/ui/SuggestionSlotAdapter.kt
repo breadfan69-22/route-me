@@ -16,6 +16,10 @@ class SuggestionSlotAdapter(
     private val onSuggestionClicked: (ClientSuggestion) -> Unit
 ) : RecyclerView.Adapter<SuggestionSlotAdapter.SuggestionViewHolder>() {
 
+    companion object {
+        private const val WEATHER_SUMMARY_MAX_CHARS = 48
+    }
+
     private val items = mutableListOf<ClientSuggestion>()
     private var selectedClientId: String? = null
     private var selectedServiceTypeCount: Int = 1
@@ -86,6 +90,7 @@ class SuggestionSlotAdapter(
             }
             val mowText = if (suggestion.mowWindowPreferred) " ✓mow" else ""
             val cuText = if (suggestion.requiresCuOverride) " ⚠CU" else ""
+            val weatherText = compactWeatherSummary(suggestion.weatherFitSummary)
             val stepTag = if (suggestion.eligibleSteps.size == 1 && selectedServiceTypeCount == 1) {
                 ""
             } else {
@@ -96,7 +101,12 @@ class SuggestionSlotAdapter(
                 if (numbers.isNotEmpty()) "[S${numbers.joinToString("+")}] " else ""
             }
 
-            button.text = "${index + 1}. $stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
+            val topLine = "${index + 1}. $stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
+            button.text = if (weatherText.isNullOrBlank()) {
+                topLine
+            } else {
+                "$topLine\n↳ ${weatherText}"
+            }
             val isSelected = selectedClientId == suggestion.client.id
             val context = button.context
 
@@ -118,6 +128,22 @@ class SuggestionSlotAdapter(
             button.setOnClickListener {
                 onSuggestionClicked(suggestion)
             }
+        }
+
+        private fun compactWeatherSummary(summary: String?): String? {
+            val raw = summary?.trim().orEmpty()
+            if (raw.isBlank()) return null
+
+            val firstReason = raw.split(';').firstOrNull()?.trim().orEmpty()
+            if (firstReason.isBlank()) return null
+
+            val hasMore = raw.contains(';')
+            val trimmed = if (firstReason.length > WEATHER_SUMMARY_MAX_CHARS) {
+                firstReason.take(WEATHER_SUMMARY_MAX_CHARS).trimEnd() + "…"
+            } else {
+                firstReason
+            }
+            return if (hasMore && !trimmed.endsWith("…")) "$trimmed…" else trimmed
         }
     }
 }

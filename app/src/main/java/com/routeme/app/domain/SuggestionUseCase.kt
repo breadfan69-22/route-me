@@ -2,10 +2,12 @@ package com.routeme.app.domain
 
 import android.location.Location
 import com.routeme.app.Client
+import com.routeme.app.ClientProperty
 import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
+import com.routeme.app.model.DailyWeather
 
 class SuggestionUseCase(
     private val routingEngine: RoutingEngine,
@@ -46,7 +48,10 @@ class SuggestionUseCase(
         cuOverrideEnabled: Boolean,
         routeDirection: RouteDirection,
         activeDestination: SavedDestination?,
-        currentLocation: Location?
+        currentLocation: Location?,
+        weather: DailyWeather? = null,
+        recentPrecipInches: Double? = null,
+        propertyMap: Map<String, ClientProperty> = emptyMap()
     ): SuggestNextResult {
         val location = currentLocation ?: lastSuggestionLocation
         lastSuggestionLocation = location
@@ -66,7 +71,10 @@ class SuggestionUseCase(
             cuOverrideEnabled = cuOverrideEnabled,
             routeDirection = routeDirection,
             skippedClientIds = skippedTodayIds,
-            destination = activeDestination
+            destination = activeDestination,
+            weather = weather,
+            recentPrecipInches = recentPrecipInches,
+            propertyMap = propertyMap
         )
 
         if (ranked.isEmpty()) {
@@ -83,12 +91,25 @@ class SuggestionUseCase(
         }
 
         val selectedClient = ranked.first().client
+        val selectedSuggestion = ranked.first()
+        val weatherImpactSummary = selectedSuggestion.weatherFitSummary
+        val details = routingEngine.buildClientDetails(selectedClient)
+        val detailsWithWeather = if (weatherImpactSummary.isNullOrBlank()) {
+            details
+        } else {
+            "$details\nWeather fit: $weatherImpactSummary"
+        }
+
         return SuggestNextResult(
             suggestions = ranked,
             selectedClient = selectedClient,
-            selectedClientDetails = routingEngine.buildClientDetails(selectedClient),
+            selectedClientDetails = detailsWithWeather,
             suggestionOffset = 0,
-            statusMessage = "Selected ${selectedClient.name}",
+            statusMessage = if (weatherImpactSummary.isNullOrBlank()) {
+                "Selected ${selectedClient.name}"
+            } else {
+                "Selected ${selectedClient.name} (${weatherImpactSummary.split(';').first().trim()})"
+            },
             dateRolloverDetected = dateRolloverDetected,
             totalEligibleCount = ranked.size
         )
