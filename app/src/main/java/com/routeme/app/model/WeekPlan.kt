@@ -1,10 +1,7 @@
 package com.routeme.app.model
 
 import com.routeme.app.Client
-import com.routeme.app.ClientProperty
 import com.routeme.app.ServiceType
-import com.routeme.app.SunShade
-import com.routeme.app.WindExposure
 import org.json.JSONArray
 import org.json.JSONObject
 

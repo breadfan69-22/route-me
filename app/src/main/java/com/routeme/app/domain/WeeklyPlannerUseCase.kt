@@ -18,6 +18,7 @@ import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
+import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -93,12 +94,45 @@ class WeeklyPlannerUseCase(
                 .thenByDescending { it.daysSinceLast == null }
         )
 
+        // Pre-compute geographic clusters via union-find so nearby clients
+        // are strongly encouraged to land on the same work day.
+        val clusterOf = mutableMapOf<String, String>()  // clientId → representative id
+        fun findRoot(id: String): String {
+            var cur = id
+            while (clusterOf[cur] != cur) cur = clusterOf[cur] ?: cur
+            return cur
+        }
+        fun union(a: String, b: String) {
+            val ra = findRoot(a); val rb = findRoot(b)
+            if (ra != rb) clusterOf[ra] = rb
+        }
+        val geocodedSuggestions = sortedClients.filter {
+            it.client.latitude != null && it.client.longitude != null
+        }
+        geocodedSuggestions.forEach { clusterOf[it.client.id] = it.client.id }
+        for (i in geocodedSuggestions.indices) {
+            val a = geocodedSuggestions[i]
+            for (j in i + 1 until geocodedSuggestions.size) {
+                val b = geocodedSuggestions[j]
+                val dist = routingEngine.distanceMilesBetween(
+                    a.client.latitude!!, a.client.longitude!!,
+                    b.client.latitude!!, b.client.longitude!!
+                )
+                if (dist < AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES) {
+                    union(a.client.id, b.client.id)
+                }
+            }
+        }
+        // Track which day each cluster root was first assigned to.
+        val clusterDayAssignment = mutableMapOf<String, PlannedDayBuilder>()
+
         var assignedCount = 0
 
         for (suggestion in sortedClients) {
             val clientLat = suggestion.client.latitude
             val clientLng = suggestion.client.longitude
             val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
+            val clusterRoot = if (clientLat != null && clientLng != null) findRoot(suggestion.client.id) else null
 
             val dayFitness = workDays.map { day ->
                 val (fitnessScore, reason) = scoreClientDayFitness(
@@ -109,8 +143,6 @@ class WeeklyPlannerUseCase(
                     eligibleSteps = suggestion.eligibleSteps
                 )
                 // Geographic affinity: bonus when this day already has nearby clients.
-                // Score += up to GEO_AFFINITY_MAX_BONUS scaled by proximity of the closest
-                // already-assigned geocoded client on this day.
                 val geoBonus = if (clientLat != null && clientLng != null && day.clients.isNotEmpty()) {
                     val minDist = day.clients
                         .mapNotNull { pc ->
@@ -125,7 +157,12 @@ class WeeklyPlannerUseCase(
                     } else 0
                 } else 0
 
-                DayFitness(day, fitnessScore + geoBonus, reason)
+                // Cluster cohesion: heavy bonus if this client's cluster already has members on this day.
+                val clusterBonus = if (clusterRoot != null && clusterDayAssignment[clusterRoot] == day) {
+                    AppConfig.WeeklyPlanner.CLUSTER_COHESION_BONUS
+                } else 0
+
+                DayFitness(day, fitnessScore + geoBonus + clusterBonus, reason)
             }
 
             val best = dayFitness
@@ -155,6 +192,10 @@ class WeeklyPlannerUseCase(
                 )
                 if (clientSqFt != null) {
                     sqFtPerDay[best.day] = sqFtPerDay.getOrDefault(best.day, 0) + clientSqFt
+                }
+                // Record cluster assignment so subsequent cluster members follow.
+                if (clusterRoot != null && clusterRoot !in clusterDayAssignment) {
+                    clusterDayAssignment[clusterRoot] = best.day
                 }
                 assignedCount++
             }
@@ -355,45 +396,31 @@ class WeeklyPlannerUseCase(
         }
 
         if (client.mowDayOfWeek in Calendar.SUNDAY..Calendar.SATURDAY) {
-            // daysSinceMow: how many days have passed since the last mow (0 = mow day, 1 = day after, …6 = day before next mow)
+            // Circular distance from mow day: 0 = mow day, 3 = farthest possible.
             val daysSinceMow = ((dayOfWeek - client.mowDayOfWeek + 7) % 7)
-            val rainExpected = forecast.precipProbabilityPct >= AppConfig.WeeklyPlanner.PRECIP_MODERATE_PCT
-            when (daysSinceMow) {
+            val distFromMow = minOf(daysSinceMow, 7 - daysSinceMow)
+            when (distFromMow) {
                 0 -> {
-                    score -= 20
-                    reasons += "Mow day — freshly cut"
+                    score -= 40
+                    reasons += "Mow day — freshly cut, avoid"
                 }
                 1 -> {
-                    // Day after mow: grass still very short
-                    score -= 10
-                    reasons += "Day after mow — grass short"
+                    score -= 20
+                    reasons += "1 day from mow — grass too short/tall"
                 }
                 2 -> {
-                    score += 5
-                    reasons += "2 days after mow — growing"
+                    score += 10
+                    reasons += "2 days from mow — moderate growth"
                 }
                 3 -> {
-                    score += 10
-                    reasons += "3 days after mow — good growth"
-                }
-                4 -> {
-                    score += 15
-                    reasons += "4 days after mow — ideal"
-                }
-                5 -> {
-                    score += 20
-                    reasons += "5 days after mow — ideal"
-                }
-                6 -> {
-                    // Day before next mow: grass may be shaggy but treatment still worthwhile if rain is coming
-                    if (!rainExpected) {
-                        score -= 20
-                        reasons += "Day before mow — treatment may be mown off soon"
-                    } else {
-                        reasons += "Day before mow — rain expected, treatment OK"
-                    }
+                    score += 30
+                    reasons += "Farthest from mow day — ideal"
                 }
             }
+        } else {
+            // No mow day set — flexible schedule, treat every day as ideal.
+            score += 30
+            reasons += "No mow day — flexible schedule"
         }
 
         return score.coerceIn(0, 100) to (reasons.firstOrNull() ?: "Standard fit")
@@ -414,7 +441,7 @@ class WeeklyPlannerUseCase(
     }
 
     /**
-     * Greedy nearest-neighbour ordering starting from [startLat]/[startLng] (typically the shop).
+     * Orders clients into a loop from the shop and back using angular sweep + 2-opt.
      * Clients without coordinates are appended at the end in their original order.
      */
     private fun nearestNeighbourOrder(
@@ -422,24 +449,56 @@ class WeeklyPlannerUseCase(
         startLat: Double,
         startLng: Double
     ): List<PlannedClient> {
-        val geocoded = clients.filter { it.client.latitude != null && it.client.longitude != null }.toMutableList()
+        val geocoded = clients.filter { it.client.latitude != null && it.client.longitude != null }
         val ungeocoded = clients.filter { it.client.latitude == null || it.client.longitude == null }
 
-        val result = mutableListOf<PlannedClient>()
-        var curLat = startLat
-        var curLng = startLng
+        if (geocoded.size <= 2) return geocoded + ungeocoded
 
-        while (geocoded.isNotEmpty()) {
-            val nearest = geocoded.minByOrNull { pc ->
-                routingEngine.distanceMilesBetween(curLat, curLng, pc.client.latitude!!, pc.client.longitude!!)
-            }!!
-            result += nearest
-            geocoded -= nearest
-            curLat = nearest.client.latitude!!
-            curLng = nearest.client.longitude!!
+        // Angular sweep: sort by bearing from shop to create a natural loop.
+        val sorted = geocoded.sortedBy { pc ->
+            atan2(
+                pc.client.longitude!! - startLng,
+                pc.client.latitude!! - startLat
+            )
+        }.toMutableList()
+
+        // 2-opt improvement: iteratively uncross edges to shorten the loop.
+        // The "route" is shop → sorted[0] → sorted[1] → … → sorted[n-1] → shop.
+        fun routeDistance(route: MutableList<PlannedClient>): Double {
+            var total = routingEngine.distanceMilesBetween(
+                startLat, startLng, route.first().client.latitude!!, route.first().client.longitude!!
+            )
+            for (k in 0 until route.size - 1) {
+                total += routingEngine.distanceMilesBetween(
+                    route[k].client.latitude!!, route[k].client.longitude!!,
+                    route[k + 1].client.latitude!!, route[k + 1].client.longitude!!
+                )
+            }
+            total += routingEngine.distanceMilesBetween(
+                route.last().client.latitude!!, route.last().client.longitude!!,
+                startLat, startLng
+            )
+            return total
         }
 
-        result.addAll(ungeocoded)
-        return result
+        var improved = true
+        while (improved) {
+            improved = false
+            for (i in 0 until sorted.size - 1) {
+                for (j in i + 1 until sorted.size) {
+                    val before = routeDistance(sorted)
+                    sorted.subList(i, j + 1).reverse()
+                    val after = routeDistance(sorted)
+                    if (after < before) {
+                        improved = true
+                    } else {
+                        // Revert
+                        sorted.subList(i, j + 1).reverse()
+                    }
+                }
+            }
+        }
+
+        return sorted + ungeocoded
     }
 }

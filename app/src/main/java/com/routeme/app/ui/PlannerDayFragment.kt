@@ -43,7 +43,9 @@ class PlannerDayFragment : Fragment() {
         rv.layoutManager = GridLayoutManager(requireContext(), 2)
         rv.adapter = chipAdapter
 
-        plannedDay?.let { bindDay(it) }
+        // Pull data from Activity — survives fragment recreation by ViewPager2
+        val day = (activity as? WeeklyPlannerActivity)?.getPlannedDay(dayIndex)
+        if (day != null) bindDay(day)
     }
 
     fun updateDay(day: PlannedDay) {

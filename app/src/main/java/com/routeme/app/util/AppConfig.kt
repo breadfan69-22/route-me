@@ -45,6 +45,8 @@ object AppConfig {
         const val GEO_AFFINITY_RADIUS_MILES = 3.0
         /** Maximum bonus score added when a client is right next to an already-assigned day client. */
         const val GEO_AFFINITY_MAX_BONUS = 30
+        /** Bonus added to keep cluster members on the same day as the first-assigned member. */
+        const val CLUSTER_COHESION_BONUS = 50
 
         /** Steps that are liquid applications and must not be rained on for 24 hours. */
         val LIQUID_STEPS = setOf(2, 5)

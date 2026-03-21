@@ -41,7 +41,6 @@ class WeeklyPlannerActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
 
     private var weekPlan: WeekPlan? = null
-    private val dayFragments = mutableListOf<PlannerDayFragment>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,31 +71,18 @@ class WeeklyPlannerActivity : AppCompatActivity() {
 
     private fun loadPlan(plan: WeekPlan) {
         weekPlan = plan
-        dayFragments.clear()
 
         val days = plan.days
         toolbar.subtitle = "${plan.totalClients} clients • ${plan.unassignedCount} unassigned"
 
         viewPager.adapter = object : FragmentStateAdapter(this) {
             override fun getItemCount() = days.size
-            override fun createFragment(position: Int): PlannerDayFragment {
-                val frag = PlannerDayFragment.newInstance(position)
-                // We'll update data after the fragment is created
-                dayFragments.add(frag)
-                return frag
-            }
+            override fun createFragment(position: Int) = PlannerDayFragment.newInstance(position)
         }
 
         TabLayoutMediator(tabLayout, viewPager) { tab, position ->
             tab.text = days[position].dayName
         }.attach()
-
-        // Delay fragment data push slightly so fragments are attached
-        viewPager.post {
-            for ((i, frag) in dayFragments.withIndex()) {
-                if (i < days.size) frag.updateDay(days[i])
-            }
-        }
 
         buildDayPickerButtons(days)
     }
@@ -113,15 +99,15 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         }
     }
 
+    fun getPlannedDay(index: Int): PlannedDay? = weekPlan?.days?.getOrNull(index)
+
     private fun refreshFromRoom() {
         lifecycleScope.launch {
             val entity = withContext(Dispatchers.IO) { weekPlanDao.loadPlan() } ?: return@launch
             val plan = WeekPlan.fromJson(JSONObject(entity.planJson))
             weekPlan = plan
-            // Refresh visible fragments
-            for ((i, frag) in dayFragments.withIndex()) {
-                if (i < plan.days.size) frag.updateDay(plan.days[i])
-            }
+            // Refresh any currently-attached fragments
+            refreshVisibleFragments()
             toolbar.subtitle = "${plan.totalClients} clients • ${plan.unassignedCount} unassigned"
         }
     }
@@ -228,9 +214,9 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val updated = plan.copy(days = days)
         weekPlan = updated
 
-        // Refresh fragments
-        if (fromDayIndex < dayFragments.size) dayFragments[fromDayIndex].updateDay(days[fromDayIndex])
-        if (toDayIndex < dayFragments.size) dayFragments[toDayIndex].updateDay(days[toDayIndex])
+        // Refresh affected fragments
+        findDayFragment(fromDayIndex)?.updateDay(days[fromDayIndex])
+        findDayFragment(toDayIndex)?.updateDay(days[toDayIndex])
 
         savePlanToRoom()
 
@@ -238,11 +224,26 @@ class WeeklyPlannerActivity : AppCompatActivity() {
     }
 
     private fun restoreChipAlphas() {
-        for (frag in dayFragments) {
+        for (frag in supportFragmentManager.fragments) {
             val rv = frag.view?.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.chipRecyclerView) ?: continue
             for (i in 0 until rv.childCount) {
                 rv.getChildAt(i)?.alpha = 1f
             }
+        }
+    }
+
+    /** Find an attached PlannerDayFragment by its day index. */
+    private fun findDayFragment(dayIndex: Int): PlannerDayFragment? {
+        return supportFragmentManager.fragments
+            .filterIsInstance<PlannerDayFragment>()
+            .firstOrNull { it.arguments?.getInt("day_index") == dayIndex }
+    }
+
+    private fun refreshVisibleFragments() {
+        val plan = weekPlan ?: return
+        for (frag in supportFragmentManager.fragments.filterIsInstance<PlannerDayFragment>()) {
+            val idx = frag.arguments?.getInt("day_index") ?: continue
+            plan.days.getOrNull(idx)?.let { frag.updateDay(it) }
         }
     }
 
