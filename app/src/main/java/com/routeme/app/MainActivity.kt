@@ -824,6 +824,7 @@ class MainActivity : AppCompatActivity() {
             onMaps = { openClientInMaps(client) },
             onSkip = { viewModel.skipSelectedClientToday() },
             onConfirm = { notes, amt1, amt2, prop -> confirmServiceForSelectedClient(notes, amt1, amt2, prop) },
+            onSavePropertyStats = { property -> viewModel.writePropertyStats(client.name, property) },
             onEditNotes = { viewModel.editSelectedClientNotes() }
         )
     }

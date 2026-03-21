@@ -374,6 +374,7 @@ object DialogFactory {
         onMaps: () -> Unit,
         onSkip: () -> Unit,
         onConfirm: (notes: String, amountUsed: Double?, amountUsed2: Double?, property: PropertyInput) -> Unit,
+        onSavePropertyStats: (PropertyInput) -> Unit,
         onEditNotes: () -> Unit
     ) {
         val view = android.view.LayoutInflater.from(context)
@@ -479,8 +480,8 @@ object DialogFactory {
             updateSections(false)
         }
 
-        propertyBtn.isEnabled = false
-        propertyBtn.alpha = 0.4f
+        propertyBtn.isEnabled = true
+        propertyBtn.alpha = 1f
 
         val dialog = AlertDialog.Builder(context)
             .setView(view)
@@ -514,10 +515,23 @@ object DialogFactory {
             )
             onConfirm(notes, amt1, amt2, property)
             dialog.dismiss()
+            showPropertyStatsDialog(
+                context = context,
+                clientName = clientName,
+                onSave = onSavePropertyStats,
+                onSkip = {}
+            )
         }
         editNotesBtn.setOnClickListener { doubleBuzz(context); onEditNotes(); dialog.dismiss() }
         propertyBtn.setOnClickListener {
-            android.widget.Toast.makeText(context, "Property stats coming soon", android.widget.Toast.LENGTH_SHORT).show()
+            doubleBuzz(context)
+            showPropertyStatsDialog(
+                context = context,
+                clientName = clientName,
+                onSave = onSavePropertyStats,
+                onSkip = {}
+            )
+            dialog.dismiss()
         }
 
         dialog.show()
