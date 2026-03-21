@@ -62,6 +62,7 @@
     <string name="hint_visit_notes">Visit notes (optional)</string>
     <string name="dialog_daily_summary_title">Today\u2019s Route Summary</string>
     <string name="menu_route_history">Route History</string>
+    <string name="menu_weekly_planner">Weekly Planner</string>
     <string name="dialog_route_history_title">Route History</string>
     <string name="dialog_week_summary_title">Week Summary</string>
     <string name="dialog_weekly_planner_title">Weekly Planner</string>

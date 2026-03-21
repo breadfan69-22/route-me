@@ -155,6 +155,18 @@ class SyncSettingsUseCase(
         return SyncSettings(readUrl = readUrl, writeUrl = writeUrl)
     }
 
+    suspend fun syncPropertyDataFromSheet(): ClientRepository.PropertySyncResult {
+        val url = SheetsWriteBack.propertyWebAppUrl
+        if (url.isBlank()) {
+            return ClientRepository.PropertySyncResult(0, "No property sheet URL configured.")
+        }
+        return try {
+            clientRepository.syncPropertyDataFromSheet(url)
+        } catch (e: Exception) {
+            ClientRepository.PropertySyncResult(0, "Property sync failed: ${e.message}")
+        }
+    }
+
     fun isNonClientLoggingEnabled(): Boolean = preferencesRepository.nonClientLoggingEnabled
 
     fun toggleNonClientLogging(): ToggleResult {

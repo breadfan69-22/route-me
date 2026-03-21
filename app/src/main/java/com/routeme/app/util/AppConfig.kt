@@ -35,6 +35,25 @@ object AppConfig {
         const val PRECIP_PROB_ESTIMATED_INCHES = 0.25
 
         const val WORKDAY_SEVERE_WEATHER_MIN_SCORE = 20
+
+        /** Hard cap: no more than this many client stops per work day. */
+        const val MAX_CLIENTS_PER_DAY = 25
+        /** Hard cap: no more than this many sq ft of lawn per work day (when sq ft data available). */
+        const val MAX_SQFT_PER_DAY = 500_000
+
+        /** Radius within which a client is considered "nearby" an already-assigned day client. */
+        const val GEO_AFFINITY_RADIUS_MILES = 3.0
+        /** Maximum bonus score added when a client is right next to an already-assigned day client. */
+        const val GEO_AFFINITY_MAX_BONUS = 30
+
+        /** Steps that are liquid applications and must not be rained on for 24 hours. */
+        val LIQUID_STEPS = setOf(2, 5)
+        /** Steps that are granular — rain logic takes precedence when mixed with liquid steps. */
+        val GRANULAR_STEPS = setOf(1, 3, 4, 6)
+        /** Rain probability threshold above which liquid steps incur a heavy penalty. */
+        const val LIQUID_STEP_RAIN_PENALTY_PCT = 70
+        /** Score penalty applied when rain is expected on a liquid-step day. */
+        const val LIQUID_STEP_RAIN_PENALTY = 40
     }
 
     object Tracking {
@@ -76,6 +95,9 @@ object AppConfig {
     }
 
     object Routing {
+        /** Set to true to log per-client score breakdowns to Logcat (tag: RoutingScore). */
+        const val DEBUG_SCORING_ENABLED = false
+
         const val ORDER_HOP_PENALTY_PER_MILE = 14.0
         const val ORDER_BASE_SCORE_WEIGHT = 0.65
         const val ORDER_OVERDUE_DIVISOR_DAYS = 10.0

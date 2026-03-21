@@ -13,6 +13,7 @@ data class Client(
     val sunShade: String,
     val terrain: String,
     val windExposure: String,
+    val irrigation: String = "",
     val cuSpringPending: Boolean = false,
     val cuFallPending: Boolean = false,
     val latitude: Double?,

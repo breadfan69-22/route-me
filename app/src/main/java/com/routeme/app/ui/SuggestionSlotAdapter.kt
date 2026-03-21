@@ -100,8 +100,9 @@ class SuggestionSlotAdapter(
                     .sorted()
                 if (numbers.isNotEmpty()) "[S${numbers.joinToString("+")}] " else ""
             }
+            val propTag = if (suggestion.propertyCompletionPct < 100) "📋 " else ""
 
-            val topLine = "${index + 1}. $stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
+            val topLine = "${index + 1}. $propTag$stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
             button.text = if (weatherText.isNullOrBlank()) {
                 topLine
             } else {

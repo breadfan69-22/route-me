@@ -585,7 +585,24 @@ class MainActivity : AppCompatActivity() {
             MainEvent.RefreshTrackingClients -> trackingUiController.refreshTrackedClients()
             MainEvent.ServiceConfirmed -> rerunSuggestionsIfVisible()
             MainEvent.SyncComplete -> rerunSuggestionsIfVisible()
+            is MainEvent.PropertyNudge -> showPropertyNudgeSnackbar(event.clientId, event.clientName)
         }
+    }
+
+    private fun showPropertyNudgeSnackbar(clientId: String, clientName: String) {
+        Snackbar.make(binding.root, "Add property details for $clientName?", Snackbar.LENGTH_LONG)
+            .setAction("Add") {
+                val client = viewModel.uiState.value.clients.find { it.id == clientId } ?: return@setAction
+                DialogFactory.showPropertyStatsDialog(
+                    context = this,
+                    clientName = clientName,
+                    initialProperty = propertyInputFor(client),
+                    onSave = { property ->
+                        viewModel.writePropertyStats(clientName, property)
+                    }
+                )
+            }
+            .show()
     }
 
     private fun showShortSnackbar(message: String) {
@@ -933,6 +950,10 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_route_history -> {
                 viewModel.showRouteHistory()
+                true
+            }
+            R.id.action_weekly_planner -> {
+                viewModel.showWeeklyPlanner()
                 true
             }
             R.id.action_clear_skips -> {

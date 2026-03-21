@@ -1,6 +1,7 @@
 package com.routeme.app.domain
 
 import android.location.Location
+import android.util.Log
 import com.routeme.app.Client
 import com.routeme.app.ClientProperty
 import com.routeme.app.ClientProximityHelper
@@ -132,7 +133,8 @@ class RoutingEngine {
                     distanceToShopMiles = distanceToShopMiles,
                     mowWindowPreferred = mowPreferred,
                     requiresCuOverride = requiresCuOverride,
-                    eligibleSteps = eligible
+                    eligibleSteps = eligible,
+                    propertyCompletionPct = propertyCompletionPct(propertyMap[client.id])
                 )
                 suggestion.weatherFitSummary = buildWeatherImpactSummary(
                     suggestion = suggestion,
@@ -302,11 +304,13 @@ class RoutingEngine {
     ): Double {
         var score = 0.0
 
-        score += mowWindowAdjustment(today, suggestion.client.mowDayOfWeek)
+        val mowAdj = mowWindowAdjustment(today, suggestion.client.mowDayOfWeek)
+        score += mowAdj
 
+        var distAdj = 0.0
         val distance = suggestion.distanceMiles
         if (distance != null) {
-            score += when {
+            distAdj += when {
                 distance < AppConfig.Routing.DISTANCE_LT_0_5_MILES -> AppConfig.Routing.DISTANCE_LT_0_5_SCORE
                 distance < AppConfig.Routing.DISTANCE_LT_1_MILES -> AppConfig.Routing.DISTANCE_LT_1_SCORE
                 distance < AppConfig.Routing.DISTANCE_LT_2_MILES -> AppConfig.Routing.DISTANCE_LT_2_SCORE
@@ -316,26 +320,28 @@ class RoutingEngine {
                 distance < AppConfig.Routing.DISTANCE_LT_12_MILES -> AppConfig.Routing.DISTANCE_LT_12_SCORE
                 else -> AppConfig.Routing.DISTANCE_FAR_SCORE
             }
-            score -= distance * AppConfig.Routing.DISTANCE_PENALTY_PER_MILE
+            distAdj -= distance * AppConfig.Routing.DISTANCE_PENALTY_PER_MILE
         } else {
             val distanceToShop = suggestion.distanceToShopMiles
             if (distanceToShop != null) {
-                score += (
+                distAdj += (
                     AppConfig.Routing.NO_DISTANCE_BASE_SCORE -
                         (distanceToShop * AppConfig.Routing.NO_DISTANCE_DISTANCE_MULTIPLIER)
                     ).coerceAtLeast(AppConfig.Routing.NO_DISTANCE_MIN_SCORE)
             }
         }
+        score += distAdj
 
+        var dirAdj = 0.0
         val clientDistanceToShopMiles = suggestion.distanceToShopMiles
         if (clientDistanceToShopMiles != null && userDistanceToShopMiles != null) {
             val delta = clientDistanceToShopMiles - userDistanceToShopMiles
             if (kotlin.math.abs(delta) <= AppConfig.Routing.DIRECTION_DELTA_NEAR_ZERO_MILES) {
-                score += AppConfig.Routing.DIRECTION_NEAR_ZERO_BONUS
+                dirAdj += AppConfig.Routing.DIRECTION_NEAR_ZERO_BONUS
             } else {
                 when (routeDirection) {
                     RouteDirection.OUTWARD -> {
-                        score += when {
+                        dirAdj += when {
                             delta in AppConfig.Routing.OUTWARD_DELTA_RANGE_MIN_MILES..AppConfig.Routing.OUTWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.OUTWARD_RANGE_BONUS
                             delta > AppConfig.Routing.OUTWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.OUTWARD_FAR_BONUS
                             delta < AppConfig.Routing.OUTWARD_REVERSE_THRESHOLD_MILES -> AppConfig.Routing.OUTWARD_REVERSE_PENALTY
@@ -343,7 +349,7 @@ class RoutingEngine {
                         }
                     }
                     RouteDirection.HOMEWARD -> {
-                        score += when {
+                        dirAdj += when {
                             delta in AppConfig.Routing.HOMEWARD_DELTA_RANGE_MIN_MILES..AppConfig.Routing.HOMEWARD_DELTA_RANGE_MAX_MILES -> AppConfig.Routing.HOMEWARD_RANGE_BONUS
                             delta < AppConfig.Routing.HOMEWARD_DELTA_RANGE_MIN_MILES -> AppConfig.Routing.HOMEWARD_FAR_BONUS
                             delta > AppConfig.Routing.HOMEWARD_REVERSE_THRESHOLD_MILES -> AppConfig.Routing.HOMEWARD_REVERSE_PENALTY
@@ -353,32 +359,47 @@ class RoutingEngine {
                 }
             }
         }
+        score += dirAdj
 
+        var overdueAdj = 0.0
         val days = suggestion.daysSinceLast
         if (days == null) {
-            score += AppConfig.Routing.NEVER_SERVED_BONUS
+            overdueAdj += AppConfig.Routing.NEVER_SERVED_BONUS
         } else if (days >= minDays) {
             val daysOverdue = days - minDays
-            score += AppConfig.Routing.OVERDUE_BASE_BONUS +
+            overdueAdj += AppConfig.Routing.OVERDUE_BASE_BONUS +
                 (daysOverdue * AppConfig.Routing.OVERDUE_PER_DAY_BONUS)
             if (days >= AppConfig.Routing.OVERDUE_60_DAY_THRESHOLD) {
-                score += AppConfig.Routing.OVERDUE_60_DAY_BONUS
+                overdueAdj += AppConfig.Routing.OVERDUE_60_DAY_BONUS
             }
             if (days >= AppConfig.Routing.OVERDUE_90_DAY_THRESHOLD) {
-                score += AppConfig.Routing.OVERDUE_90_DAY_BONUS
+                overdueAdj += AppConfig.Routing.OVERDUE_90_DAY_BONUS
             }
         }
+        score += overdueAdj
 
+        var cuAdj = 0.0
         if (suggestion.requiresCuOverride) {
+            cuAdj -= AppConfig.Routing.CU_OVERRIDE_PENALTY
             score -= AppConfig.Routing.CU_OVERRIDE_PENALTY
         }
 
-        score += weatherPropertyAdjustment(
+        val weatherAdj = weatherPropertyAdjustment(
             suggestion = suggestion,
             weather = weather,
             recentPrecipInches = recentPrecipInches,
             property = property
         )
+        score += weatherAdj
+
+        if (AppConfig.Routing.DEBUG_SCORING_ENABLED) {
+            Log.d(
+                "RoutingScore",
+                "${suggestion.client.name}: dist=%+.0f mow=%+.0f overdue=%+.0f dir=%+.0f cu=%+.0f wx=%+.0f total=%+.0f".format(
+                    distAdj, mowAdj, overdueAdj, dirAdj, cuAdj, weatherAdj, score
+                )
+            )
+        }
 
         return score
     }
@@ -490,6 +511,17 @@ class RoutingEngine {
             ServiceType.INCIDENTAL -> AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY + 20.0
             else -> AppConfig.Routing.WEATHER_RAIN_SERVICE_PENALTY
         }
+    }
+
+    private fun propertyCompletionPct(property: ClientProperty?): Int {
+        if (property == null) return 0
+        val total = 4
+        var filled = 0
+        if (property.sunShade != SunShade.UNKNOWN) filled++
+        if (property.windExposure != WindExposure.UNKNOWN) filled++
+        if (property.hasSteepSlopes) filled++
+        if (property.hasIrrigation) filled++
+        return (filled * 100) / total
     }
 
     private fun mowWindowAdjustment(today: Int, mowDay: Int): Double {

@@ -18,7 +18,6 @@ import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
-import kotlin.math.abs
 import kotlin.math.ceil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,7 +78,10 @@ class WeeklyPlannerUseCase(
         }
 
         val targetPerDay = ceil(eligibleSuggestions.size.toDouble() / workDays.size.toDouble()).toInt().coerceAtLeast(1)
-        val softCap = targetPerDay + 2
+        val softCap = minOf(targetPerDay + 2, AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY)
+
+        // Track accumulated sq ft per day for the sq-ft hard cap.
+        val sqFtPerDay = mutableMapOf<PlannedDayBuilder, Int>()
 
         val sortedClients = eligibleSuggestions.sortedWith(
             compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
@@ -89,20 +91,53 @@ class WeeklyPlannerUseCase(
         var assignedCount = 0
 
         for (suggestion in sortedClients) {
+            val clientLat = suggestion.client.latitude
+            val clientLng = suggestion.client.longitude
+            val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
+
             val dayFitness = workDays.map { day ->
                 val (fitnessScore, reason) = scoreClientDayFitness(
                     client = suggestion.client,
                     property = suggestion.client.property,
                     forecast = day.forecast,
-                    dayOfWeek = day.dayOfWeek
+                    dayOfWeek = day.dayOfWeek,
+                    eligibleSteps = suggestion.eligibleSteps
                 )
-                DayFitness(day, fitnessScore, reason)
+                // Geographic affinity: bonus when this day already has nearby clients.
+                // Score += up to GEO_AFFINITY_MAX_BONUS scaled by proximity of the closest
+                // already-assigned geocoded client on this day.
+                val geoBonus = if (clientLat != null && clientLng != null && day.clients.isNotEmpty()) {
+                    val minDist = day.clients
+                        .mapNotNull { pc ->
+                            val pcLat = pc.client.latitude ?: return@mapNotNull null
+                            val pcLng = pc.client.longitude ?: return@mapNotNull null
+                            routingEngine.distanceMilesBetween(clientLat, clientLng, pcLat, pcLng)
+                        }
+                        .minOrNull()
+                    if (minDist != null && minDist < AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES) {
+                        val fraction = 1.0 - (minDist / AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES)
+                        (fraction * AppConfig.WeeklyPlanner.GEO_AFFINITY_MAX_BONUS).toInt()
+                    } else 0
+                } else 0
+
+                DayFitness(day, fitnessScore + geoBonus, reason)
             }
 
             val best = dayFitness
-                .filter { it.day.clients.size < softCap }
+                .filter { fitness ->
+                    val d = fitness.day
+                    if (d.clients.size >= AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY) return@filter false
+                    if (d.clients.size >= softCap) return@filter false
+                    if (clientSqFt != null) {
+                        val dayTotal = sqFtPerDay.getOrDefault(d, 0)
+                        if (dayTotal + clientSqFt > AppConfig.WeeklyPlanner.MAX_SQFT_PER_DAY) return@filter false
+                    }
+                    true
+                }
                 .maxByOrNull { it.score }
-                ?: dayFitness.minByOrNull { it.day.clients.size }
+                ?: dayFitness
+                    .filter { it.day.clients.size < AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY }
+                    .minByOrNull { it.day.clients.size }
 
             if (best != null) {
                 best.day.clients += PlannedClient(
@@ -113,12 +148,21 @@ class WeeklyPlannerUseCase(
                     eligibleSteps = suggestion.eligibleSteps,
                     daysOverdue = suggestion.daysSinceLast
                 )
+                if (clientSqFt != null) {
+                    sqFtPerDay[best.day] = sqFtPerDay.getOrDefault(best.day, 0) + clientSqFt
+                }
                 assignedCount++
             }
         }
 
+        // Sort each work day's clients into nearest-neighbour route order starting from the shop.
         dayBuilders.forEach { day ->
-            day.clients.sortByDescending { client -> client.fitnessScore }
+            if (day.clients.size > 1) {
+                day.clients.replaceAll { it }  // no-op to keep mutable
+                val ordered = nearestNeighbourOrder(day.clients, lat, lng)
+                day.clients.clear()
+                day.clients.addAll(ordered)
+            }
         }
 
         WeekPlan(
@@ -217,7 +261,8 @@ class WeeklyPlannerUseCase(
         client: Client,
         property: ClientProperty?,
         forecast: ForecastDay,
-        dayOfWeek: Int
+        dayOfWeek: Int,
+        eligibleSteps: Set<ServiceType> = emptySet()
     ): Pair<Int, String> {
         if (property == null) {
             return 50 to "No property data — neutral fit"
@@ -225,6 +270,21 @@ class WeeklyPlannerUseCase(
 
         var score = 50
         val reasons = mutableListOf<String>()
+
+        // Liquid steps (2 & 5) must not be rained on — penalise if rain is likely.
+        // Exception: when a granular step (1, 3, 4, 6) is selected alongside a liquid step,
+        // granular rain logic takes precedence and the liquid penalty is suppressed.
+        val hasLiquidStep = eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.LIQUID_STEPS }
+        val hasGranularStep = eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+        if (hasLiquidStep && !hasGranularStep &&
+            forecast.precipProbabilityPct >= AppConfig.WeeklyPlanner.LIQUID_STEP_RAIN_PENALTY_PCT
+        ) {
+            score -= AppConfig.WeeklyPlanner.LIQUID_STEP_RAIN_PENALTY
+            val stepLabels = eligibleSteps
+                .filter { it.stepNumber in AppConfig.WeeklyPlanner.LIQUID_STEPS }
+                .joinToString("/") { "Step ${it.stepNumber}" }
+            reasons += "$stepLabels liquid — rain risk (${forecast.precipProbabilityPct}%)"
+        }
 
         val wind = forecast.windGustMph ?: forecast.windSpeedMph
         val isWindy = wind >= AppConfig.Routing.WEATHER_WIND_THRESHOLD_MPH
@@ -289,23 +349,48 @@ class WeeklyPlannerUseCase(
         }
 
         if (client.mowDayOfWeek in Calendar.SUNDAY..Calendar.SATURDAY) {
-            val dayDist = circularDayDistance(dayOfWeek, client.mowDayOfWeek)
-            when (dayDist) {
+            // daysSinceMow: how many days have passed since the last mow (0 = mow day, 1 = day after, …6 = day before next mow)
+            val daysSinceMow = ((dayOfWeek - client.mowDayOfWeek + 7) % 7)
+            val rainExpected = forecast.precipProbabilityPct >= AppConfig.WeeklyPlanner.PRECIP_MODERATE_PCT
+            when (daysSinceMow) {
                 0 -> {
                     score -= 20
-                    reasons += "Mow day — may be freshly cut"
+                    reasons += "Mow day — freshly cut"
                 }
-                1 -> score -= 5
-                2, 3 -> score += 5
+                1 -> {
+                    // Day after mow: grass still very short
+                    score -= 10
+                    reasons += "Day after mow — grass short"
+                }
+                2 -> {
+                    score += 5
+                    reasons += "2 days after mow — growing"
+                }
+                3 -> {
+                    score += 10
+                    reasons += "3 days after mow — good growth"
+                }
+                4 -> {
+                    score += 15
+                    reasons += "4 days after mow — ideal"
+                }
+                5 -> {
+                    score += 20
+                    reasons += "5 days after mow — ideal"
+                }
+                6 -> {
+                    // Day before next mow: grass may be shaggy but treatment still worthwhile if rain is coming
+                    if (!rainExpected) {
+                        score -= 20
+                        reasons += "Day before mow — treatment may be mown off soon"
+                    } else {
+                        reasons += "Day before mow — rain expected, treatment OK"
+                    }
+                }
             }
         }
 
         return score.coerceIn(0, 100) to (reasons.firstOrNull() ?: "Standard fit")
-    }
-
-    private fun circularDayDistance(dayA: Int, dayB: Int): Int {
-        val direct = abs(dayA - dayB)
-        return minOf(direct, 7 - direct)
     }
 
     private fun fitnessScoreToLabel(score: Int): FitnessLabel = when {
@@ -320,5 +405,35 @@ class WeeklyPlannerUseCase(
         val calendar = Calendar.getInstance()
         calendar.timeInMillis = dateMillis
         return calendar.get(Calendar.DAY_OF_WEEK)
+    }
+
+    /**
+     * Greedy nearest-neighbour ordering starting from [startLat]/[startLng] (typically the shop).
+     * Clients without coordinates are appended at the end in their original order.
+     */
+    private fun nearestNeighbourOrder(
+        clients: List<PlannedClient>,
+        startLat: Double,
+        startLng: Double
+    ): List<PlannedClient> {
+        val geocoded = clients.filter { it.client.latitude != null && it.client.longitude != null }.toMutableList()
+        val ungeocoded = clients.filter { it.client.latitude == null || it.client.longitude == null }
+
+        val result = mutableListOf<PlannedClient>()
+        var curLat = startLat
+        var curLng = startLng
+
+        while (geocoded.isNotEmpty()) {
+            val nearest = geocoded.minByOrNull { pc ->
+                routingEngine.distanceMilesBetween(curLat, curLng, pc.client.latitude!!, pc.client.longitude!!)
+            }!!
+            result += nearest
+            geocoded -= nearest
+            curLat = nearest.client.latitude!!
+            curLng = nearest.client.longitude!!
+        }
+
+        result.addAll(ungeocoded)
+        return result
     }
 }

@@ -105,4 +105,6 @@ sealed interface MainEvent {
     data class EditClientNotes(val clientId: String, val clientName: String, val currentNotes: String) : MainEvent
     /** Emitted after a successful sheet sync so the UI can auto-refresh suggestions. */
     data object SyncComplete : MainEvent
+    /** Nudge user to enter property data for a client with incomplete stats. */
+    data class PropertyNudge(val clientId: String, val clientName: String) : MainEvent
 }

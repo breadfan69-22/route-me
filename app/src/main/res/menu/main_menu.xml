@@ -29,6 +29,11 @@
         app:showAsAction="never" />
 
     <item
+        android:id="@+id/action_weekly_planner"
+        android:title="@string/menu_weekly_planner"
+        app:showAsAction="never" />
+
+    <item
         android:id="@+id/action_clear_skips"
         android:title="@string/menu_clear_skips"
         app:showAsAction="never" />

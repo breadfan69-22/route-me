@@ -33,8 +33,9 @@ object GoogleSheetsSync {
         longitudeKeys = listOf("lng"),
         lawnSizeKeys = listOf("lawn size", "lawnsize", "lawn_size", "sqft"),
         sunShadeKeys = listOf("sun/shade", "sun shade", "sunshade", "sun_shade"),
-        terrainKeys = listOf("terrain", "slope", "slopes"),
+        terrainKeys = listOf("terrain", "slope", "slopes", "steep_slopes", "steepslopes", "steep slopes"),
         windExposureKeys = listOf("wind exposure", "windexposure", "wind_exposure"),
+        irrigationKeys = listOf("irrigation", "irrigated", "has_irrigation"),
         parseEmbeddedStepDate = true,
         skipStatusKeywordsInStepDate = true
     )

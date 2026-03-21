@@ -340,6 +340,13 @@ class MainViewModel(
             }
         }
 
+        if (com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+            val propResult = runCatching { syncSettingsUseCase.syncPropertyDataFromSheet() }.getOrNull()
+            if (propResult != null && propResult.updated > 0) {
+                android.util.Log.d("MainViewModel", propResult.message)
+            }
+        }
+
         return SyncPostActions(
             shouldEmitSyncComplete = true,
             shouldAutoGeocode = result.shouldAutoGeocode
@@ -1510,6 +1517,7 @@ class MainViewModel(
         emitConfirmSelectedPrimaryStatus(result)
         emitConfirmSelectedEvents(result)
         emitConfirmSelectedSheetFeedback(result)
+        emitPropertyNudgeIfNeeded(result.selectedClient)
 
         onSuccess?.invoke()
     }
@@ -1561,6 +1569,22 @@ class MainViewModel(
         }
         result.sheetStatusMessage?.let { message ->
             setStatus(message)
+        }
+    }
+
+    private suspend fun emitPropertyNudgeIfNeeded(client: Client) {
+        val prop = client.property ?: run {
+            _events.emit(MainEvent.PropertyNudge(client.id, client.name))
+            return
+        }
+        val filledCount = listOf(
+            prop.sunShade != com.routeme.app.SunShade.UNKNOWN,
+            prop.windExposure != com.routeme.app.WindExposure.UNKNOWN,
+            prop.hasSteepSlopes,
+            prop.hasIrrigation
+        ).count { it }
+        if (filledCount <= 1) {
+            _events.emit(MainEvent.PropertyNudge(client.id, client.name))
         }
     }
 

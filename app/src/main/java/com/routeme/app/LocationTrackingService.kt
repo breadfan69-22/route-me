@@ -218,6 +218,7 @@ class LocationTrackingService : Service(), KoinComponent {
         trackedClients = runCatching { clientRepository.loadAllClients() }
             .onFailure { Log.w(TAG, "Failed to load tracked clients: ${it.message}") }
             .getOrDefault(emptyList())
+            .filter { it.subscribedSteps.isNotEmpty() || it.hasGrub }
         Log.d(TAG, "Tracking service loaded ${trackedClients.size} clients")
     }
 

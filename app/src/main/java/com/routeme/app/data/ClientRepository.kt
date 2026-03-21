@@ -29,6 +29,9 @@ import com.routeme.app.toDomain
 import com.routeme.app.toEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class ClientRepository(
     private val appContext: Context,
@@ -170,6 +173,8 @@ class ClientRepository(
                     existing?.windExposure ?: ""
                 }
                 val mergedTerrain = client.terrain.ifBlank { existing?.terrain.orEmpty() }
+                // irrigation is transient on Client (not stored in clients table) — keep import value
+                val mergedIrrigation = client.irrigation
 
                 if (client.latitude == null || client.longitude == null) {
                     val saved = existingCoords[client.name.lowercase()]
@@ -180,14 +185,16 @@ class ClientRepository(
                             lawnSizeSqFt = mergedLawnSize,
                             sunShade = mergedSunShade,
                             windExposure = mergedWindExposure,
-                            terrain = mergedTerrain
+                            terrain = mergedTerrain,
+                            irrigation = mergedIrrigation
                         )
                     } else {
                         client.copy(
                             lawnSizeSqFt = mergedLawnSize,
                             sunShade = mergedSunShade,
                             windExposure = mergedWindExposure,
-                            terrain = mergedTerrain
+                            terrain = mergedTerrain,
+                            irrigation = mergedIrrigation
                         )
                     }
                 } else {
@@ -195,7 +202,8 @@ class ClientRepository(
                         lawnSizeSqFt = mergedLawnSize,
                         sunShade = mergedSunShade,
                         windExposure = mergedWindExposure,
-                        terrain = mergedTerrain
+                        terrain = mergedTerrain,
+                        irrigation = mergedIrrigation
                     )
                 }
             }
@@ -443,12 +451,14 @@ class ClientRepository(
             val importedSunShade = SunShade.fromStorage(client.sunShade)
             val importedWindExposure = WindExposure.fromStorage(client.windExposure)
             val hasImportedTerrain = client.terrain.isNotBlank()
+            val importedIrrigation = parseYesNo(client.irrigation)
 
             val hasImportData =
                 importedLawnSize != null ||
                     importedSunShade != SunShade.UNKNOWN ||
                     importedWindExposure != WindExposure.UNKNOWN ||
-                    hasImportedTerrain
+                    hasImportedTerrain ||
+                    importedIrrigation != null
 
             if (!hasImportData && existing == null) {
                 return@mapNotNull null
@@ -472,7 +482,7 @@ class ClientRepository(
                 } else {
                     existing?.hasSteepSlopes ?: false
                 },
-                hasIrrigation = existing?.hasIrrigation ?: false,
+                hasIrrigation = importedIrrigation ?: existing?.hasIrrigation ?: false,
                 propertyNotes = existing?.propertyNotes ?: "",
                 updatedAtMillis = now
             )
@@ -539,6 +549,129 @@ class ClientRepository(
 
     companion object {
         private val WHITESPACE_REGEX = "\\s+".toRegex()
+    }
+
+    data class PropertySyncResult(val updated: Int, val message: String)
+
+    /**
+     * Fetches all rows from the property sheet Apps Script (`?action=exportAll`)
+     * and upserts into client_properties, only overwriting UNKNOWN/empty fields.
+     */
+    suspend fun syncPropertyDataFromSheet(propertyUrl: String): PropertySyncResult = withContext(Dispatchers.IO) {
+        val exportUrl = if (propertyUrl.contains('?')) {
+            "$propertyUrl&action=exportAll"
+        } else {
+            "$propertyUrl?action=exportAll"
+        }
+
+        val json = try {
+            fetchJsonGet(exportUrl)
+        } catch (e: Exception) {
+            return@withContext PropertySyncResult(0, "Property sheet fetch failed: ${e.message}")
+        }
+
+        val status = json.optString("status")
+        if (status != "ok") {
+            return@withContext PropertySyncResult(0, "Property sheet error: ${json.optString("message")}")
+        }
+
+        val rows = json.optJSONArray("rows")
+        if (rows == null || rows.length() == 0) {
+            return@withContext PropertySyncResult(0, "Property sheet returned 0 rows.")
+        }
+
+        val allClients = clientDao.getAllClients()
+        val clientsByName = allClients.associateBy { it.name.lowercase().trim() }
+
+        var updatedCount = 0
+        val now = System.currentTimeMillis()
+
+        for (i in 0 until rows.length()) {
+            val row = rows.optJSONObject(i) ?: continue
+            val name = row.optString("Client Name", "").trim()
+            if (name.isBlank()) continue
+
+            val entity = clientsByName[name.lowercase()] ?: continue
+            val clientId = entity.id
+            val existing = clientPropertyDao.getPropertyForClient(clientId)
+
+            val sheetSunShade = SunShade.fromStorage(
+                row.optString("Sun/Shade", "")
+            )
+            val sheetWindExposure = WindExposure.fromStorage(
+                row.optString("Wind Exposure", "")
+            )
+            val sheetSteepSlopes = parseYesNo(row.optString("Steep Slopes", ""))
+            val sheetIrrigation = parseYesNo(row.optString("Irrigation", ""))
+            val sheetLawnSize = row.optString("Lawn Size", "")
+                .replace(",", "").trim().toIntOrNull()?.takeIf { it > 0 }
+
+            val effectiveSunShade = if (existing?.sunShade != null && SunShade.fromStorage(existing.sunShade) != SunShade.UNKNOWN)
+                existing.sunShade
+            else if (sheetSunShade != SunShade.UNKNOWN) sheetSunShade.name
+            else existing?.sunShade ?: SunShade.UNKNOWN.name
+
+            val effectiveWindExposure = if (existing?.windExposure != null && WindExposure.fromStorage(existing.windExposure) != WindExposure.UNKNOWN)
+                existing.windExposure
+            else if (sheetWindExposure != WindExposure.UNKNOWN) sheetWindExposure.name
+            else existing?.windExposure ?: WindExposure.UNKNOWN.name
+
+            val effectiveSteepSlopes = existing?.hasSteepSlopes?.takeIf { it }
+                ?: sheetSteepSlopes
+                ?: existing?.hasSteepSlopes
+                ?: false
+
+            val effectiveIrrigation = existing?.hasIrrigation?.takeIf { it }
+                ?: sheetIrrigation
+                ?: existing?.hasIrrigation
+                ?: false
+
+            val effectiveLawnSize = if ((existing?.lawnSizeSqFt ?: 0) > 0)
+                existing!!.lawnSizeSqFt
+            else sheetLawnSize ?: existing?.lawnSizeSqFt ?: 0
+
+            clientPropertyDao.upsertProperty(
+                ClientPropertyEntity(
+                    clientId = clientId,
+                    lawnSizeSqFt = effectiveLawnSize,
+                    sunShade = effectiveSunShade,
+                    windExposure = effectiveWindExposure,
+                    hasSteepSlopes = effectiveSteepSlopes,
+                    hasIrrigation = effectiveIrrigation,
+                    propertyNotes = existing?.propertyNotes ?: "",
+                    updatedAtMillis = now
+                )
+            )
+            updatedCount++
+        }
+
+        PropertySyncResult(updatedCount, "Property sheet: $updatedCount client(s) updated.")
+    }
+
+    private fun fetchJsonGet(urlString: String): JSONObject {
+        var currentUrl = urlString
+        for (i in 0 until 5) {
+            val conn = URL(currentUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 15_000
+            conn.requestMethod = "GET"
+            conn.instanceFollowRedirects = false
+
+            val code = conn.responseCode
+            if (code in 301..303 || code == 307 || code == 308) {
+                currentUrl = conn.getHeaderField("Location") ?: break
+                conn.disconnect()
+                continue
+            }
+            if (code != 200) {
+                conn.disconnect()
+                throw Exception("HTTP $code")
+            }
+            val body = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+            return JSONObject(body)
+        }
+        throw Exception("Too many redirects")
     }
 
     suspend fun fetchDrivingTimes(

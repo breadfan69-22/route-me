@@ -24,5 +24,7 @@ data class ClientSuggestion(
     var drivingDistance: String? = null,
     var weatherFitSummary: String? = null,
     /** Which of the active service types this client is actually due for. */
-    val eligibleSteps: Set<ServiceType> = emptySet()
+    val eligibleSteps: Set<ServiceType> = emptySet(),
+    /** Percentage of property stats fields filled (0–100). */
+    val propertyCompletionPct: Int = 0
 )
