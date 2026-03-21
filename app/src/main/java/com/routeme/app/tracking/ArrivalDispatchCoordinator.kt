@@ -71,6 +71,7 @@ class ArrivalDispatchCoordinator(
             location = location,
             trackedClients = trackedClients,
             arrivalRadiusMeters = arrivalRadiusMeters,
+            clusterRadiusMeters = clusterRadiusMeters,
             dwellThresholdMs = dwellThresholdMs,
             nowMillis = now
         )

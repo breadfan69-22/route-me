@@ -72,6 +72,9 @@ class ArrivalDispatchCoordinatorTest {
         nowMillis = 66_000L
         coordinator.onLocationTick(far, listOf(client))
 
+        nowMillis = 86_000L
+        coordinator.onLocationTick(far, listOf(client))
+
         val expectedArrivalNotifId = 2_000 + client.id.hashCode()
         assertTrue(canceledNotifications.contains(expectedArrivalNotifId))
 
@@ -141,6 +144,8 @@ class ArrivalDispatchCoordinatorTest {
         val location = mockk<Location>()
         every { location.latitude } returns lat
         every { location.longitude } returns lng
+        every { location.hasAccuracy() } returns false
+        every { location.accuracy } returns 0f
         return location
     }
 }

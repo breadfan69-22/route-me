@@ -1103,12 +1103,29 @@ class MainActivity : AppCompatActivity() {
             onConfirmSelection = { selected ->
                 if (selected.isNotEmpty()) {
                     viewModel.confirmClusterService(selected)
+                    if (com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+                        showNextClusterPropertyDialog(selected, 0)
+                    }
                 }
                 for (member in members) {
                     trackingUiController.dismissNotification(3000 + member.client.id.hashCode())
                 }
                 trackingUiController.dismissNotification(4000 + members.hashCode())
             }
+        )
+    }
+
+    private fun showNextClusterPropertyDialog(members: List<ClusterMember>, index: Int) {
+        if (index >= members.size) return
+        val member = members[index]
+        DialogFactory.showPropertyStatsDialog(
+            context = this,
+            clientName = member.client.name,
+            onSave = { property ->
+                viewModel.writePropertyStats(member.client.name, property)
+                showNextClusterPropertyDialog(members, index + 1)
+            },
+            onSkip = { showNextClusterPropertyDialog(members, index + 1) }
         )
     }
 

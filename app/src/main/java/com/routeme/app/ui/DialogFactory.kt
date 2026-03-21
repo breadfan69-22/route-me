@@ -530,7 +530,8 @@ object DialogFactory {
     fun showPropertyStatsDialog(
         context: Context,
         clientName: String,
-        onSave: (PropertyInput) -> Unit
+        onSave: (PropertyInput) -> Unit,
+        onSkip: (() -> Unit)? = null
     ) {
         val density = context.resources.displayMetrics.density
         val pad = (16 * density).toInt()
@@ -588,7 +589,7 @@ object DialogFactory {
                 )
                 if (property.hasAnyData) onSave(property)
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(if (onSkip != null) "Skip" else "Cancel") { _, _ -> onSkip?.invoke() }
             .show()
     }
 

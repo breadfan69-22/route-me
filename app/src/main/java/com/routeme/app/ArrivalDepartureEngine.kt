@@ -9,6 +9,10 @@ class ArrivalDepartureEngine(
         results[0]
     }
 ) {
+    companion object {
+        private const val DEPARTURE_CONFIRM_MS = 20_000L
+    }
+
 
     data class ArrivalPrompt(
         val client: Client,
@@ -32,7 +36,8 @@ class ArrivalDepartureEngine(
         val client: Client,
         val arrivedAtMillis: Long,
         val location: Location,
-        var completionNotified: Boolean = false
+        var completionNotified: Boolean = false,
+        var outOfRangeSinceMillis: Long? = null
     )
 
     private var dwellClientId: String? = null
@@ -53,6 +58,7 @@ class ArrivalDepartureEngine(
         location: Location,
         trackedClients: List<Client>,
         arrivalRadiusMeters: Float,
+        clusterRadiusMeters: Float,
         dwellThresholdMs: Long,
         nowMillis: Long
     ): ArrivalPrompt? {
@@ -67,6 +73,12 @@ class ArrivalDepartureEngine(
                 dwellStartTime = 0L
                 return null
             }
+
+        if (hasNearbyActiveArrival(nearestClient, clusterRadiusMeters)) {
+            dwellClientId = null
+            dwellStartTime = 0L
+            return null
+        }
 
         if (dwellClientId == nearestClient.id) {
             val dwelled = nowMillis - dwellStartTime
@@ -87,6 +99,25 @@ class ArrivalDepartureEngine(
         return null
     }
 
+    private fun hasNearbyActiveArrival(candidate: Client, clusterRadiusMeters: Float): Boolean {
+        if (activeArrivals.isEmpty()) return false
+        if (activeArrivals.containsKey(candidate.id)) return false
+
+        val candidateLat = candidate.latitude ?: return false
+        val candidateLng = candidate.longitude ?: return false
+
+        for (activeState in activeArrivals.values) {
+            val activeLat = activeState.client.latitude ?: continue
+            val activeLng = activeState.client.longitude ?: continue
+            val distance = distanceCalculator(candidateLat, candidateLng, activeLat, activeLng)
+            if (distance <= clusterRadiusMeters) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     fun evaluateDepartures(
         location: Location,
         trackedClients: List<Client>,
@@ -102,8 +133,23 @@ class ArrivalDepartureEngine(
             val lat = state.client.latitude ?: continue
             val lng = state.client.longitude ?: continue
             val dist = distanceCalculator(location.latitude, location.longitude, lat, lng)
+            val effectiveOnSiteRadius = if (location.hasAccuracy()) {
+                onSiteRadiusMeters + location.accuracy
+            } else {
+                onSiteRadiusMeters
+            }
 
-            if (dist > onSiteRadiusMeters) {
+            if (dist > effectiveOnSiteRadius) {
+                val outOfRangeSince = state.outOfRangeSinceMillis
+                if (outOfRangeSince == null) {
+                    state.outOfRangeSinceMillis = nowMillis
+                    continue
+                }
+
+                if (nowMillis - outOfRangeSince < DEPARTURE_CONFIRM_MS) {
+                    continue
+                }
+
                 val stillInCluster = ClientProximityHelper.isInCluster(
                     departingClient = state.client,
                     location = location,
@@ -129,6 +175,8 @@ class ArrivalDepartureEngine(
                 }
 
                 departed.add(clientId)
+            } else {
+                state.outOfRangeSinceMillis = null
             }
         }
 

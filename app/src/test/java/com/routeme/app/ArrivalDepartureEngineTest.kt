@@ -22,6 +22,7 @@ class ArrivalDepartureEngineTest {
             location = here,
             trackedClients = listOf(client),
             arrivalRadiusMeters = 60f,
+            clusterRadiusMeters = 200f,
             dwellThresholdMs = 60_000L,
             nowMillis = 1_000L
         )
@@ -31,6 +32,7 @@ class ArrivalDepartureEngineTest {
             location = here,
             trackedClients = listOf(client),
             arrivalRadiusMeters = 60f,
+            clusterRadiusMeters = 200f,
             dwellThresholdMs = 60_000L,
             nowMillis = 61_000L
         )
@@ -44,6 +46,7 @@ class ArrivalDepartureEngineTest {
             location = here,
             trackedClients = listOf(client),
             arrivalRadiusMeters = 60f,
+            clusterRadiusMeters = 200f,
             dwellThresholdMs = 60_000L,
             nowMillis = 121_000L
         )
@@ -58,8 +61,20 @@ class ArrivalDepartureEngineTest {
         val far = location(42.005, -85.0)
 
         // arm dwell then trigger arrival
-        engine.evaluateArrival(here, listOf(client), 60f, 1_000L, 1_000L)
-        engine.evaluateArrival(here, listOf(client), 60f, 1_000L, 2_100L)
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 1_000L, 1_000L)
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 1_000L, 2_100L)
+
+        val firstEval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = listOf(client),
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 3 * 60 * 1000L,
+            nowMillis = 3 * 60 * 1000L + 2_100L
+        )
+
+        assertTrue(firstEval.departedClientIds.isEmpty())
+        assertTrue(firstEval.completionCandidates.isEmpty())
 
         val eval = engine.evaluateDepartures(
             location = far,
@@ -67,7 +82,7 @@ class ArrivalDepartureEngineTest {
             onSiteRadiusMeters = 150f,
             clusterRadiusMeters = 200f,
             jobMinDurationMs = 3 * 60 * 1000L,
-            nowMillis = 3 * 60 * 1000L + 2_100L
+            nowMillis = 3 * 60 * 1000L + 22_100L
         )
 
         assertEquals(listOf("c1"), eval.departedClientIds)
@@ -87,11 +102,12 @@ class ArrivalDepartureEngineTest {
         val atB = location(42.0003, -85.0)
 
         // Activate A
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
-        // Activate B
-        engine.evaluateArrival(atB, tracked, 60f, 500L, 2_000L)
-        engine.evaluateArrival(atB, tracked, 60f, 500L, 2_600L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_600L)
+        // B arrival should be suppressed while A is active and nearby
+        engine.evaluateArrival(atB, tracked, 60f, 200f, 500L, 2_000L)
+        val bPrompt = engine.evaluateArrival(atB, tracked, 60f, 200f, 500L, 2_600L)
+        assertNull(bPrompt)
 
         // User is near B and far from A: A should not depart due cluster rule (B active + adjacent)
         val eval = engine.evaluateDepartures(
@@ -118,8 +134,20 @@ class ArrivalDepartureEngineTest {
         val far = location(42.005, -85.0)    // drove away from both
 
         // Only A gets an arrival
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_600L)
+
+        val firstEval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        assertTrue(firstEval.departedClientIds.isEmpty())
+        assertTrue(firstEval.completionCandidates.isEmpty())
 
         val eval = engine.evaluateDepartures(
             location = far,
@@ -127,7 +155,7 @@ class ArrivalDepartureEngineTest {
             onSiteRadiusMeters = 150f,
             clusterRadiusMeters = 200f,
             jobMinDurationMs = 1_000L,
-            nowMillis = 10_000L
+            nowMillis = 31_000L
         )
 
         // Both A and B should appear so the user can confirm or uncheck B
@@ -151,8 +179,20 @@ class ArrivalDepartureEngineTest {
         val far = location(42.008, -85.0)    // ~888m from A, ~333m from B
 
         // Only A gets an arrival
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_600L)
+
+        val firstEval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        assertTrue(firstEval.departedClientIds.isEmpty())
+        assertTrue(firstEval.completionCandidates.isEmpty())
 
         val eval = engine.evaluateDepartures(
             location = far,
@@ -160,7 +200,7 @@ class ArrivalDepartureEngineTest {
             onSiteRadiusMeters = 150f,
             clusterRadiusMeters = 200f,
             jobMinDurationMs = 1_000L,
-            nowMillis = 10_000L
+            nowMillis = 31_000L
         )
 
         // B is too far from A to be pulled in by cluster expansion
@@ -181,8 +221,20 @@ class ArrivalDepartureEngineTest {
         val far = location(42.005, -85.0)    // drove away from both
 
         // Only A gets an arrival (corner lot client had no GPS dwell)
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_000L)
-        engine.evaluateArrival(atA, tracked, 60f, 500L, 1_600L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_000L)
+        engine.evaluateArrival(atA, tracked, 60f, 200f, 500L, 1_600L)
+
+        val firstEval = engine.evaluateDepartures(
+            location = far,
+            trackedClients = tracked,
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 10_000L
+        )
+
+        assertTrue(firstEval.departedClientIds.isEmpty())
+        assertTrue(firstEval.completionCandidates.isEmpty())
 
         val eval = engine.evaluateDepartures(
             location = far,
@@ -190,7 +242,7 @@ class ArrivalDepartureEngineTest {
             onSiteRadiusMeters = 150f,
             clusterRadiusMeters = 200f,
             jobMinDurationMs = 1_000L,
-            nowMillis = 10_000L
+            nowMillis = 31_000L
         )
 
         // Corner-lot neighbor should be included despite different street name
@@ -206,13 +258,47 @@ class ArrivalDepartureEngineTest {
         val client = client("c1", 42.0, -85.0)
         val here = location(42.0, -85.0)
 
-        engine.evaluateArrival(here, listOf(client), 60f, 1_000L, 1_000L)
-        engine.evaluateArrival(here, listOf(client), 60f, 1_000L, 2_100L)
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 1_000L, 1_000L)
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 1_000L, 2_100L)
         assertTrue(engine.hasActiveArrivals())
 
         engine.reset()
         assertFalse(engine.hasActiveArrivals())
         assertTrue(engine.activeArrivalClientIds().isEmpty())
+    }
+
+    @Test
+    fun `transient out-of-range blip does not clear active arrival`() {
+        val engine = newEngine()
+        val client = client("c1", 42.0, -85.0)
+        val near = location(42.0, -85.0)
+        val farBlip = location(42.005, -85.0)
+
+        engine.evaluateArrival(near, listOf(client), 60f, 200f, 1_000L, 1_000L)
+        engine.evaluateArrival(near, listOf(client), 60f, 200f, 1_000L, 2_100L)
+        assertTrue(engine.hasActiveArrivals())
+
+        val blipEval = engine.evaluateDepartures(
+            location = farBlip,
+            trackedClients = listOf(client),
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 5_000L
+        )
+        assertTrue(blipEval.departedClientIds.isEmpty())
+        assertTrue(engine.hasActiveArrivals())
+
+        val recoveredEval = engine.evaluateDepartures(
+            location = near,
+            trackedClients = listOf(client),
+            onSiteRadiusMeters = 150f,
+            clusterRadiusMeters = 200f,
+            jobMinDurationMs = 1_000L,
+            nowMillis = 8_000L
+        )
+        assertTrue(recoveredEval.departedClientIds.isEmpty())
+        assertTrue(engine.hasActiveArrivals())
     }
 
     private fun newEngine(): ArrivalDepartureEngine {
@@ -243,6 +329,8 @@ class ArrivalDepartureEngineTest {
         val location = mockk<Location>()
         every { location.latitude } returns lat
         every { location.longitude } returns lng
+        every { location.hasAccuracy() } returns false
+        every { location.accuracy } returns 0f
         return location
     }
 
