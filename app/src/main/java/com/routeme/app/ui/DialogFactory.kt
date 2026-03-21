@@ -7,6 +7,8 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
@@ -16,8 +18,13 @@ import android.widget.Spinner
 import android.widget.TextView
 import com.google.android.material.button.MaterialButton
 import com.routeme.app.ClusterMember
+import com.routeme.app.PropertyInput
 import com.routeme.app.R
+import com.routeme.app.ServiceType
 import com.routeme.app.data.PreferencesRepository
+import com.routeme.app.estimateGranularSqFt
+import com.routeme.app.estimateSpraySqFt
+import com.routeme.app.isSpray
 import java.util.Calendar
 
 object DialogFactory {
@@ -360,11 +367,13 @@ object DialogFactory {
         clientName: String,
         details: String,
         arrivalActive: Boolean,
+        serviceTypes: Set<ServiceType>,
+        granularRate: Double,
         onArrive: () -> Unit,
         onCancelArrival: () -> Unit,
         onMaps: () -> Unit,
         onSkip: () -> Unit,
-        onConfirm: (notes: String) -> Unit,
+        onConfirm: (notes: String, amountUsed: Double?, amountUsed2: Double?, property: PropertyInput) -> Unit,
         onEditNotes: () -> Unit
     ) {
         val view = android.view.LayoutInflater.from(context)
@@ -381,15 +390,93 @@ object DialogFactory {
         val editNotesBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogEditNotesButton)
         val propertyBtn = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.dialogPropertyButton)
 
+        // Consumable fields
+        val consumableSection = view.findViewById<LinearLayout>(R.id.dialogConsumableSection)
+        val amount1Layout = view.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.dialogAmount1Layout)
+        val amount1Input = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.dialogAmount1Input)
+        val amount2Layout = view.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.dialogAmount2Layout)
+        val amount2Input = view.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.dialogAmount2Input)
+        val estSqFtLabel = view.findViewById<TextView>(R.id.dialogEstSqFtLabel)
+
+        // Property stat fields
+        val propertySection = view.findViewById<LinearLayout>(R.id.dialogPropertySection)
+        val sunShadeSpinner = view.findViewById<Spinner>(R.id.dialogSunShadeSpinner)
+        val windSpinner = view.findViewById<Spinner>(R.id.dialogWindSpinner)
+        val slopesSpinner = view.findViewById<Spinner>(R.id.dialogSteepSlopesSpinner)
+        val irrigationSpinner = view.findViewById<Spinner>(R.id.dialogIrrigationSpinner)
+
+        fun setupSpinner(spinner: Spinner, options: List<String>) {
+            spinner.adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, options).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+        }
+        setupSpinner(sunShadeSpinner, PropertyInput.SUN_SHADE_OPTIONS)
+        setupSpinner(windSpinner, PropertyInput.WIND_OPTIONS)
+        setupSpinner(slopesSpinner, PropertyInput.YES_NO_OPTIONS)
+        setupSpinner(irrigationSpinner, PropertyInput.YES_NO_OPTIONS)
+
         nameText.text = clientName
         detailsText.text = details
+
+        val primaryType = serviceTypes.firstOrNull() ?: ServiceType.ROUND_1
+        val isSprayer = primaryType.isSpray
+
+        fun updateSections(visible: Boolean) {
+            if (!visible) {
+                consumableSection.visibility = View.GONE
+                propertySection.visibility = View.GONE
+                return
+            }
+            // Consumable section
+            if (primaryType == ServiceType.INCIDENTAL) {
+                consumableSection.visibility = View.GONE
+            } else {
+                consumableSection.visibility = View.VISIBLE
+                if (isSprayer) {
+                    amount1Layout.hint = "Hose (gal)"
+                    amount2Layout.visibility = View.VISIBLE
+                    amount2Layout.hint = "PG (gal)"
+                } else {
+                    amount1Layout.hint = "Lbs used"
+                    amount2Layout.visibility = View.GONE
+                }
+            }
+            // Property section always visible during arrival
+            propertySection.visibility = View.VISIBLE
+        }
+
+        fun updateEstimate() {
+            val amt1 = amount1Input.text?.toString()?.toDoubleOrNull()
+            val amt2 = amount2Input.text?.toString()?.toDoubleOrNull()
+            val est = if (isSprayer) {
+                estimateSpraySqFt(amt1, amt2)
+            } else {
+                estimateGranularSqFt(amt1, granularRate)
+            }
+            if (est != null) {
+                estSqFtLabel.text = "≈ %,d sqft".format(est)
+                estSqFtLabel.visibility = View.VISIBLE
+            } else {
+                estSqFtLabel.visibility = View.GONE
+            }
+        }
+
+        val amountWatcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) { updateEstimate() }
+        }
+        amount1Input.addTextChangedListener(amountWatcher)
+        amount2Input.addTextChangedListener(amountWatcher)
 
         if (arrivalActive) {
             arriveBtn.text = context.getString(R.string.dialog_cancel_arrival)
             notesLayout.visibility = View.VISIBLE
+            updateSections(true)
         } else {
             arriveBtn.text = context.getString(R.string.dialog_arrive)
             notesLayout.visibility = View.GONE
+            updateSections(false)
         }
 
         propertyBtn.isEnabled = false
@@ -404,10 +491,12 @@ object DialogFactory {
                 onCancelArrival()
                 arriveBtn.text = context.getString(R.string.dialog_arrive)
                 notesLayout.visibility = View.GONE
+                updateSections(false)
             } else {
                 onArrive()
                 arriveBtn.text = context.getString(R.string.dialog_cancel_arrival)
                 notesLayout.visibility = View.VISIBLE
+                updateSections(true)
             }
         }
         mapsBtn.setOnClickListener { doubleBuzz(context); onMaps(); dialog.dismiss() }
@@ -415,7 +504,15 @@ object DialogFactory {
         confirmBtn.setOnClickListener {
             doubleBuzz(context)
             val notes = notesInput.text?.toString().orEmpty()
-            onConfirm(notes)
+            val amt1 = amount1Input.text?.toString()?.toDoubleOrNull()
+            val amt2 = amount2Input.text?.toString()?.toDoubleOrNull()
+            val property = PropertyInput(
+                sunShade = sunShadeSpinner.selectedItem?.toString().orEmpty(),
+                windExposure = windSpinner.selectedItem?.toString().orEmpty(),
+                steepSlopes = slopesSpinner.selectedItem?.toString().orEmpty(),
+                irrigation = irrigationSpinner.selectedItem?.toString().orEmpty()
+            )
+            onConfirm(notes, amt1, amt2, property)
             dialog.dismiss()
         }
         editNotesBtn.setOnClickListener { doubleBuzz(context); onEditNotes(); dialog.dismiss() }
@@ -424,6 +521,138 @@ object DialogFactory {
         }
 
         dialog.show()
+    }
+
+    /**
+     * Standalone property-stats dialog launched from the notification action.
+     * Does NOT dismiss the "job done?" notification — caller decides that.
+     */
+    fun showPropertyStatsDialog(
+        context: Context,
+        clientName: String,
+        onSave: (PropertyInput) -> Unit
+    ) {
+        val density = context.resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+        }
+
+        fun addSpinnerRow(label: String, options: List<String>): android.widget.Spinner {
+            val row = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = (8 * density).toInt() }
+            }
+            val tv = android.widget.TextView(context).apply {
+                text = label
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+                )
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            val spinner = android.widget.Spinner(context).apply {
+                adapter = android.widget.ArrayAdapter(
+                    context,
+                    android.R.layout.simple_spinner_dropdown_item,
+                    options
+                )
+                layoutParams = LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f
+                )
+            }
+            row.addView(tv)
+            row.addView(spinner)
+            container.addView(row)
+            return spinner
+        }
+
+        val sunShadeSpinner = addSpinnerRow("Sun/Shade", PropertyInput.SUN_SHADE_OPTIONS)
+        val windSpinner = addSpinnerRow("Wind", PropertyInput.WIND_OPTIONS)
+        val slopesSpinner = addSpinnerRow("Steep Slopes", PropertyInput.YES_NO_OPTIONS)
+        val irrigationSpinner = addSpinnerRow("Irrigation", PropertyInput.YES_NO_OPTIONS)
+
+        AlertDialog.Builder(context)
+            .setTitle("Property Stats — $clientName")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val property = PropertyInput(
+                    sunShade = sunShadeSpinner.selectedItem?.toString().orEmpty(),
+                    windExposure = windSpinner.selectedItem?.toString().orEmpty(),
+                    steepSlopes = slopesSpinner.selectedItem?.toString().orEmpty(),
+                    irrigation = irrigationSpinner.selectedItem?.toString().orEmpty()
+                )
+                if (property.hasAnyData) onSave(property)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    fun showApplicationRatesDialog(
+        context: Context,
+        preferencesRepository: PreferencesRepository,
+    ) {
+        // Only granular (non-spray) steps need configurable rates.
+        // Spray steps (2, 5) have fixed rates: Hose = 1 gal/1000sqft, PG = 1 gal/5500sqft.
+        val granularSteps = listOf(
+            ServiceType.ROUND_1, ServiceType.ROUND_3,
+            ServiceType.ROUND_4, ServiceType.ROUND_6, ServiceType.GRUB
+        )
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, 0)
+        }
+
+        val inputs = mutableListOf<Pair<ServiceType, EditText>>()
+
+        for (step in granularSteps) {
+            val current = preferencesRepository.getGranularRate(step)
+
+            val label = TextView(context).apply {
+                text = "${step.label} (lbs/1000sqft)"
+                textSize = 13f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            }
+            container.addView(label)
+
+            val input = EditText(context).apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                hint = "Rate"
+                textSize = 13f
+                if (current > 0.0) setText(current.toBigDecimal().stripTrailingZeros().toPlainString())
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+            container.addView(input)
+            inputs.add(step to input)
+        }
+
+        val note = TextView(context).apply {
+            text = "Spray steps (2 & 5) use fixed rates:\nHose = 1 gal/1,000 sqft, PG = 1 gal/5,500 sqft"
+            textSize = 12f
+            setPadding(0, (12 * context.resources.displayMetrics.density).toInt(), 0, 0)
+        }
+        container.addView(note)
+
+        androidx.appcompat.app.AlertDialog.Builder(context)
+            .setTitle("Granular Application Rates")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                for ((step, input) in inputs) {
+                    val rate = input.text.toString().toDoubleOrNull() ?: 0.0
+                    preferencesRepository.setGranularRate(step, rate)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
 }

@@ -48,4 +48,9 @@
         android:id="@+id/action_min_days"
         android:title="@string/menu_min_days"
         app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_app_rates"
+        android:title="Application Rates"
+        app:showAsAction="never" />
 </menu>

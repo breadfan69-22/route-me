@@ -27,7 +27,9 @@ fun ServiceRecord.toEntity(clientId: String): ServiceRecordEntity = ServiceRecor
     durationMinutes = durationMinutes,
     lat = lat,
     lng = lng,
-    notes = notes
+    notes = notes,
+    amountUsed = amountUsed,
+    amountUsed2 = amountUsed2
 )
 
 fun NonClientStopEntity.toDomain(): NonClientStop = NonClientStop(
@@ -81,7 +83,9 @@ fun ClientWithRecords.toDomain(): Client = Client(
             durationMinutes = rec.durationMinutes,
             lat = rec.lat,
             lng = rec.lng,
-            notes = rec.notes
+            notes = rec.notes,
+            amountUsed = rec.amountUsed,
+            amountUsed2 = rec.amountUsed2
         )
     }
 )

@@ -112,6 +112,20 @@ class LocationTrackingNotifier(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val propertyIntent = buildCompletionIntent(
+            client = client,
+            minutesOnSite = minutesOnSite,
+            location = location,
+            arrivedAtMillis = arrivedAtMillis,
+            completionAction = LocationTrackingService.COMPLETE_ACTION_PROPERTY
+        )
+        val propertyPendingIntent = PendingIntent.getActivity(
+            context,
+            notifId + 10_000,
+            propertyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification = NotificationCompat.Builder(context, channelId)
             .setContentTitle(context.getString(R.string.notif_complete_title, client.name))
             .setContentText(context.getString(R.string.notif_complete_text, client.address, minutesOnSite))
@@ -129,6 +143,11 @@ class LocationTrackingNotifier(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 context.getString(R.string.notif_action_not_yet),
                 notYetPendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_edit,
+                context.getString(R.string.notif_action_property),
+                propertyPendingIntent
             )
             .build()
 

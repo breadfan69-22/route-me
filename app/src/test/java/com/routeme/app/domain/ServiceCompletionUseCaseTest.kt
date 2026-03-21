@@ -4,6 +4,7 @@ import com.routeme.app.Client
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WriteBackRetryQueue
 import com.routeme.app.network.SheetsWriteBack
 import io.mockk.coEvery
@@ -19,17 +20,20 @@ class ServiceCompletionUseCaseTest {
 
     private lateinit var repository: ClientRepository
     private lateinit var retryQueue: WriteBackRetryQueue
+    private lateinit var preferencesRepository: PreferencesRepository
 
     @Before
     fun setup() {
         repository = mockk(relaxed = true)
         retryQueue = mockk(relaxed = true)
+        preferencesRepository = mockk(relaxed = true)
         SheetsWriteBack.webAppUrl = ""
+        SheetsWriteBack.propertyWebAppUrl = ""
     }
 
     @Test
     fun `confirmSelectedClientService returns error when no selected client`() = runTest {
-        val useCase = ServiceCompletionUseCase(repository, retryQueue)
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository)
 
         val result = useCase.confirmSelectedClientService(
             ServiceCompletionUseCase.ConfirmSelectedRequest(
@@ -54,7 +58,7 @@ class ServiceCompletionUseCaseTest {
 
     @Test
     fun `confirmSelectedClientService returns error when no arrival timestamp`() = runTest {
-        val useCase = ServiceCompletionUseCase(repository, retryQueue)
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository)
 
         val result = useCase.confirmSelectedClientService(
             ServiceCompletionUseCase.ConfirmSelectedRequest(
@@ -80,7 +84,7 @@ class ServiceCompletionUseCaseTest {
     @Test
     fun `confirmSelectedClientService persists record and returns success`() = runTest {
         val fixedNow = 200_000L
-        val useCase = ServiceCompletionUseCase(repository, retryQueue, nowProvider = { fixedNow })
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
         val client = testClient("10")
 
         coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
@@ -115,7 +119,7 @@ class ServiceCompletionUseCaseTest {
     @Test
     fun `confirmClusterService confirms selected members`() = runTest {
         val fixedNow = 500_000L
-        val useCase = ServiceCompletionUseCase(repository, retryQueue, nowProvider = { fixedNow })
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
         val client = testClient("20")
 
         coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
@@ -146,7 +150,7 @@ class ServiceCompletionUseCaseTest {
 
     @Test
     fun `undoLastConfirmation deletes persisted record and removes in-memory record`() = runTest {
-        val useCase = ServiceCompletionUseCase(repository, retryQueue)
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository)
         val completedAt = 123_456L
         val client = testClient("30").copy(
             records = listOf(
@@ -172,7 +176,7 @@ class ServiceCompletionUseCaseTest {
 
     @Test
     fun `editSelectedClientNotes returns editor payload`() {
-        val useCase = ServiceCompletionUseCase(repository, retryQueue)
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository)
         val client = testClient("40").copy(notes = "Needs gate code")
 
         val result = useCase.editSelectedClientNotes(client)
@@ -186,7 +190,7 @@ class ServiceCompletionUseCaseTest {
 
     @Test
     fun `saveClientNotes updates client notes and returns updated selected client`() = runTest {
-        val useCase = ServiceCompletionUseCase(repository, retryQueue)
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository)
         val client = testClient("50")
 
         coEvery { repository.updateClientNotes(client.id, "trimmed") } returns Unit

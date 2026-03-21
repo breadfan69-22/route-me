@@ -154,6 +154,26 @@ class ClientRepository(
         SheetsWriteBack.markDone(clientName, serviceType, completedAtMillis)
     }
 
+    suspend fun writeBackRaw(
+        clientName: String,
+        column: String,
+        value: String
+    ): SheetsWriteBack.WriteResult = withContext(Dispatchers.IO) {
+        SheetsWriteBack.postRaw(clientName, column, value)
+    }
+
+    suspend fun writeBackPropertyRaw(
+        clientName: String,
+        column: String,
+        value: String
+    ): SheetsWriteBack.WriteResult = withContext(Dispatchers.IO) {
+        SheetsWriteBack.postPropertyRaw(clientName, column, value)
+    }
+
+    suspend fun updateClientLawnSize(clientId: String, sqFt: Int) = withContext(Dispatchers.IO) {
+        clientDao.updateClientLawnSize(clientId, sqFt)
+    }
+
     suspend fun importFromUri(uri: Uri): ImportResult {
         val result = ClientImportParser.parse(appContext, uri)
         if (result.clients.isNotEmpty()) {

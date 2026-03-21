@@ -115,6 +115,7 @@
     <string name="notif_complete_text">You were at %1$s for %2$d min. Choose Done or Not yet.</string>
     <string name="notif_action_done">Done</string>
     <string name="notif_action_not_yet">Not yet</string>
+    <string name="notif_action_property">Property Stats</string>
 
     <!-- Dialog - completion -->
     <string name="dialog_complete_title">Mark job complete for %s?</string>

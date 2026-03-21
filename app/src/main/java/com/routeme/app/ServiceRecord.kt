@@ -9,7 +9,9 @@ data class ServiceRecord(
     val durationMinutes: Long,
     val lat: Double?,
     val lng: Double?,
-    val notes: String = ""
+    val notes: String = "",
+    val amountUsed: Double? = null,
+    val amountUsed2: Double? = null
 )
 
 enum class ServiceType(val label: String, val stepNumber: Int) {

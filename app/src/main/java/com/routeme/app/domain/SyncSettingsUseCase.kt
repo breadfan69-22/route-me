@@ -139,7 +139,9 @@ class SyncSettingsUseCase(
     fun loadSyncSettings(): SyncSettings {
         val readUrl = preferencesRepository.sheetsReadUrl
         val writeUrl = preferencesRepository.sheetsWriteUrl
+        val propertyWriteUrl = preferencesRepository.propertySheetWriteUrl
         SheetsWriteBack.webAppUrl = writeUrl
+        SheetsWriteBack.propertyWebAppUrl = propertyWriteUrl
         return SyncSettings(readUrl = readUrl, writeUrl = writeUrl)
     }
 
@@ -147,6 +149,7 @@ class SyncSettingsUseCase(
         preferencesRepository.sheetsReadUrl = readUrl
         preferencesRepository.sheetsWriteUrl = writeUrl
         SheetsWriteBack.webAppUrl = writeUrl
+        SheetsWriteBack.propertyWebAppUrl = preferencesRepository.propertySheetWriteUrl
         return SyncSettings(readUrl = readUrl, writeUrl = writeUrl)
     }
 

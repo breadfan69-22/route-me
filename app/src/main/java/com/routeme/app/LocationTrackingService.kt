@@ -65,6 +65,7 @@ class LocationTrackingService : Service(), KoinComponent {
         const val COMPLETE_ACTION_PROMPT = "complete_action_prompt"
         const val COMPLETE_ACTION_DONE = "complete_action_done"
         const val COMPLETE_ACTION_NOT_YET = "complete_action_not_yet"
+        const val COMPLETE_ACTION_PROPERTY = "complete_action_property"
         const val EXTRA_CLUSTER_CLIENT_IDS = "cluster_client_ids"
         const val EXTRA_CLUSTER_MINUTES = "cluster_minutes"
         const val EXTRA_CLUSTER_ARRIVED_AT = "cluster_arrived_at"

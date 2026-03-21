@@ -24,6 +24,9 @@ object SheetsWriteBack {
     /** Set this to the deployed Apps Script web app URL */
     var webAppUrl: String = ""
 
+    /** Set this to the Property Stats Apps Script web app URL */
+    var propertyWebAppUrl: String = ""
+
     data class WriteResult(
         val success: Boolean,
         val message: String
@@ -93,6 +96,34 @@ object SheetsWriteBack {
     }
 
     /**
+     * Posts a raw column/value update to the Property Stats Google Sheet.
+     * Must be called on a background thread.
+     */
+    fun postPropertyRaw(clientName: String, column: String, value: String): WriteResult {
+        if (propertyWebAppUrl.isBlank()) {
+            return WriteResult(false, "No Property Stats Apps Script URL configured.")
+        }
+        return try {
+            val json = JSONObject().apply {
+                put("clientName", clientName)
+                put("column", column)
+                put("value", value)
+            }
+            val http = postJsonWithRedirects(json, "property raw", propertyWebAppUrl)
+            if (http.code in 200..299) {
+                WriteResult(true, "Updated $column for $clientName (property)")
+            } else if (http.transportError) {
+                WriteResult(false, http.body)
+            } else {
+                WriteResult(false, "HTTP ${http.code}: ${http.body.take(100)}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Property raw write-back failed", e)
+            WriteResult(false, "${e.javaClass.simpleName}: ${e.message?.take(80)}")
+        }
+    }
+
+    /**
      * Posts a completion to the Google Sheet.
      * Must be called on a background thread.
      *
@@ -149,11 +180,11 @@ object SheetsWriteBack {
         }
     }
 
-    private fun postJsonWithRedirects(json: JSONObject, label: String): HttpResult {
-        Log.d(TAG, "Posting $label: $json to $webAppUrl")
+    private fun postJsonWithRedirects(json: JSONObject, label: String, url: String = webAppUrl): HttpResult {
+        Log.d(TAG, "Posting $label: $json to $url")
         val jsonBytes = json.toString().toByteArray(Charsets.UTF_8)
 
-        var conn = URL(webAppUrl).openConnection() as HttpURLConnection
+        var conn = URL(url).openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
         conn.doOutput = true

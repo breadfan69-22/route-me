@@ -38,6 +38,9 @@ interface ClientDao {
     @Query("UPDATE clients SET notes = :notes WHERE id = :clientId")
     suspend fun updateClientNotes(clientId: String, notes: String)
 
+    @Query("UPDATE clients SET lawnSizeSqFt = :sqFt WHERE id = :clientId")
+    suspend fun updateClientLawnSize(clientId: String, sqFt: Int)
+
     @Query("DELETE FROM clients")
     suspend fun deleteAllClients()
 

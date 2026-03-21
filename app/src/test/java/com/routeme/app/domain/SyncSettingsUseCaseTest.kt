@@ -60,6 +60,7 @@ class SyncSettingsUseCaseTest {
         }
 
         SheetsWriteBack.webAppUrl = ""
+        SheetsWriteBack.propertyWebAppUrl = ""
     }
 
     @Test

@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
 
     private val viewModel: MainViewModel by viewModel()
     private val trackingEventBus: TrackingEventBus by inject()
+    private val preferencesRepository: com.routeme.app.data.PreferencesRepository by inject()
     private var sheetsUrl: String = ""
     private val SUGGEST_LOCATION_MAX_AGE_MS = 120_000L
     private var lastObservedServiceTypes: Set<ServiceType>? = null
@@ -755,21 +756,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun confirmServiceForSelectedClient(visitNotes: String = "") {
+    private fun confirmServiceForSelectedClient(
+        visitNotes: String = "",
+        amountUsed: Double? = null,
+        amountUsed2: Double? = null,
+        property: PropertyInput = PropertyInput()
+    ) {
         val current = getCurrentLocation()
         lastLocation = current
         val types = viewModel.uiState.value.selectedServiceTypes.ifEmpty { setOf(ServiceType.ROUND_1) }
         viewModel.setServiceTypes(types)
-        viewModel.confirmSelectedClientService(current, visitNotes)
+        viewModel.confirmSelectedClientService(current, visitNotes, amountUsed, amountUsed2, property)
     }
 
     private fun showClientActionDialog(client: Client) {
         val state = viewModel.uiState.value
+        val primaryType = state.selectedServiceTypes.firstOrNull() ?: ServiceType.ROUND_1
         DialogFactory.showClientActionDialog(
             context = this,
             clientName = client.name,
             details = state.selectedClientDetails,
             arrivalActive = state.arrivalStartedAtMillis != null,
+            serviceTypes = state.selectedServiceTypes,
+            granularRate = viewModel.getGranularRate(primaryType),
             onArrive = {
                 lastLocation = getCurrentLocation()
                 viewModel.startArrivalForSelected(lastLocation)
@@ -777,7 +786,7 @@ class MainActivity : AppCompatActivity() {
             onCancelArrival = { viewModel.cancelArrival() },
             onMaps = { openClientInMaps(client) },
             onSkip = { viewModel.skipSelectedClientToday() },
-            onConfirm = { notes -> confirmServiceForSelectedClient(notes) },
+            onConfirm = { notes, amt1, amt2, prop -> confirmServiceForSelectedClient(notes, amt1, amt2, prop) },
             onEditNotes = { viewModel.editSelectedClientNotes() }
         )
     }
@@ -894,6 +903,10 @@ class MainActivity : AppCompatActivity() {
             }
             R.id.action_min_days -> {
                 showMinDaysDialog()
+                true
+            }
+            R.id.action_app_rates -> {
+                DialogFactory.showApplicationRatesDialog(this, preferencesRepository)
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -1138,6 +1151,20 @@ class MainActivity : AppCompatActivity() {
             System.currentTimeMillis() - minutes * 60_000L
         )
         val client = clients.find { it.id == completeClientId } ?: return true
+        val action = intent.getStringExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
+
+        // Property Stats action — show dialog but keep the notification alive
+        if (action == LocationTrackingService.COMPLETE_ACTION_PROPERTY) {
+            DialogFactory.showPropertyStatsDialog(
+                context = this,
+                clientName = client.name,
+                onSave = { property -> viewModel.writePropertyStats(client.name, property) }
+            )
+            // Clear only the action extra so tapping the notification body still works
+            intent.removeExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION)
+            return true
+        }
+
         val location = resolveNotificationLocation(
             intent,
             LocationTrackingService.EXTRA_COMPLETE_LAT,

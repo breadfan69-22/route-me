@@ -53,6 +53,7 @@ class MainViewModelTest {
         every { prefs.sheetsReadUrl } returns ""
         every { prefs.sheetsWriteUrl } returns ""
         SheetsWriteBack.webAppUrl = ""
+        SheetsWriteBack.propertyWebAppUrl = ""
     }
 
     @Test

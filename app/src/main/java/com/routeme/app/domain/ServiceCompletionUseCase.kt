@@ -2,16 +2,22 @@ package com.routeme.app.domain
 
 import com.routeme.app.Client
 import com.routeme.app.ClientStopStatus
+import com.routeme.app.PropertyInput
 import com.routeme.app.ServiceRecord
 import com.routeme.app.ServiceType
 import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WriteBackRetryQueue
+import com.routeme.app.estimateGranularSqFt
+import com.routeme.app.estimateSpraySqFt
+import com.routeme.app.isSpray
 import com.routeme.app.network.SheetsWriteBack
 import java.util.Calendar
 
 class ServiceCompletionUseCase(
     private val clientRepository: ClientRepository,
     private val retryQueue: WriteBackRetryQueue,
+    private val preferencesRepository: PreferencesRepository,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     data class GeoPoint(
@@ -41,7 +47,10 @@ class ServiceCompletionUseCase(
         val selectedSuggestionEligibleSteps: Set<ServiceType>,
         val selectedServiceTypes: Set<ServiceType>,
         val currentLocation: GeoPoint?,
-        val visitNotes: String
+        val visitNotes: String,
+        val amountUsed: Double? = null,
+        val amountUsed2: Double? = null,
+        val property: PropertyInput = PropertyInput()
     )
 
     sealed class ConfirmSelectedResult {
@@ -147,7 +156,9 @@ class ServiceCompletionUseCase(
                 durationMinutes = durationMinutes,
                 lat = request.arrivalLat ?: request.currentLocation?.latitude,
                 lng = request.arrivalLng ?: request.currentLocation?.longitude,
-                notes = trimmedNotes
+                notes = trimmedNotes,
+                amountUsed = request.amountUsed,
+                amountUsed2 = request.amountUsed2
             )
 
             updatedClient = updatedClient.copy(records = updatedClient.records + record)
@@ -206,6 +217,49 @@ class ServiceCompletionUseCase(
             } else {
                 sheetStatusMessage = "Sheet updated. $statusMsg"
             }
+        }
+
+        // Estimate lawn size from product usage
+        val estimatedSqFt = calculateEstimatedSqFt(
+            request.amountUsed, request.amountUsed2,
+            stepsToConfirm.first()
+        )
+        if (estimatedSqFt != null && estimatedSqFt in 1_000..200_000) {
+            runCatching {
+                clientRepository.updateClientLawnSize(client.id, estimatedSqFt)
+            }
+            if (SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+                runCatching {
+                    clientRepository.writeBackPropertyRaw(
+                        updatedClient.name, "Lawn Size", estimatedSqFt.toString()
+                    )
+                }
+            }
+        }
+
+        // Write property stats to property sheet
+        val prop = request.property
+        if (prop.hasAnyData && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+            val name = updatedClient.name
+            if (prop.sunShade.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(name, "Sun/Shade", prop.sunShade) }
+            }
+            if (prop.windExposure.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(name, "Wind Exposure", prop.windExposure) }
+            }
+            if (prop.steepSlopes.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(name, "Steep Slopes", prop.steepSlopes) }
+            }
+            if (prop.irrigation.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(name, "Irrigation", prop.irrigation) }
+            }
+            val cal = Calendar.getInstance()
+            val dateStr = "%d-%02d-%02d".format(
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH) + 1,
+                cal.get(Calendar.DAY_OF_MONTH)
+            )
+            runCatching { clientRepository.writeBackPropertyRaw(name, "Last Updated", dateStr) }
         }
 
         return ConfirmSelectedResult.Success(
@@ -413,6 +467,23 @@ class ServiceCompletionUseCase(
             retryQueue.drainQueue().succeeded
         } catch (_: Exception) {
             0
+        }
+    }
+
+    private fun calculateEstimatedSqFt(
+        amountUsed: Double?,
+        amountUsed2: Double?,
+        serviceType: ServiceType
+    ): Int? {
+        if (amountUsed == null && amountUsed2 == null) return null
+        return if (serviceType.isSpray) {
+            // Spray: amountUsed = Hose gal, amountUsed2 = PG gal
+            // Both can be used on the same jobsite
+            estimateSpraySqFt(amountUsed, amountUsed2)
+        } else {
+            // Granular: amountUsed = lbs, rate from preferences
+            val rate = preferencesRepository.getGranularRate(serviceType)
+            estimateGranularSqFt(amountUsed, rate)
         }
     }
 

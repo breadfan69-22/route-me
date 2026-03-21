@@ -10,6 +10,7 @@ import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
+import com.routeme.app.PropertyInput
 import com.routeme.app.ServiceType
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
@@ -49,7 +50,7 @@ class MainViewModel(
     private val retryQueue: com.routeme.app.data.WriteBackRetryQueue,
     private val suggestionUseCase: SuggestionUseCase = SuggestionUseCase(routingEngine),
     private val arrivalUseCase: ArrivalUseCase = ArrivalUseCase(routingEngine),
-    private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue),
+    private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue, preferencesRepository),
     private val destinationQueueUseCase: DestinationQueueUseCase = DestinationQueueUseCase(preferencesRepository, routingEngine),
     private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
@@ -1272,16 +1273,23 @@ class MainViewModel(
         )
     }
 
+    fun getGranularRate(serviceType: ServiceType): Double {
+        return preferencesRepository.getGranularRate(serviceType)
+    }
+
     fun confirmSelectedClientService(
         currentLocation: Location?,
         visitNotes: String = "",
+        amountUsed: Double? = null,
+        amountUsed2: Double? = null,
+        property: PropertyInput = PropertyInput(),
         onSuccess: (() -> Unit)? = null
     ) {
         viewModelScope.launch {
             val state = _uiState.value
             when (
                 val result = serviceCompletionUseCase.confirmSelectedClientService(
-                    buildConfirmSelectedRequest(state, currentLocation, visitNotes)
+                    buildConfirmSelectedRequest(state, currentLocation, visitNotes, amountUsed, amountUsed2, property)
                 )
             ) {
                 is ServiceCompletionUseCase.ConfirmSelectedResult.Error -> {
@@ -1295,10 +1303,45 @@ class MainViewModel(
         }
     }
 
+    /**
+     * Write property stats to the Google Sheet for the given client.
+     * Independent of the service-completion flow — used from the
+     * notification "Property Stats" action.
+     */
+    fun writePropertyStats(clientName: String, property: PropertyInput) {
+        if (!property.hasAnyData) return
+        viewModelScope.launch {
+            if (com.routeme.app.network.SheetsWriteBack.propertyWebAppUrl.isBlank()) return@launch
+            if (property.sunShade.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Sun/Shade", property.sunShade) }
+            }
+            if (property.windExposure.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Wind Exposure", property.windExposure) }
+            }
+            if (property.steepSlopes.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Steep Slopes", property.steepSlopes) }
+            }
+            if (property.irrigation.isNotEmpty()) {
+                runCatching { clientRepository.writeBackPropertyRaw(clientName, "Irrigation", property.irrigation) }
+            }
+            val cal = java.util.Calendar.getInstance()
+            val dateStr = "%d-%02d-%02d".format(
+                cal.get(java.util.Calendar.YEAR),
+                cal.get(java.util.Calendar.MONTH) + 1,
+                cal.get(java.util.Calendar.DAY_OF_MONTH)
+            )
+            runCatching { clientRepository.writeBackPropertyRaw(clientName, "Last Updated", dateStr) }
+            setStatus("Property stats saved for $clientName")
+        }
+    }
+
     private fun buildConfirmSelectedRequest(
         state: MainUiState,
         currentLocation: Location?,
-        visitNotes: String
+        visitNotes: String,
+        amountUsed: Double? = null,
+        amountUsed2: Double? = null,
+        property: PropertyInput = PropertyInput()
     ): ServiceCompletionUseCase.ConfirmSelectedRequest {
         return ServiceCompletionUseCase.ConfirmSelectedRequest(
             clients = state.clients,
@@ -1312,7 +1355,10 @@ class MainViewModel(
             selectedSuggestionEligibleSteps = selectedSuggestionEligibleStepsForSelectedClient(state),
             selectedServiceTypes = state.selectedServiceTypes,
             currentLocation = serviceCompletionGeoPoint(currentLocation),
-            visitNotes = visitNotes
+            visitNotes = visitNotes,
+            amountUsed = amountUsed,
+            amountUsed2 = amountUsed2,
+            property = property
         )
     }
 
