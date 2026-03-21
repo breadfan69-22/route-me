@@ -10,6 +10,7 @@ data class DailyWeather(
     val lowTempF: Int?,
     val windSpeedMph: Int?,
     val windGustMph: Int?,
+    val windDirection: String?,
     val precipitationInches: Double?,
     val description: String
 ) {
@@ -24,10 +25,11 @@ data class DailyWeather(
         }
 
         if (windSpeedMph != null) {
+            val dirPrefix = windDirection?.let { "$it " } ?: ""
             val windStr = if (windGustMph != null && windGustMph > windSpeedMph) {
-                "Wind $windSpeedMph mph (gusts $windGustMph)"
+                "${dirPrefix}Wind $windSpeedMph mph (gusts $windGustMph)"
             } else {
-                "Wind $windSpeedMph mph"
+                "${dirPrefix}Wind $windSpeedMph mph"
             }
             parts += windStr
         }

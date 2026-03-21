@@ -224,11 +224,37 @@ class MainActivity : AppCompatActivity() {
             binding.heroClientName.visibility = View.GONE
         }
 
-        val hasWeather = state.currentWeatherTempF != null
+        // Weather display - toggle between current observation and hourly forecast
+        val showCurrent = state.showCurrentWeather
+        val tempF = if (showCurrent) state.currentWeatherTempF else state.forecastTempF
+        val iconDesc = if (showCurrent) state.currentWeatherIconDesc else state.forecastIconDesc
+        val windMph = if (showCurrent) state.currentWeatherWindMph else state.forecastWindMph
+        val windDir = if (showCurrent) state.currentWeatherWindDirection else state.forecastWindDirection
+        val gust = if (showCurrent) state.currentWeatherWindGust else null // forecasts don't have gusts
+
+        val hasWeather = tempF != null
         binding.heroWeatherChip.visibility = if (hasWeather) View.VISIBLE else View.GONE
         if (hasWeather) {
-            binding.heroWeatherTemp.text = "${state.currentWeatherTempF}°F"
-            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(state.currentWeatherIconDesc, state.isDaytime))
+            val tempLabel = if (showCurrent) "${tempF}°F" else "${state.forecastTimeLabel ?: ""} ${tempF}°F"
+            binding.heroWeatherTemp.text = tempLabel.trim()
+            binding.heroWeatherIcon.setImageResource(weatherDescToIcon(iconDesc, state.isDaytime))
+
+            // Wind direction + speed
+            if (windMph != null && windMph > 0) {
+                val windText = if (windDir != null) "$windDir ${windMph}mph" else "${windMph}mph"
+                binding.heroWeatherWind.text = windText
+                binding.heroWeatherWind.visibility = View.VISIBLE
+            } else {
+                binding.heroWeatherWind.visibility = View.GONE
+            }
+
+            // Wind gust (only for current weather)
+            if (gust != null && gust > (windMph ?: 0)) {
+                binding.heroWeatherGust.text = "Gust- ${gust}mph"
+                binding.heroWeatherGust.visibility = View.VISIBLE
+            } else {
+                binding.heroWeatherGust.visibility = View.GONE
+            }
         }
 
         if (state.selectedServiceTypes.isNotEmpty()) {
@@ -654,6 +680,17 @@ class MainActivity : AppCompatActivity() {
         setupTrackingTileActions()
         setupDirectionTileActions()
         setupSuggestionRefreshActions()
+        setupWeatherTapAction()
+    }
+
+    private fun setupWeatherTapAction() {
+        binding.heroWeatherChip.setOnClickListener {
+            viewModel.toggleWeatherDisplay()
+        }
+        // Fetch weather at current location on startup
+        getCurrentLocation()?.let { loc ->
+            viewModel.fetchWeatherAtLocation(loc.latitude, loc.longitude)
+        }
     }
 
     private fun setupUpcomingTileActions() {

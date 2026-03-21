@@ -14,6 +14,7 @@ data class DailyWeatherEntity(
     val lowTempF: Int?,
     val windSpeedMph: Int?,
     val windGustMph: Int?,
+    val windDirection: String?,
     val precipitationInches: Double?,
     val description: String,
     val fetchedAtMillis: Long

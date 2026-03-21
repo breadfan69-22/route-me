@@ -44,6 +44,7 @@ class WeatherRepository(private val weatherDao: WeatherDao) {
             lowTempF = fetched.lowTempF,
             windSpeedMph = fetched.windSpeedMph,
             windGustMph = fetched.windGustMph,
+            windDirection = fetched.windDirection,
             precipitationInches = fetched.precipitationInches,
             description = fetched.description,
             fetchedAtMillis = System.currentTimeMillis()
@@ -65,6 +66,7 @@ class WeatherRepository(private val weatherDao: WeatherDao) {
         lowTempF = lowTempF,
         windSpeedMph = windSpeedMph,
         windGustMph = windGustMph,
+        windDirection = windDirection,
         precipitationInches = precipitationInches,
         description = description
     )

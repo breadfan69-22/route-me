@@ -43,6 +43,17 @@ data class MainUiState(
     /** Weather for live dashboard display (sourced from last stop or NWS fallback). */
     val currentWeatherTempF: Int? = null,
     val currentWeatherIconDesc: String? = null,
+    val currentWeatherWindMph: Int? = null,
+    val currentWeatherWindGust: Int? = null,
+    val currentWeatherWindDirection: String? = null,
+    /** Hourly forecast data (next hour). */
+    val forecastTempF: Int? = null,
+    val forecastIconDesc: String? = null,
+    val forecastWindMph: Int? = null,
+    val forecastWindDirection: String? = null,
+    val forecastTimeLabel: String? = null,
+    /** True = show current weather, false = show hourly forecast. */
+    val showCurrentWeather: Boolean = true,
     /** True if current time is between sunrise and sunset (for day/night weather icons). */
     val isDaytime: Boolean = true,
     /** Total eligible client count (full ranked list size before pagination). */

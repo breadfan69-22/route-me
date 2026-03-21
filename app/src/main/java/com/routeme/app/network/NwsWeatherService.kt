@@ -35,6 +35,9 @@ object NwsWeatherService {
      */
     private val stationCache = ConcurrentHashMap<String, String>()
 
+    /** Cached hourly forecast URL keyed by "%.2f,%.2f" (lat/lng rounded to 0.01°, ~1 km). */
+    private val forecastUrlCache = ConcurrentHashMap<String, String>()
+
     /**
      * Fetch a daily weather summary for the given location and date.
      *
@@ -57,8 +60,92 @@ object NwsWeatherService {
     data class WeatherSnapshot(
         val tempF: Int,
         val windMph: Int,
+        val windDirection: String?,
+        val windGustMph: Int?,
         val description: String
     )
+
+    /**
+     * Hourly forecast period from NWS.
+     */
+    data class HourlyForecast(
+        val tempF: Int,
+        val windSpeedMph: Int?,
+        val windDirection: String?,
+        val description: String,
+        /** e.g. "2pm", "3pm" */
+        val timeLabel: String
+    )
+
+    /**
+     * Fetch the next hour's forecast near [lat],[lng].
+     * Returns null on failure.
+     * Must be called on a background thread.
+     */
+    fun fetchNextHourForecast(lat: Double, lng: Double): HourlyForecast? {
+        return try {
+            val forecastUrl = resolveForecastUrl(lat, lng) ?: return null
+            val json = httpGet(forecastUrl) ?: return null
+            val periods = json.optJSONObject("properties")?.optJSONArray("periods")
+            if (periods == null || periods.length() == 0) return null
+
+            // First period is the next hour
+            val period = periods.getJSONObject(0)
+            val tempF = period.optInt("temperature", 0)
+            val windSpeed = period.optString("windSpeed", "") // e.g. "10 mph"
+            val windSpeedMph = windSpeed.replace(Regex("[^0-9]"), "").toIntOrNull()
+            val windDir = period.optString("windDirection", "").ifBlank { null }
+            val desc = period.optString("shortForecast", "").ifBlank { "Unknown" }
+            val startTime = period.optString("startTime", "")
+            val timeLabel = parseHourLabel(startTime)
+
+            HourlyForecast(
+                tempF = tempF,
+                windSpeedMph = windSpeedMph,
+                windDirection = windDir,
+                description = desc,
+                timeLabel = timeLabel
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Hourly forecast fetch failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Parse ISO timestamp to hour label like "2pm" */
+    private fun parseHourLabel(isoTime: String): String {
+        return try {
+            val instant = java.time.OffsetDateTime.parse(isoTime)
+            val hour = instant.hour
+            val suffix = if (hour < 12) "am" else "pm"
+            val displayHour = when {
+                hour == 0 -> 12
+                hour > 12 -> hour - 12
+                else -> hour
+            }
+            "$displayHour$suffix"
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    /** Resolve the hourly forecast URL for a lat/lon via the NWS points API. */
+    private fun resolveForecastUrl(lat: Double, lng: Double): String? {
+        val cacheKey = "%.2f,%.2f".format(lat, lng)
+        forecastUrlCache[cacheKey]?.let { return it }
+
+        val latStr = "%.4f".format(lat)
+        val lngStr = "%.4f".format(lng)
+        val url = "$BASE_URL/points/$latStr,$lngStr"
+
+        val json = httpGet(url) ?: return null
+        val properties = json.optJSONObject("properties") ?: return null
+        val forecastUrl = properties.optString("forecastHourly", "")
+        if (forecastUrl.isBlank()) return null
+
+        forecastUrlCache[cacheKey] = forecastUrl
+        return forecastUrl
+    }
 
     /**
      * Fetch the latest observation near [lat],[lng].
@@ -79,9 +166,15 @@ object NwsWeatherService {
             val windKmh = props.optJSONObject("windSpeed")?.optDouble("value", Double.NaN)
             val windMph = if (windKmh != null && !windKmh.isNaN()) (windKmh * 0.621371).toInt() else 0
 
+            val windDirDeg = props.optJSONObject("windDirection")?.optDouble("value", Double.NaN)
+            val windDir = if (windDirDeg != null && !windDirDeg.isNaN()) degreesToCompass(windDirDeg) else null
+
+            val gustKmh = props.optJSONObject("windGust")?.optDouble("value", Double.NaN)
+            val gustMph = if (gustKmh != null && !gustKmh.isNaN()) (gustKmh * 0.621371).toInt() else null
+
             val desc = props.optString("textDescription", "").ifBlank { "Unknown" }
 
-            WeatherSnapshot(tempF = tempF, windMph = windMph, description = desc)
+            WeatherSnapshot(tempF = tempF, windMph = windMph, windDirection = windDir, windGustMph = gustMph, description = desc)
         } catch (e: Exception) {
             Log.w(TAG, "Latest obs fetch failed: ${e.message}")
             null
@@ -135,6 +228,7 @@ object NwsWeatherService {
         val temps = mutableListOf<Double>()
         val winds = mutableListOf<Double>()
         val gusts = mutableListOf<Double>()
+        val windDirs = mutableListOf<Double>()
         var totalPrecipMm = 0.0
         var lastDescription = ""
 
@@ -162,6 +256,13 @@ object NwsWeatherService {
                 gusts += gustKmh * 0.621371
             }
 
+            // Wind direction (degrees)
+            val windDirObj = props.optJSONObject("windDirection")
+            val windDirDeg = windDirObj?.optDouble("value", Double.NaN)
+            if (windDirDeg != null && !windDirDeg.isNaN()) {
+                windDirs += windDirDeg
+            }
+
             // Precipitation (mm → inches)  — use precipitationLastHour
             val precipObj = props.optJSONObject("precipitationLastHour")
             val precipMm = precipObj?.optDouble("value", Double.NaN)
@@ -184,9 +285,28 @@ object NwsWeatherService {
             lowTempF = temps.minOrNull()?.toInt(),
             windSpeedMph = winds.takeIf { it.isNotEmpty() }?.average()?.toInt(),
             windGustMph = gusts.maxOrNull()?.toInt(),
+            windDirection = windDirs.takeIf { it.isNotEmpty() }?.average()?.let { degreesToCompass(it) },
             precipitationInches = if (totalPrecipMm > 0) totalPrecipMm / 25.4 else 0.0,
             description = lastDescription.ifBlank { "Unknown" }
         )
+    }
+
+    /**
+     * Convert wind direction in degrees (0-360) to compass direction.
+     * 0° = N, 90° = E, 180° = S, 270° = W
+     */
+    private fun degreesToCompass(degrees: Double): String {
+        val normalized = ((degrees % 360) + 360) % 360
+        return when {
+            normalized < 22.5 || normalized >= 337.5 -> "N"
+            normalized < 67.5 -> "NE"
+            normalized < 112.5 -> "E"
+            normalized < 157.5 -> "SE"
+            normalized < 202.5 -> "S"
+            normalized < 247.5 -> "SW"
+            normalized < 292.5 -> "W"
+            else -> "NW"
+        }
     }
 
     private fun httpGet(url: String): JSONObject? {
