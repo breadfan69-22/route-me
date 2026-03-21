@@ -24,7 +24,7 @@ import java.util.Calendar
 class WeeklyPlannerUseCaseTest {
 
     @Test
-    fun `generateWeekPlan excludes sunday and low-score saturday`() = runTest {
+    fun `generateWeekPlan excludes sunday and saturday from auto-schedule`() = runTest {
         val weatherRepository = mockk<WeatherRepository>()
         val clientRepository = mockk<ClientRepository>()
         val routingEngine = mockk<RoutingEngine>()
@@ -35,13 +35,14 @@ class WeeklyPlannerUseCaseTest {
         val forecast = listOf(
             ForecastDay(
                 dateMillis = saturday,
-                highTempF = 45,
-                lowTempF = 32,
-                windSpeedMph = 28,
-                windGustMph = 45,
-                precipProbabilityPct = 95,
-                shortForecast = "Thunderstorms",
-                detailedForecast = "Severe thunderstorms"
+                // Perfect weather — but Saturday should still be excluded from auto-schedule
+                highTempF = 72,
+                lowTempF = 55,
+                windSpeedMph = 5,
+                windGustMph = null,
+                precipProbabilityPct = 5,
+                shortForecast = "Sunny",
+                detailedForecast = "Beautiful day"
             ),
             ForecastDay(
                 dateMillis = sunday,

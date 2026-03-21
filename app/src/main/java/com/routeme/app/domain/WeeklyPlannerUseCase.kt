@@ -252,8 +252,7 @@ class WeeklyPlannerUseCase(
 
     private fun shouldIncludeAsWorkDay(day: PlannedDayBuilder): Boolean {
         return when (day.dayOfWeek) {
-            Calendar.SUNDAY -> !AppConfig.WeeklyPlanner.SUNDAY_EXCLUDED
-            Calendar.SATURDAY -> day.dayScore >= AppConfig.WeeklyPlanner.SATURDAY_SCORE_THRESHOLD
+            Calendar.SUNDAY, Calendar.SATURDAY -> false  // Weekend: not auto-scheduled; Saturday is manual-add only
             else -> day.dayScore >= AppConfig.WeeklyPlanner.WORKDAY_SEVERE_WEATHER_MIN_SCORE
         }
     }
@@ -397,15 +396,16 @@ class WeeklyPlannerUseCase(
 
         if (client.mowDayOfWeek in Calendar.SUNDAY..Calendar.SATURDAY) {
             // Circular distance from mow day: 0 = mow day, 3 = farthest possible.
+            // Heavy penalties ensure mow day is avoided even with cluster/geo bonuses.
             val daysSinceMow = ((dayOfWeek - client.mowDayOfWeek + 7) % 7)
             val distFromMow = minOf(daysSinceMow, 7 - daysSinceMow)
             when (distFromMow) {
                 0 -> {
-                    score -= 40
+                    score -= 100  // Effectively disqualifies this day
                     reasons += "Mow day — freshly cut, avoid"
                 }
                 1 -> {
-                    score -= 20
+                    score -= 60
                     reasons += "1 day from mow — grass too short/tall"
                 }
                 2 -> {
@@ -423,7 +423,7 @@ class WeeklyPlannerUseCase(
             reasons += "No mow day — flexible schedule"
         }
 
-        return score.coerceIn(0, 100) to (reasons.firstOrNull() ?: "Standard fit")
+        return score.coerceAtMost(100) to (reasons.firstOrNull() ?: "Standard fit")
     }
 
     private fun fitnessScoreToLabel(score: Int): FitnessLabel = when {

@@ -24,7 +24,7 @@ object AppConfig {
 
         const val SEVERE_WEATHER_FLOOR = 10
 
-        const val SATURDAY_SCORE_THRESHOLD = 60
+        /** Saturday and Sunday are never auto-scheduled; Saturday is for manual commercial jobs. */
         const val SUNDAY_EXCLUDED = true
 
         const val FITNESS_GREAT_THRESHOLD = 80
