@@ -39,6 +39,7 @@ import kotlinx.coroutines.launch
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.appcompat.widget.PopupMenu
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -148,6 +149,10 @@ class MainActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Set status bar icons to dark in light mode so they're visible
+        val isNightMode = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        WindowInsetsControllerCompat(window, binding.root).isAppearanceLightStatusBars = !isNightMode
 
         // Apply status bar inset to the spacer so hero doesn't overlap system UI
         ViewCompat.setOnApplyWindowInsetsListener(binding.statusBarSpacer) { view, insets ->

@@ -102,16 +102,8 @@ class PlannerChipAdapter(
 
         // Lock button
         holder.lockButton.alpha = if (planned.locked) 1f else 0.25f
-        holder.lockButton.setImageResource(
-            if (planned.locked) android.R.drawable.ic_lock_idle_lock
-            else android.R.drawable.ic_lock_idle_lock
-        )
-        // Tint locked vs unlocked
         holder.lockButton.setColorFilter(
-            if (planned.locked)
-                androidx.core.content.ContextCompat.getColor(holder.itemView.context, com.google.android.material.R.color.material_dynamic_primary40)
-            else
-                android.graphics.Color.GRAY
+            if (planned.locked) 0xFF1976D2.toInt() else android.graphics.Color.GRAY
         )
         holder.lockButton.setOnClickListener { onToggleLock(planned) }
 
