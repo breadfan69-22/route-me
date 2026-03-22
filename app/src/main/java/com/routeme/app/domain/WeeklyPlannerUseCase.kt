@@ -45,7 +45,9 @@ class WeeklyPlannerUseCase(
         val forecastDays = weatherRepository.getForecastDays(dayCount = 7, lat = lat, lng = lng)
         val allClients = clientRepository.loadAllClients()
         val propertyMap = allClients.mapNotNull { client -> client.property?.let { client.id to it } }.toMap()
-        val recentWeatherByClientId = weatherRepository.getRecentWeatherSignals(allClients)
+        val shopWeatherSignal = runCatching {
+            weatherRepository.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG)
+        }.getOrNull()
 
         val noteOnlyClients = allClients.filter {
             it.subscribedSteps.isEmpty() && !it.hasGrub && it.notes.isNotBlank()
@@ -61,7 +63,7 @@ class WeeklyPlannerUseCase(
             weather = null,
             recentPrecipInches = null,
             propertyMap = propertyMap,
-            recentWeatherByClientId = recentWeatherByClientId
+            recentWeatherByClientId = emptyMap()
         )
 
         val dayBuilders = forecastDays.map { forecast ->
@@ -118,7 +120,7 @@ class WeeklyPlannerUseCase(
                     forecast = day.forecast,
                     dayOfWeek = day.dayOfWeek,
                     eligibleSteps = suggestion.eligibleSteps,
-                    recentWeatherSignal = recentWeatherByClientId[suggestion.client.id]
+                    recentWeatherSignal = shopWeatherSignal
                 )
 
                 // Hard block: mow day, day-after-mow, and day-before-mow are ineligible.
@@ -254,7 +256,7 @@ class WeeklyPlannerUseCase(
     private fun shouldIncludeAsWorkDay(day: PlannedDayBuilder): Boolean {
         return when (day.dayOfWeek) {
             Calendar.SUNDAY, Calendar.SATURDAY -> false  // Weekend: not auto-scheduled; Saturday is manual-add only
-            else -> day.dayScore >= AppConfig.WeeklyPlanner.WORKDAY_SEVERE_WEATHER_MIN_SCORE
+            else -> true  // Mon-Fri always scheduled; weather shown as label only
         }
     }
 

@@ -60,7 +60,7 @@ class WeeklyPlannerUseCaseTest {
         val suggestion = testSuggestion(client)
 
         coEvery { weatherRepository.getForecastDays(dayCount = 7, lat = SHOP_LAT, lng = SHOP_LNG) } returns forecast
-        coEvery { weatherRepository.getRecentWeatherSignals(listOf(client)) } returns emptyMap()
+        coEvery { weatherRepository.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) } returns null
         coEvery { clientRepository.loadAllClients() } returns listOf(client)
         coEvery {
             routingEngine.rankClients(
@@ -127,7 +127,7 @@ class WeeklyPlannerUseCaseTest {
         val suggestion = testSuggestion(client)
 
         coEvery { weatherRepository.getForecastDays(dayCount = 7, lat = SHOP_LAT, lng = SHOP_LNG) } returns listOf(windyMonday, calmTuesday)
-        coEvery { weatherRepository.getRecentWeatherSignals(listOf(client)) } returns emptyMap()
+        coEvery { weatherRepository.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) } returns null
         coEvery { clientRepository.loadAllClients() } returns listOf(client)
         coEvery {
             routingEngine.rankClients(
