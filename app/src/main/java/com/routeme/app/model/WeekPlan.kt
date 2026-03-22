@@ -90,7 +90,8 @@ data class PlannedClient(
     val primaryReason: String,
     val eligibleSteps: Set<ServiceType>,
     val daysOverdue: Int?,
-    val manuallyPlaced: Boolean = false
+    val manuallyPlaced: Boolean = false,
+    val locked: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("client", clientToJson(client))
@@ -100,6 +101,7 @@ data class PlannedClient(
         put("eligibleSteps", JSONArray().apply { eligibleSteps.forEach { put(it.name) } })
         if (daysOverdue != null) put("daysOverdue", daysOverdue)
         put("manuallyPlaced", manuallyPlaced)
+        put("locked", locked)
     }
 
     companion object {
@@ -112,7 +114,8 @@ data class PlannedClient(
                 (0 until arr.length()).mapNotNull { runCatching { ServiceType.valueOf(arr.getString(it)) }.getOrNull() }.toSet()
             },
             daysOverdue = if (json.has("daysOverdue")) json.getInt("daysOverdue") else null,
-            manuallyPlaced = json.optBoolean("manuallyPlaced", false)
+            manuallyPlaced = json.optBoolean("manuallyPlaced", false),
+            locked = json.optBoolean("locked", false)
         )
     }
 }

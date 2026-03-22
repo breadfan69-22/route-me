@@ -8,7 +8,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.fragment.app.Fragment
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.chip.Chip
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -39,14 +40,65 @@ class PlannerDayFragment : Fragment() {
         chipAdapter = PlannerChipAdapter(
             dayIndex = dayIndex,
             onChipTap = ::showClientDetails,
-            onDragStarted = { (activity as? WeeklyPlannerActivity)?.showDayPickerBar() }
+            onDragStarted = { (activity as? WeeklyPlannerActivity)?.showDayPickerBar() },
+            onRemoveClient = { client ->
+                (activity as? WeeklyPlannerActivity)?.removeClient(dayIndex, client.client.id)
+            },
+            onToggleLock = { client ->
+                (activity as? WeeklyPlannerActivity)?.toggleClientLock(dayIndex, client.client.id)
+            }
         )
 
         val rv = view.findViewById<RecyclerView>(R.id.chipRecyclerView)
-        rv.layoutManager = GridLayoutManager(requireContext(), 2)
+        rv.layoutManager = LinearLayoutManager(requireContext())
         rv.adapter = chipAdapter
 
+        // Drag to reorder (handle) + swipe left/right to dismiss
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+            ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
+        ) {
+            override fun isLongPressDragEnabled() = false
+
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                chipAdapter.onItemDragTo(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                chipAdapter.removeAt(viewHolder.bindingAdapterPosition)
+            }
+
+            override fun canDropOver(
+                recyclerView: RecyclerView,
+                current: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                // Don’t allow dropping a client onto a locked client’s position
+                val targetPos = target.bindingAdapterPosition
+                return targetPos !in chipAdapter.getDraggedList().indices ||
+                    !chipAdapter.getDraggedList()[targetPos].locked
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                (activity as? WeeklyPlannerActivity)?.reorderDay(dayIndex, chipAdapter.getDraggedList())
+            }
+        })
+        itemTouchHelper.attachToRecyclerView(rv)
+        chipAdapter.onStartDrag = { holder -> itemTouchHelper.startDrag(holder) }
+
         view.findViewById<Chip>(R.id.anchorChip).setOnClickListener { showAnchorDialog() }
+        view.findViewById<Chip>(R.id.reorderChip).setOnClickListener {
+            (activity as? WeeklyPlannerActivity)?.reoptimiseRoute(dayIndex)
+        }
+        view.findViewById<Chip>(R.id.refillChip).setOnClickListener {
+            (activity as? WeeklyPlannerActivity)?.refillDay(dayIndex)
+        }
         view.findViewById<Chip>(R.id.rebuildChip).setOnClickListener { confirmRebuild() }
 
         // Pull data from Activity — survives fragment recreation by ViewPager2

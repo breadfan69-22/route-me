@@ -13,42 +13,69 @@
         android:paddingBottom="4dp"
         android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
 
-    <!-- Day score badge + anchor chip -->
-    <LinearLayout
+    <!-- Day score badge -->
+    <TextView
+        android:id="@+id/dayScoreBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:background="@drawable/score_badge_bg" />
+
+    <!-- Action chips row -->
+    <HorizontalScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:scrollbars="none"
         android:layout_marginBottom="8dp">
 
-        <TextView
-            android:id="@+id/dayScoreBadge"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
-            android:background="@drawable/score_badge_bg" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
 
-        <com.google.android.material.chip.Chip
-            android:id="@+id/anchorChip"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="📍 Set anchor"
-            android:textSize="12sp"
-            style="@style/Widget.Material3.Chip.Assist" />
-        <com.google.android.material.chip.Chip
-            android:id="@+id/rebuildChip"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="4dp"
-            android:text="\U0001F504 Rebuild"
-            android:textSize="12sp"
-            style="@style/Widget.Material3.Chip.Assist" />
-    </LinearLayout>
+            <com.google.android.material.chip.Chip
+                android:id="@+id/anchorChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📍 Set anchor"
+                android:textSize="12sp"
+                style="@style/Widget.Material3.Chip.Assist" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/reorderChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="Reorder"
+                android:textSize="12sp"
+                style="@style/Widget.Material3.Chip.Assist" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/refillChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="Refill"
+                android:textSize="12sp"
+                style="@style/Widget.Material3.Chip.Assist" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/rebuildChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="Rebuild"
+                android:textSize="12sp"
+                style="@style/Widget.Material3.Chip.Assist" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
 
     <!-- Client chips grid -->
     <androidx.recyclerview.widget.RecyclerView

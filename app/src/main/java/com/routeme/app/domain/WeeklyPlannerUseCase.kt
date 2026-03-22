@@ -599,6 +599,19 @@ class WeeklyPlannerUseCase(
         return sorted + ungeocoded
     }
 
+    /** Re-optimise the route order for a day's existing clients without changing who is in the list. */
+    suspend fun reoptimiseRoute(
+        currentPlan: WeekPlan,
+        dayIndex: Int,
+        lat: Double = SHOP_LAT,
+        lng: Double = SHOP_LNG
+    ): PlannedDay? = withContext(Dispatchers.Default) {
+        val targetDay = currentPlan.days.getOrNull(dayIndex) ?: return@withContext null
+        if (targetDay.clients.isEmpty()) return@withContext null
+        val reordered = nearestNeighbourOrder(targetDay.clients, lat, lng)
+        targetDay.copy(clients = reordered)
+    }
+
     /**
      * Rebuild a single day's client list, blacklisting the previous picks so fresh names appear.
      * Clients assigned to other days are excluded — only freely-available clients are considered.
@@ -609,10 +622,15 @@ class WeeklyPlannerUseCase(
         serviceTypes: Set<ServiceType> = ServiceType.entries.toSet(),
         minDays: Int = 7,
         lat: Double = SHOP_LAT,
-        lng: Double = SHOP_LNG
+        lng: Double = SHOP_LNG,
+        lockedClientIds: Set<String> = emptySet()
     ): PlannedDay? = withContext(Dispatchers.Default) {
         val targetDay = currentPlan.days.getOrNull(dayIndex) ?: return@withContext null
         if (!targetDay.isWorkDay) return@withContext null
+
+        // Locked clients stay exactly as they are (preserving order and lock state)
+        val lockedClients = targetDay.clients.filter { it.client.id in lockedClientIds }
+        val lockedIds = lockedClients.map { it.client.id }.toSet()
 
         // IDs on OTHER days — these clients stay put
         val otherDayClientIds = currentPlan.days
@@ -621,8 +639,8 @@ class WeeklyPlannerUseCase(
             .map { it.client.id }
             .toSet()
 
-        // IDs on the current day — the blacklist (try different picks)
-        val blacklist = targetDay.clients.map { it.client.id }.toSet()
+        // Blacklist = non-locked current day clients (try different picks)
+        val blacklist = targetDay.clients.filter { it.client.id !in lockedIds }.map { it.client.id }.toSet()
 
         val allClients = clientRepository.loadAllClients()
         val propertyMap = allClients.mapNotNull { c -> c.property?.let { c.id to it } }.toMap()
@@ -639,9 +657,9 @@ class WeeklyPlannerUseCase(
             propertyMap = propertyMap
         )
 
-        // Pool = eligible minus other days and minus blacklist
+        // Pool = eligible minus other days, locked IDs, and blacklist
         val pool = eligibleSuggestions.filter { s ->
-            s.client.id !in otherDayClientIds && s.client.id !in blacklist
+            s.client.id !in otherDayClientIds && s.client.id !in blacklist && s.client.id !in lockedIds
         }.sortedWith(
             compareByDescending<ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
                 .thenByDescending { it.daysSinceLast == null }
@@ -658,8 +676,9 @@ class WeeklyPlannerUseCase(
         val anchor = if (targetDay.anchorLat != null && targetDay.anchorLng != null)
             DayAnchor(targetDay.anchorLat, targetDay.anchorLng, targetDay.anchorLabel ?: "") else null
 
-        val picked = mutableListOf<PlannedClient>()
-        var sqFtTotal = 0
+        // Start with locked clients; fill remaining slots from the pool
+        val picked = lockedClients.toMutableList()
+        var sqFtTotal = picked.sumOf { it.client.lawnSizeSqFt.takeIf { s -> s > 0 } ?: 0 }
 
         for (suggestion in pool) {
             if (picked.size >= softCap) break
@@ -708,8 +727,15 @@ class WeeklyPlannerUseCase(
             if (clientSqFt != null) sqFtTotal += clientSqFt
         }
 
-        // Route order
-        val ordered = if (picked.size > 1) nearestNeighbourOrder(picked, lat, lng) else picked
+        // Route order: if there are locked clients, preserve their positions and slot new picks around them
+        val ordered = if (lockedClients.isEmpty()) {
+            if (picked.size > 1) nearestNeighbourOrder(picked, lat, lng) else picked
+        } else {
+            // Route only the new (unlocked) picks, then interleave at the end after locked clients
+            val newPicks = picked.filter { it.client.id !in lockedIds }
+            val routedNew = if (newPicks.size > 1) nearestNeighbourOrder(newPicks, lat, lng) else newPicks
+            lockedClients + routedNew
+        }
 
         targetDay.copy(clients = ordered)
     }

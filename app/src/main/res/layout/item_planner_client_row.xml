@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="8dp"
+    android:layout_marginEnd="8dp"
+    android:layout_marginTop="3dp"
+    android:layout_marginBottom="3dp"
+    app:cardCornerRadius="10dp"
+    app:cardElevation="1dp"
+    app:strokeWidth="0dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
+
+        <!-- Drag handle -->
+        <ImageView
+            android:id="@+id/dragHandle"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:src="@drawable/ic_drag_handle"
+            android:contentDescription="Drag to reorder"
+            android:alpha="0.35" />
+
+        <!-- Fitness color bar -->
+        <View
+            android:id="@+id/fitnessDot"
+            android:layout_width="5dp"
+            android:layout_height="36dp"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/circle_dot" />
+
+        <!-- Main content -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/clientName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="2dp">
+
+                <!-- Step tag -->
+                <TextView
+                    android:id="@+id/clientStep"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:alpha="0.6" />
+
+                <!-- Overdue -->
+                <TextView
+                    android:id="@+id/clientOverdue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:textColor="#D32F2F"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:visibility="gone" />
+
+                <!-- Manually placed pin -->
+                <TextView
+                    android:id="@+id/clientPinned"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:text="📌"
+                    android:textSize="10sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <!-- Fitness label -->
+            <TextView
+                android:id="@+id/clientFitness"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                android:alpha="0.55" />
+
+        </LinearLayout>
+
+        <!-- Lock toggle button -->
+        <ImageButton
+            android:id="@+id/lockButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="Lock client to this day"
+            android:src="@android:drawable/ic_lock_idle_lock"
+            android:alpha="0.25" />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>
