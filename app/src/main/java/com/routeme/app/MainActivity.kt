@@ -36,6 +36,7 @@ import com.routeme.app.ui.SuggestionUiController
 import com.routeme.app.ui.StepPickerBottomSheet
 import com.routeme.app.ui.TrackingUiController
 import kotlinx.coroutines.launch
+import androidx.appcompat.widget.PopupMenu
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
@@ -171,7 +172,7 @@ class MainActivity : AppCompatActivity() {
             onTrackingEvent = ::handleTrackingEvent
         )
 
-        setSupportActionBar(binding.topToolbar)
+        binding.heroMenuButton.setOnClickListener { showMainMenu(it) }
 
         setupSplitFlapDigits()
         applyDarkOverlay()
@@ -1034,6 +1035,21 @@ class MainActivity : AppCompatActivity() {
             }
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    private fun showMainMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menuInflater.inflate(R.menu.main_menu, popup.menu)
+        val state = viewModel.uiState.value
+        popup.menu.findItem(R.id.action_cu_override)?.isChecked = state.cuOverrideEnabled
+        popup.menu.findItem(R.id.action_errands_mode)?.isChecked = state.errandsModeEnabled
+        val skipCount = viewModel.skippedCount()
+        popup.menu.findItem(R.id.action_clear_skips)?.title =
+            if (skipCount > 0) "Clear Skipped ($skipCount)" else getString(R.string.menu_clear_skips)
+        popup.menu.findItem(R.id.action_toggle_break_logging)?.isChecked =
+            viewModel.isNonClientLoggingEnabled()
+        popup.setOnMenuItemClickListener { item -> onOptionsItemSelected(item) }
+        popup.show()
     }
 
     private fun getDirectionMenuTitle(direction: RouteDirection): String {
