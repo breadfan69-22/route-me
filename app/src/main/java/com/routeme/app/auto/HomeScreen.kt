@@ -81,7 +81,7 @@ class HomeScreen(carContext: CarContext) : Screen(carContext), KoinComponent {
                     )
                     .setBrowsable(true)
                     .setOnClickListener {
-                        screenManager.push(SuggestionListScreen(carContext, showAll = false))
+                        screenManager.push(SuggestionListScreen(carContext, showAll = false, showDestinations = true))
                     }
                     .build()
             )

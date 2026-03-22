@@ -28,7 +28,8 @@ import org.koin.core.component.inject
 
 class SuggestionListScreen(
     carContext: CarContext,
-    private val showAll: Boolean = false
+    private val showAll: Boolean = false,
+    private val showDestinations: Boolean = false
 ) : Screen(carContext), KoinComponent {
 
     private val suggestionUseCase: SuggestionUseCase by inject()
@@ -51,7 +52,7 @@ class SuggestionListScreen(
         loading = true
         invalidate()
         lifecycleScope.launch {
-            errandsMode = prefs.errandsModeEnabled
+            errandsMode = showDestinations || prefs.errandsModeEnabled
             if (errandsMode) {
                 destinations = prefs.savedDestinations
             } else {
@@ -151,10 +152,17 @@ class SuggestionListScreen(
                     .setTitle(dest.name)
                     .addText(dest.address)
                     .setOnClickListener {
-                        val uri = android.net.Uri.parse("google.navigation:q=${dest.lat},${dest.lng}")
-                        carContext.startCarApp(
-                            android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                        val uri = android.net.Uri.parse(
+                            "geo:${dest.lat},${dest.lng}?q=${dest.lat},${dest.lng}(${android.net.Uri.encode(dest.name)})"
                         )
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri).apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try {
+                            carContext.applicationContext.startActivity(intent)
+                        } catch (e: Exception) {
+                            android.util.Log.e("SuggestionListScreen", "Nav launch failed", e)
+                        }
                     }
                     .build()
             )

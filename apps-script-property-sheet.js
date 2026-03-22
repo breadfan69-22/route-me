@@ -218,3 +218,108 @@ function jsonResponse(obj) {
     return ContentService.createTextOutput(JSON.stringify(obj))
         .setMimeType(ContentService.MimeType.JSON);
 }
+
+/**
+ * ONE-TIME BACKFILL: Geocode all client addresses and fill lat/lng columns.
+ *
+ * Run manually from the Apps Script editor (Run → geocodeAllAddresses).
+ * Uses Google's built-in Maps service — no API key needed.
+ *
+ * Expects columns named "lat" and "lng" in the header row, plus an
+ * "Address" column. Skips rows that already have lat/lng values.
+ *
+ * Google limits Maps.newGeocoder() to ~1,000 calls/day for the free tier.
+ * The function processes in batches and logs progress.
+ */
+function geocodeAllAddresses() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheets()[0];
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+
+    if (lastRow < 2) {
+        Logger.log("No data rows found.");
+        return;
+    }
+
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+        .map(function (h) { return h.toString().trim().toLowerCase(); });
+
+    var addrCol = -1, latCol = -1, lngCol = -1, zoneCol = -1;
+    for (var i = 0; i < headers.length; i++) {
+        if (headers[i] === "address") addrCol = i;
+        if (headers[i] === "lat") latCol = i;
+        if (headers[i] === "lng") lngCol = i;
+        if (headers[i] === "zone") zoneCol = i;
+    }
+
+    if (addrCol === -1) { Logger.log("ERROR: No 'Address' column found."); return; }
+    if (latCol === -1) { Logger.log("ERROR: No 'lat' column found."); return; }
+    if (lngCol === -1) { Logger.log("ERROR: No 'lng' column found."); return; }
+
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var geocoded = 0, skipped = 0, failed = 0;
+
+    var ZONE_CITY = {
+        "KAL": "Kalamazoo", "KZOO": "Kalamazoo", "N09": "Kalamazoo",
+        "S09": "Kalamazoo", "POR": "Portage", "RIC": "Richland",
+        "PW": "Plainwell", "MAR": "Marshall"
+    };
+
+    for (var r = 0; r < data.length; r++) {
+        var existingLat = data[r][latCol];
+        var existingLng = data[r][lngCol];
+
+        // Skip if already has coordinates
+        if (existingLat && existingLng &&
+            parseFloat(existingLat) !== 0 && parseFloat(existingLng) !== 0) {
+            skipped++;
+            continue;
+        }
+
+        var rawAddr = data[r][addrCol].toString().trim();
+        if (!rawAddr) { skipped++; continue; }
+
+        // Enrich address with zone city if no recognizable city/zip
+        var addr = rawAddr;
+        if (zoneCol >= 0 && !/\b\d{5}\b/.test(addr)) {
+            var zone = data[r][zoneCol].toString().trim().toUpperCase();
+            var city = ZONE_CITY[zone];
+            if (city && addr.toLowerCase().indexOf(city.toLowerCase()) === -1) {
+                addr = addr + ", " + city;
+            }
+        }
+        if (!/\bmi\b/i.test(addr)) {
+            addr = addr + ", MI";
+        }
+
+        try {
+            var response = Maps.newGeocoder().geocode(addr);
+            if (response.results && response.results.length > 0) {
+                var loc = response.results[0].geometry.location;
+                var rowNum = r + 2; // 1-indexed + header row
+                sheet.getRange(rowNum, latCol + 1).setValue(parseFloat(loc.lat.toFixed(7)));
+                sheet.getRange(rowNum, lngCol + 1).setValue(parseFloat(loc.lng.toFixed(7)));
+                geocoded++;
+                Logger.log("OK [" + rowNum + "] " + rawAddr + " → " + loc.lat.toFixed(7) + ", " + loc.lng.toFixed(7));
+            } else {
+                failed++;
+                Logger.log("FAIL [" + (r + 2) + "] " + addr + " — no results");
+            }
+        } catch (e) {
+            failed++;
+            Logger.log("ERROR [" + (r + 2) + "] " + addr + " — " + e.message);
+        }
+
+        // Throttle to stay under rate limits
+        Utilities.sleep(200);
+    }
+
+    Logger.log("Done! Geocoded: " + geocoded + ", Skipped: " + skipped + ", Failed: " + failed);
+    SpreadsheetApp.getUi().alert(
+        "Geocoding complete!\n\nGeocoded: " + geocoded +
+        "\nSkipped (already had coords): " + skipped +
+        "\nFailed: " + failed +
+        "\n\nCheck View → Logs for details."
+    );
+}
