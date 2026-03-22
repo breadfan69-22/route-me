@@ -1,10 +1,12 @@
 package com.routeme.app
 
+import android.os.PowerManager
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.routeme.app.domain.PropertyEstimator
 import com.routeme.app.network.AerialEstimationConfig
+import com.routeme.app.network.SheetsWriteBack
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -117,6 +119,83 @@ class BatchEstimationTest {
         Log.i(TAG, "  Estimated OK: $success")
         Log.i(TAG, "  Zero sqft (skipped DB write): $skippedZero")
         Log.i(TAG, "  Total processed: ${withCoords.size}")
+        Log.i(TAG, "═══════════════════════════════════════")
+    }
+
+    /**
+     * Reads lawn sizes from Room DB and writes them to the "Lawn Size" column
+     * on the Property Stats sheet via SheetsWriteBack.
+     *
+     * Run with:
+     *   adb shell am instrument -w -e class com.routeme.app.BatchEstimationTest#writeBackLawnSizes com.routeme.app.test/androidx.test.runner.AndroidJUnitRunner
+     */
+    @Test
+    fun writeBackLawnSizes() {
+        val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+        val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as PowerManager
+        val wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BatchEstimate:writeback")
+        wakeLock.acquire(60 * 60 * 1000L) // 60-minute ceiling
+
+        try {
+            writeBackLawnSizesInner(ctx)
+        } finally {
+            if (wakeLock.isHeld) wakeLock.release()
+        }
+    }
+
+    private fun writeBackLawnSizesInner(ctx: android.content.Context) {
+        val db = AppDatabase.getInstance(ctx)
+        val clientDao = db.clientDao()
+        val propertyDao = db.clientPropertyDao()
+
+        val allClients = runBlocking { clientDao.getAllClients() }
+        val allProperties = runBlocking { propertyDao.getAllProperties() }
+        val propMap = allProperties.associateBy { it.clientId }
+
+        val toWrite = allClients.mapNotNull { client ->
+            val prop = propMap[client.id] ?: return@mapNotNull null
+            if (prop.lawnSizeSqFt <= 0) return@mapNotNull null
+            client.name to prop.lawnSizeSqFt
+        }
+
+        Log.i(TAG, "═══════════════════════════════════════")
+        Log.i(TAG, "  LAWN SIZE WRITE-BACK TO SHEET")
+        Log.i(TAG, "  Clients with lawn size: ${toWrite.size}")
+        Log.i(TAG, "═══════════════════════════════════════")
+
+        var ok = 0
+        var fail = 0
+
+        for ((index, pair) in toWrite.withIndex()) {
+            val (name, sqft) = pair
+            var written = false
+            for (attempt in 1..3) {
+                val result = SheetsWriteBack.postPropertyRaw(name, "Lawn Size", sqft.toString())
+                if (result.success) {
+                    written = true
+                    break
+                }
+                Log.w(TAG, "  Retry $attempt for $name: ${result.message}")
+                Thread.sleep(3000L * attempt) // back off
+            }
+            if (written) {
+                ok++
+                if ((index + 1) % 25 == 0) {
+                    Log.i(TAG, "  Progress: ${index + 1}/${toWrite.size} (ok=$ok, fail=$fail)")
+                }
+            } else {
+                fail++
+                Log.w(TAG, "  FAIL [${index + 1}] $name: gave up after 3 attempts")
+            }
+            Thread.sleep(200) // gentle throttle to avoid hammering Apps Script
+        }
+
+        Log.i(TAG, "")
+        Log.i(TAG, "═══════════════════════════════════════")
+        Log.i(TAG, "  WRITE-BACK COMPLETE")
+        Log.i(TAG, "  OK: $ok")
+        Log.i(TAG, "  Failed: $fail")
+        Log.i(TAG, "  Total: ${toWrite.size}")
         Log.i(TAG, "═══════════════════════════════════════")
     }
 }
