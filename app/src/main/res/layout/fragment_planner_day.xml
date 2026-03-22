@@ -40,7 +40,14 @@
             android:text="📍 Set anchor"
             android:textSize="12sp"
             style="@style/Widget.Material3.Chip.Assist" />
-
+        <com.google.android.material.chip.Chip
+            android:id="@+id/rebuildChip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:text="\U0001F504 Rebuild"
+            android:textSize="12sp"
+            style="@style/Widget.Material3.Chip.Assist" />
     </LinearLayout>
 
     <!-- Client chips grid -->

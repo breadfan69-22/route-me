@@ -26,6 +26,7 @@ import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.db.SavedWeekPlanEntity
 import com.routeme.app.data.db.WeekPlanDao
 import com.routeme.app.domain.DayAnchor
+import com.routeme.app.domain.WeeklyPlannerUseCase
 import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.network.GeocodingHelper
@@ -41,6 +42,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
 
     private val weekPlanDao: WeekPlanDao by inject()
     private val clientRepository: ClientRepository by inject()
+    private val weeklyPlannerUseCase: WeeklyPlannerUseCase by inject()
 
     private lateinit var viewPager: ViewPager2
     private lateinit var tabLayout: TabLayout
@@ -384,6 +386,25 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         findDayFragment(dayIndex)?.updateDay(days[dayIndex])
         savePlanToRoom()
         Snackbar.make(viewPager, "Anchor cleared", Snackbar.LENGTH_SHORT).show()
+    }
+
+    fun rebuildDay(dayIndex: Int) {
+        val plan = weekPlan ?: return
+        lifecycleScope.launch {
+            val newDay = weeklyPlannerUseCase.rebuildDay(plan, dayIndex)
+            if (newDay != null) {
+                val days = plan.days.toMutableList()
+                days[dayIndex] = newDay
+                val updated = plan.copy(days = days)
+                weekPlan = updated
+                findDayFragment(dayIndex)?.updateDay(newDay)
+                toolbar.subtitle = "${updated.totalClients} clients \u2022 ${updated.unassignedCount} unassigned"
+                savePlanToRoom()
+                Snackbar.make(viewPager, "${newDay.dayName} rebuilt \u2014 ${newDay.clients.size} clients", Snackbar.LENGTH_SHORT).show()
+            } else {
+                Snackbar.make(viewPager, "Cannot rebuild this day", Snackbar.LENGTH_SHORT).show()
+            }
+        }
     }
 
     fun geocodeAndSetAnchor(dayIndex: Int, address: String) {

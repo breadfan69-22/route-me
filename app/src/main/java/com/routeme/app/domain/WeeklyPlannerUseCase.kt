@@ -2,6 +2,7 @@ package com.routeme.app.domain
 
 import com.routeme.app.Client
 import com.routeme.app.ClientProperty
+import com.routeme.app.ClientSuggestion
 import com.routeme.app.RouteDirection
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
@@ -144,7 +145,11 @@ class WeeklyPlannerUseCase(
                     corridorScore(suggestion.client, lat, lng, day.anchorLat, day.anchorLng)
                 }
 
-                val geoBonus = maxOf(zoneDensityBonus, corridorBonus)
+                // Proximity bonus: reward being physically near an already-assigned client
+                val proximityBonus = if (blockedByMow) 0 else
+                    proximityScore(suggestion.client, day.clients)
+
+                val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus
                 val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
                 DayFitness(day, finalScore, reason)
             }
@@ -497,7 +502,161 @@ class WeeklyPlannerUseCase(
             }
         }
 
+        // Rotate the loop to find the best start/end cut point.
+        // The 2-opt optimised a closed loop; now find which rotation minimises
+        // the open-path distance (shop → first → … → last → shop).
+        if (sorted.size > 2) {
+            val distances = (0 until sorted.size).map { start ->
+                val rotated = (sorted.subList(start, sorted.size) + sorted.subList(0, start)).toMutableList()
+                routeDistance(rotated)
+            }
+            val bestStart = distances.indices.minByOrNull { distances[it] } ?: 0
+            if (bestStart > 0) {
+                val rotated = (sorted.subList(bestStart, sorted.size) + sorted.subList(0, bestStart))
+                sorted.clear()
+                sorted.addAll(rotated)
+            }
+        }
+
         return sorted + ungeocoded
+    }
+
+    /**
+     * Rebuild a single day's client list, blacklisting the previous picks so fresh names appear.
+     * Clients assigned to other days are excluded — only freely-available clients are considered.
+     */
+    suspend fun rebuildDay(
+        currentPlan: WeekPlan,
+        dayIndex: Int,
+        serviceTypes: Set<ServiceType> = ServiceType.entries.toSet(),
+        minDays: Int = 7,
+        lat: Double = SHOP_LAT,
+        lng: Double = SHOP_LNG
+    ): PlannedDay? = withContext(Dispatchers.Default) {
+        val targetDay = currentPlan.days.getOrNull(dayIndex) ?: return@withContext null
+        if (!targetDay.isWorkDay) return@withContext null
+
+        // IDs on OTHER days — these clients stay put
+        val otherDayClientIds = currentPlan.days
+            .filterIndexed { i, _ -> i != dayIndex }
+            .flatMap { it.clients }
+            .map { it.client.id }
+            .toSet()
+
+        // IDs on the current day — the blacklist (try different picks)
+        val blacklist = targetDay.clients.map { it.client.id }.toSet()
+
+        val allClients = clientRepository.loadAllClients()
+        val propertyMap = allClients.mapNotNull { c -> c.property?.let { c.id to it } }.toMap()
+
+        val eligibleSuggestions = routingEngine.rankClients(
+            clients = allClients,
+            serviceTypes = serviceTypes,
+            minDays = minDays,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD,
+            weather = null,
+            recentPrecipInches = null,
+            propertyMap = propertyMap
+        )
+
+        // Pool = eligible minus other days and minus blacklist
+        val pool = eligibleSuggestions.filter { s ->
+            s.client.id !in otherDayClientIds && s.client.id !in blacklist
+        }.sortedWith(
+            compareByDescending<ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
+                .thenByDescending { it.daysSinceLast == null }
+        )
+
+        // Target size: same as original count or soft cap
+        val totalWorkDays = currentPlan.days.count { it.isWorkDay }
+        val targetPerDay = ceil(eligibleSuggestions.size.toDouble() / totalWorkDays.coerceAtLeast(1).toDouble())
+            .toInt().coerceAtLeast(1)
+        val softCap = minOf(targetPerDay + 2, AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY)
+
+        val forecast = targetDay.forecast ?: return@withContext null
+        val dayOfWeek = targetDay.dayOfWeek
+        val anchor = if (targetDay.anchorLat != null && targetDay.anchorLng != null)
+            DayAnchor(targetDay.anchorLat, targetDay.anchorLng, targetDay.anchorLabel ?: "") else null
+
+        val picked = mutableListOf<PlannedClient>()
+        var sqFtTotal = 0
+
+        for (suggestion in pool) {
+            if (picked.size >= softCap) break
+
+            val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
+            val daysSinceMow = if (clientMowDay != null) ((dayOfWeek - clientMowDay + 7) % 7) else null
+            val blockedByMow = daysSinceMow != null && (daysSinceMow in 0..1 || daysSinceMow == 6)
+            if (blockedByMow) continue
+
+            val (fitnessScore, reason) = scoreClientDayFitness(
+                client = suggestion.client,
+                property = suggestion.client.property,
+                forecast = forecast,
+                dayOfWeek = dayOfWeek,
+                eligibleSteps = suggestion.eligibleSteps
+            )
+
+            val zoneDensityBonus = if (suggestion.client.zone.isBlank()) 0 else {
+                val sameZoneCount = picked.count { it.client.zone == suggestion.client.zone }
+                minOf(
+                    sameZoneCount * AppConfig.WeeklyPlanner.ZONE_DENSITY_BONUS_PER_CLIENT,
+                    AppConfig.WeeklyPlanner.ZONE_DENSITY_BONUS_MAX
+                )
+            }
+
+            val corridorBonus = if (anchor != null) {
+                corridorScore(suggestion.client, lat, lng, anchor.lat, anchor.lng)
+            } else 0
+
+            val proximityBonus = proximityScore(suggestion.client, picked)
+
+            val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus
+            val finalScore = fitnessScore + geoBonus
+
+            val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
+            if (clientSqFt != null && sqFtTotal + clientSqFt > AppConfig.WeeklyPlanner.MAX_SQFT_PER_DAY) continue
+
+            picked += PlannedClient(
+                client = suggestion.client,
+                fitnessScore = finalScore,
+                fitnessLabel = fitnessScoreToLabel(finalScore).displayText,
+                primaryReason = reason,
+                eligibleSteps = suggestion.eligibleSteps,
+                daysOverdue = suggestion.daysSinceLast
+            )
+            if (clientSqFt != null) sqFtTotal += clientSqFt
+        }
+
+        // Route order
+        val ordered = if (picked.size > 1) nearestNeighbourOrder(picked, lat, lng) else picked
+
+        targetDay.copy(clients = ordered)
+    }
+
+    /**
+     * Proximity bonus: how close a client is to any already-assigned client on the day.
+     * Returns 0–GEO_AFFINITY_MAX_BONUS, scaling linearly from max at 0 mi to 0 at GEO_AFFINITY_RADIUS_MILES.
+     */
+    private fun proximityScore(client: Client, dayClients: List<PlannedClient>): Int {
+        val cLat = client.latitude ?: return 0
+        val cLng = client.longitude ?: return 0
+        val cosLat = kotlin.math.cos(Math.toRadians(cLat))
+
+        val closestMiles = dayClients.mapNotNull { existing ->
+            val eLat = existing.client.latitude ?: return@mapNotNull null
+            val eLng = existing.client.longitude ?: return@mapNotNull null
+            val dLat = (cLat - eLat) * 69.0
+            val dLng = (cLng - eLng) * 69.0 * cosLat
+            sqrt(dLat * dLat + dLng * dLng)
+        }.minOrNull() ?: return 0
+
+        val radius = AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES
+        if (closestMiles >= radius) return 0
+        val fraction = 1.0 - (closestMiles / radius)
+        return (fraction * AppConfig.WeeklyPlanner.GEO_AFFINITY_MAX_BONUS).toInt()
     }
 
     /**

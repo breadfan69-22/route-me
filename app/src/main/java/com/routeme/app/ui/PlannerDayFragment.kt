@@ -47,6 +47,7 @@ class PlannerDayFragment : Fragment() {
         rv.adapter = chipAdapter
 
         view.findViewById<Chip>(R.id.anchorChip).setOnClickListener { showAnchorDialog() }
+        view.findViewById<Chip>(R.id.rebuildChip).setOnClickListener { confirmRebuild() }
 
         // Pull data from Activity — survives fragment recreation by ViewPager2
         val day = (activity as? WeeklyPlannerActivity)?.getPlannedDay(dayIndex)
@@ -108,6 +109,18 @@ class PlannerDayFragment : Fragment() {
             emptyText.visibility = View.GONE
             chipAdapter.submitList(day.clients)
         }
+    }
+
+    private fun confirmRebuild() {
+        val day = plannedDay ?: return
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Rebuild ${day.dayName}?")
+            .setMessage("Replace all ${day.clients.size} clients with different picks.")
+            .setPositiveButton("Rebuild") { _, _ ->
+                (activity as? WeeklyPlannerActivity)?.rebuildDay(dayIndex)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showAnchorDialog() {
