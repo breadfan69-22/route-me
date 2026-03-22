@@ -36,6 +36,9 @@ import com.routeme.app.ui.SuggestionUiController
 import com.routeme.app.ui.StepPickerBottomSheet
 import com.routeme.app.ui.TrackingUiController
 import kotlinx.coroutines.launch
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.appcompat.widget.PopupMenu
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
@@ -142,8 +145,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Apply status bar inset to the spacer so hero doesn't overlap system UI
+        ViewCompat.setOnApplyWindowInsetsListener(binding.statusBarSpacer) { view, insets ->
+            val statusBarHeight = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            view.layoutParams.height = statusBarHeight
+            view.requestLayout()
+            insets
+        }
+
         suggestionUiController = SuggestionUiController(binding, viewModel,
             onSuggestionTapped = { suggestion -> showClientActionDialog(suggestion.client) })
         trackingUiController = TrackingUiController(
