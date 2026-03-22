@@ -172,7 +172,7 @@ class MainActivity : AppCompatActivity() {
             onTrackingEvent = ::handleTrackingEvent
         )
 
-        binding.heroMenuButton?.setOnClickListener { showMainMenu(it) }
+        binding.heroMenuButton.setOnClickListener { showMainMenu(it) }
 
         setupSplitFlapDigits()
         applyDarkOverlay()
