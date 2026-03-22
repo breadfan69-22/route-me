@@ -6,16 +6,13 @@
     android:background="@color/neumorph_surface"
     android:orientation="vertical">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topToolbar"
+    <!-- Thin status-bar spacer (time / battery / signal) -->
+    <View
+        android:id="@+id/statusBarSpacer"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:background="?attr/colorPrimaryContainer"
-        android:minHeight="?attr/actionBarSize"
-        android:visibility="gone"
-        app:popupTheme="@style/ThemeOverlay.RouteMe.PopupMenu"
-        app:title="@string/app_name"
-        app:titleTextColor="?attr/colorOnPrimaryContainer" />
+        android:fitsSystemWindows="true" />
 
     <!-- ═══════════ DASHBOARD HERO (1/3 screen) ═══════════ -->
     <FrameLayout

@@ -6,15 +6,13 @@
     android:background="@color/neumorph_surface"
     android:orientation="vertical">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/topToolbar"
+    <!-- Thin status-bar spacer (time / battery / signal) -->
+    <View
+        android:id="@+id/statusBarSpacer"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
         android:background="?attr/colorPrimaryContainer"
-        android:minHeight="?attr/actionBarSize"
-        app:popupTheme="@style/ThemeOverlay.RouteMe.PopupMenu"
-        app:title="@string/app_name"
-        app:titleTextColor="?attr/colorOnPrimaryContainer" />
+        android:fitsSystemWindows="true" />
 
     <!-- ═══════ 3-COLUMN CONTENT (fills remaining height) ═══════ -->
     <LinearLayout
@@ -307,6 +305,17 @@
                     android:layout_marginStart="8dp"
                     android:gravity="center_vertical"
                     android:orientation="horizontal" />
+
+                <ImageButton
+                    android:id="@+id/heroMenuButton"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_more_horiz"
+                    app:tint="@android:color/white"
+                    android:contentDescription="More options"
+                    android:padding="6dp" />
 
             </LinearLayout>
 

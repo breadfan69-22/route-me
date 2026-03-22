@@ -32,12 +32,11 @@ class SmokeInstrumentationTest {
     }
 
     @Test
-    fun mainActivity_displaysTopToolbar() {
+    fun mainActivity_displaysStatusBarSpacer() {
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario.onActivity { activity ->
-            val toolbar = activity.findViewById<View>(R.id.topToolbar)
-            assertNotNull(toolbar)
-            assertTrue(toolbar.visibility == View.VISIBLE)
+            val spacer = activity.findViewById<View>(R.id.statusBarSpacer)
+            assertNotNull(spacer)
         }
         scenario.close()
     }
