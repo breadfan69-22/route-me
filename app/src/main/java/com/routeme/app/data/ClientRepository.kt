@@ -41,7 +41,11 @@ class ClientRepository(
     private val geocodeCacheDao: com.routeme.app.data.db.GeocodeCacheDao? = null
 ) {
     suspend fun loadAllClients(): List<Client> = withContext(Dispatchers.IO) {
-        clientDao.getAllClientsWithRecords().map { it.toDomain() }
+        val clients = clientDao.getAllClientsWithRecords().map { it.toDomain() }
+        val result = applyCachedCoordinates(clients)
+        val withCoords = result.count { it.latitude != null }
+        android.util.Log.d("AutoSuggestions", "loadAllClients: ${clients.size} raw, $withCoords with coords after cache overlay")
+        result
     }
 
     suspend fun loadClientById(clientId: String): Client? = withContext(Dispatchers.IO) {
@@ -349,6 +353,10 @@ class ClientRepository(
             val lng = client.longitude
             if (lat != null && lng != null) {
                 clientDao.updateClientCoordinates(client.id, lat, lng)
+                if (SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+                    runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lat", "%.7f".format(lat)) }
+                    runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lng", "%.7f".format(lng)) }
+                }
             }
         }
         upsertGeocodeCacheEntries(cacheEntriesFrom(result.clients))
@@ -382,9 +390,11 @@ class ClientRepository(
             .mapNotNull { addressKeyFor(it) }
             .toSet()
 
+        android.util.Log.d("AutoSuggestions", "applyCachedCoords: ${keysNeedingCoordinates.size} keys needing coords, geocodeCacheDao=${geocodeCacheDao != null}")
         if (keysNeedingCoordinates.isEmpty()) return clients
 
         val cachedCoordinates = cachedCoordsByKey(keysNeedingCoordinates)
+        android.util.Log.d("AutoSuggestions", "applyCachedCoords: ${cachedCoordinates.size} cache hits")
         if (cachedCoordinates.isEmpty()) return clients
 
         return clients.map { client ->
@@ -584,7 +594,9 @@ class ClientRepository(
         val clientsByName = allClients.associateBy { it.name.lowercase().trim() }
 
         var updatedCount = 0
+        var coordsUpdated = 0
         val now = System.currentTimeMillis()
+        val coordCacheEntries = mutableListOf<GeocodeCacheEntity>()
 
         for (i in 0 until rows.length()) {
             val row = rows.optJSONObject(i) ?: continue
@@ -594,6 +606,25 @@ class ClientRepository(
             val entity = clientsByName[name.lowercase()] ?: continue
             val clientId = entity.id
             val existing = clientPropertyDao.getPropertyForClient(clientId)
+
+            // Read lat/lng from property sheet
+            val sheetLat = row.optDouble("Latitude", Double.NaN).takeIf { !it.isNaN() && it in -90.0..90.0 }
+                ?: row.optDouble("lat", Double.NaN).takeIf { !it.isNaN() && it in -90.0..90.0 }
+            val sheetLng = row.optDouble("Longitude", Double.NaN).takeIf { !it.isNaN() && it in -180.0..180.0 }
+                ?: row.optDouble("lng", Double.NaN).takeIf { !it.isNaN() && it in -180.0..180.0 }
+            if (sheetLat != null && sheetLng != null) {
+                clientDao.updateClientCoordinates(clientId, sheetLat, sheetLng)
+                coordsUpdated++
+                val cacheKey = addressKeyFor(entity.address, entity.zone)
+                if (cacheKey != null) {
+                    coordCacheEntries.add(GeocodeCacheEntity(
+                        addressKey = cacheKey,
+                        latitude = sheetLat,
+                        longitude = sheetLng,
+                        updatedAtMillis = now
+                    ))
+                }
+            }
 
             val sheetSunShade = SunShade.fromStorage(
                 row.optString("Sun/Shade", "")
@@ -645,7 +676,13 @@ class ClientRepository(
             updatedCount++
         }
 
-        PropertySyncResult(updatedCount, "Property sheet: $updatedCount client(s) updated.")
+        // Populate geocode cache for future loads
+        if (coordCacheEntries.isNotEmpty()) {
+            upsertGeocodeCacheEntries(coordCacheEntries)
+        }
+
+        val coordMsg = if (coordsUpdated > 0) ", $coordsUpdated coordinates" else ""
+        PropertySyncResult(updatedCount, "Property sheet: $updatedCount client(s) updated$coordMsg.")
     }
 
     private fun fetchJsonGet(urlString: String): JSONObject {

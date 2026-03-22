@@ -1,6 +1,7 @@
 package com.routeme.app.data
 
 import android.content.Context
+import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
 import org.json.JSONArray
@@ -44,6 +45,25 @@ class PreferencesRepository(context: Context) {
     var selectedSteps: String
         get() = prefs.getString(PREF_SELECTED_STEPS, "") ?: ""
         set(value) = prefs.edit().putString(PREF_SELECTED_STEPS, value).apply()
+
+    /** Current route direction (OUTWARD or HOMEWARD). */
+    var routeDirection: RouteDirection
+        get() {
+            val name = prefs.getString(PREF_ROUTE_DIRECTION, null)
+            return name?.let { runCatching { RouteDirection.valueOf(it) }.getOrNull() }
+                ?: RouteDirection.OUTWARD
+        }
+        set(value) = prefs.edit().putString(PREF_ROUTE_DIRECTION, value.name).apply()
+
+    /** Minimum days since last service for suggestion eligibility. */
+    var minDays: Int
+        get() = prefs.getInt(PREF_MIN_DAYS, 21)
+        set(value) = prefs.edit().putInt(PREF_MIN_DAYS, value).apply()
+
+    /** Whether CU override (treat CU-blocked clients as eligible) is enabled. */
+    var cuOverrideEnabled: Boolean
+        get() = prefs.getBoolean(PREF_CU_OVERRIDE, false)
+        set(value) = prefs.edit().putBoolean(PREF_CU_OVERRIDE, value).apply()
 
     /** Whether destination-only errands routing mode is enabled. */
     var errandsModeEnabled: Boolean
@@ -151,6 +171,9 @@ class PreferencesRepository(context: Context) {
         private const val PREF_SELECTED_STEPS = "selected_steps"
         private const val PREF_ERRANDS_MODE = "errands_mode"
         private const val PREF_SELECTED_STEPS_DATE = "selected_steps_date"
+        private const val PREF_ROUTE_DIRECTION = "route_direction"
+        private const val PREF_MIN_DAYS = "min_days"
+        private const val PREF_CU_OVERRIDE = "cu_override"
         private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
         private const val PREF_ACTIVE_DESTINATION = "active_destination"
 

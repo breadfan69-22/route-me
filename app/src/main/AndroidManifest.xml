@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- POI apps don't need NAVIGATION_TEMPLATES -->
 
     <application
         android:name=".RouteMeApplication"
@@ -48,6 +49,27 @@
             android:name=".LocationTrackingService"
             android:foregroundServiceType="location"
             android:exported="false" />
+
+        <service
+            android:name=".auto.RouteMeCarAppService"
+            android:exported="true"
+            android:permission="androidx.car.app.ACCESS_SURFACE">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.POI" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.car.app.minCarApiLevel"
+                android:value="1" />
+        </service>
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="1" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

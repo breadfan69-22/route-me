@@ -127,7 +127,7 @@
                 android:layout_marginStart="8dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_more_horiz"
-                android:imageTintList="@android:color/white"
+                app:tint="@android:color/white"
                 android:contentDescription="More options"
                 android:padding="6dp" />
 
