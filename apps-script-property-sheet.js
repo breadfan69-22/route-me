@@ -39,6 +39,9 @@
 
 function doGet(e) {
     try {
+        if (e.parameter && e.parameter.action === "exportAll") {
+            return jsonResponse(exportAll());
+        }
         if (e.parameter && e.parameter.clientName && e.parameter.column && e.parameter.value) {
             var data = {
                 clientName: e.parameter.clientName,
@@ -56,6 +59,30 @@ function doGet(e) {
     } catch (error) {
         return jsonResponse({ status: "error", message: error.message });
     }
+}
+
+function exportAll() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheets()[0];
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return { status: "ok", rows: [] };
+
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0]
+        .map(function (h) { return h.toString().trim(); });
+    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var rows = [];
+
+    for (var r = 0; r < data.length; r++) {
+        var name = data[r][0].toString().trim();
+        if (!name) continue;
+        var obj = {};
+        for (var c = 0; c < headers.length; c++) {
+            if (headers[c]) obj[headers[c]] = data[r][c].toString().trim();
+        }
+        rows.push(obj);
+    }
+    return { status: "ok", rows: rows };
 }
 
 function doPost(e) {
