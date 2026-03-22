@@ -2264,7 +2264,7 @@ class MainViewModel(
     }
 
     /** Generate and show a weather-aware plan for the next 7 days. */
-    fun showWeeklyPlanner() {
+    fun showWeeklyPlanner(dayAnchors: Map<Int, com.routeme.app.domain.DayAnchor> = emptyMap()) {
         val planner = weeklyPlannerUseCase ?: run {
             viewModelScope.launch { setStatus("Weekly planner is not available") }
             return
@@ -2277,7 +2277,8 @@ class MainViewModel(
             val result = runCatching {
                 planner.generateWeekPlan(
                     serviceTypes = selectedTypes,
-                    minDays = state.minDays
+                    minDays = state.minDays,
+                    dayAnchors = dayAnchors
                 )
             }
 

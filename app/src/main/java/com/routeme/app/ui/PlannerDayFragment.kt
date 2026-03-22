@@ -4,10 +4,13 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.chip.Chip
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.routeme.app.R
 import com.routeme.app.model.PlannedClient
@@ -43,6 +46,8 @@ class PlannerDayFragment : Fragment() {
         rv.layoutManager = GridLayoutManager(requireContext(), 2)
         rv.adapter = chipAdapter
 
+        view.findViewById<Chip>(R.id.anchorChip).setOnClickListener { showAnchorDialog() }
+
         // Pull data from Activity — survives fragment recreation by ViewPager2
         val day = (activity as? WeeklyPlannerActivity)?.getPlannedDay(dayIndex)
         if (day != null) bindDay(day)
@@ -55,10 +60,12 @@ class PlannerDayFragment : Fragment() {
 
     private fun bindDay(day: PlannedDay) {
         val v = view ?: return
+        plannedDay = day
         val weatherHeader = v.findViewById<TextView>(R.id.weatherHeader)
         val scoreBadge = v.findViewById<TextView>(R.id.dayScoreBadge)
         val rv = v.findViewById<RecyclerView>(R.id.chipRecyclerView)
         val emptyText = v.findViewById<TextView>(R.id.emptyText)
+        val anchorChip = v.findViewById<Chip>(R.id.anchorChip)
 
         // Weather
         val forecast = day.forecast
@@ -79,6 +86,18 @@ class PlannerDayFragment : Fragment() {
         val bg = scoreBadge.background?.mutate()
         if (bg is android.graphics.drawable.GradientDrawable) bg.setColor(badgeColor)
 
+        // Anchor chip
+        if (day.anchorLabel != null) {
+            anchorChip.text = "📍 ${day.anchorLabel}"
+            anchorChip.isCloseIconVisible = true
+            anchorChip.setOnCloseIconClickListener {
+                (activity as? WeeklyPlannerActivity)?.clearAnchor(dayIndex)
+            }
+        } else {
+            anchorChip.text = "📍 Set anchor"
+            anchorChip.isCloseIconVisible = false
+        }
+
         // Clients
         if (day.clients.isEmpty() || !day.isWorkDay) {
             rv.visibility = View.GONE
@@ -89,6 +108,58 @@ class PlannerDayFragment : Fragment() {
             emptyText.visibility = View.GONE
             chipAdapter.submitList(day.clients)
         }
+    }
+
+    private fun showAnchorDialog() {
+        val plannerActivity = activity as? WeeklyPlannerActivity ?: return
+        val day = plannedDay ?: return
+
+        val zoneOptions = plannerActivity.getAvailableZones()
+        if (zoneOptions.isEmpty()) return
+
+        // Option list: zone centroids + "Custom address…"
+        val labels = zoneOptions.map { it.label }.toTypedArray() + "Custom address…"
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Set anchor for ${day.dayName}")
+            .setItems(labels) { _, which ->
+                if (which < zoneOptions.size) {
+                    val zone = zoneOptions[which]
+                    plannerActivity.setAnchor(dayIndex, zone.lat, zone.lng, zone.label)
+                } else {
+                    showCustomAddressDialog()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showCustomAddressDialog() {
+        val plannerActivity = activity as? WeeklyPlannerActivity ?: return
+        val day = plannedDay ?: return
+
+        val input = EditText(requireContext()).apply {
+            hint = "Address or place name"
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, pad, pad, pad)
+        }
+        val container = LinearLayout(requireContext()).apply {
+            val pad = (16 * resources.displayMetrics.density).toInt()
+            setPadding(pad, 0, pad, 0)
+            addView(input)
+        }
+
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("Custom anchor for ${day.dayName}")
+            .setView(container)
+            .setPositiveButton("Geocode & Set") { _, _ ->
+                val address = input.text.toString().trim()
+                if (address.isNotBlank()) {
+                    plannerActivity.geocodeAndSetAnchor(dayIndex, address)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun showClientDetails(planned: PlannedClient) {

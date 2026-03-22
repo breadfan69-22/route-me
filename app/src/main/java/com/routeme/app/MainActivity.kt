@@ -124,8 +124,18 @@ class MainActivity : AppCompatActivity() {
     private val weeklyPlannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == com.routeme.app.ui.WeeklyPlannerActivity.RESULT_REGENERATE) {
-            viewModel.showWeeklyPlanner()
+        when (result.resultCode) {
+            com.routeme.app.ui.WeeklyPlannerActivity.RESULT_REGENERATE -> {
+                val anchors = com.routeme.app.ui.WeeklyPlannerActivity.extractAnchors(result.data)
+                viewModel.showWeeklyPlanner(dayAnchors = anchors)
+            }
+            com.routeme.app.ui.WeeklyPlannerActivity.RESULT_START_ROUTE -> {
+                val destinations = com.routeme.app.ui.WeeklyPlannerActivity.extractRouteDestinations(result.data)
+                if (!destinations.isNullOrEmpty()) {
+                    viewModel.replaceDestinationQueue(destinations, activeDestinationIndex = 0)
+                    Snackbar.make(binding.root, "Route loaded: ${destinations.size} stops", Snackbar.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 

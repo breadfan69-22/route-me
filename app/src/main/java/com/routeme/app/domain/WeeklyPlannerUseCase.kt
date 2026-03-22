@@ -20,6 +20,7 @@ import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
 import kotlin.math.atan2
 import kotlin.math.ceil
+import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -35,7 +36,8 @@ class WeeklyPlannerUseCase(
         lat: Double = SHOP_LAT,
         lng: Double = SHOP_LNG,
         serviceTypes: Set<ServiceType> = ServiceType.entries.toSet(),
-        minDays: Int = 7
+        minDays: Int = 7,
+        dayAnchors: Map<Int, DayAnchor> = emptyMap()
     ): WeekPlan = withContext(Dispatchers.Default) {
         val forecastDays = weatherRepository.getForecastDays(dayCount = 7, lat = lat, lng = lng)
         val allClients = clientRepository.loadAllClients()
@@ -66,7 +68,10 @@ class WeeklyPlannerUseCase(
                 dayName = DateUtils.dayName(dayOfWeek),
                 forecast = forecast,
                 dayScore = score,
-                dayScoreLabel = dayScoreToLabel(score)
+                dayScoreLabel = dayScoreToLabel(score),
+                anchorLat = dayAnchors[dayOfWeek]?.lat,
+                anchorLng = dayAnchors[dayOfWeek]?.lng,
+                anchorLabel = dayAnchors[dayOfWeek]?.label
             )
         }.toMutableList()
 
@@ -89,50 +94,17 @@ class WeeklyPlannerUseCase(
         // Track accumulated sq ft per day for the sq-ft hard cap.
         val sqFtPerDay = mutableMapOf<PlannedDayBuilder, Int>()
 
+        // Sort by urgency (most overdue first) — tiebreaker only, not primary driver.
         val sortedClients = eligibleSuggestions.sortedWith(
             compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
                 .thenByDescending { it.daysSinceLast == null }
         )
 
-        // Pre-compute geographic clusters via union-find so nearby clients
-        // are strongly encouraged to land on the same work day.
-        val clusterOf = mutableMapOf<String, String>()  // clientId → representative id
-        fun findRoot(id: String): String {
-            var cur = id
-            while (clusterOf[cur] != cur) cur = clusterOf[cur] ?: cur
-            return cur
-        }
-        fun union(a: String, b: String) {
-            val ra = findRoot(a); val rb = findRoot(b)
-            if (ra != rb) clusterOf[ra] = rb
-        }
-        val geocodedSuggestions = sortedClients.filter {
-            it.client.latitude != null && it.client.longitude != null
-        }
-        geocodedSuggestions.forEach { clusterOf[it.client.id] = it.client.id }
-        for (i in geocodedSuggestions.indices) {
-            val a = geocodedSuggestions[i]
-            for (j in i + 1 until geocodedSuggestions.size) {
-                val b = geocodedSuggestions[j]
-                val dist = routingEngine.distanceMilesBetween(
-                    a.client.latitude!!, a.client.longitude!!,
-                    b.client.latitude!!, b.client.longitude!!
-                )
-                if (dist < AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES) {
-                    union(a.client.id, b.client.id)
-                }
-            }
-        }
-        // Track which day each cluster root was first assigned to.
-        val clusterDayAssignment = mutableMapOf<String, PlannedDayBuilder>()
-
         var assignedCount = 0
 
         for (suggestion in sortedClients) {
-            val clientLat = suggestion.client.latitude
-            val clientLng = suggestion.client.longitude
             val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
-            val clusterRoot = if (clientLat != null && clientLng != null) findRoot(suggestion.client.id) else null
+            val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
 
             val dayFitness = workDays.map { day ->
                 val (fitnessScore, reason) = scoreClientDayFitness(
@@ -142,30 +114,46 @@ class WeeklyPlannerUseCase(
                     dayOfWeek = day.dayOfWeek,
                     eligibleSteps = suggestion.eligibleSteps
                 )
-                // Geographic affinity: bonus when this day already has nearby clients.
-                val geoBonus = if (clientLat != null && clientLng != null && day.clients.isNotEmpty()) {
-                    val minDist = day.clients
-                        .mapNotNull { pc ->
-                            val pcLat = pc.client.latitude ?: return@mapNotNull null
-                            val pcLng = pc.client.longitude ?: return@mapNotNull null
-                            routingEngine.distanceMilesBetween(clientLat, clientLng, pcLat, pcLng)
-                        }
-                        .minOrNull()
-                    if (minDist != null && minDist < AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES) {
-                        val fraction = 1.0 - (minDist / AppConfig.WeeklyPlanner.GEO_AFFINITY_RADIUS_MILES)
-                        (fraction * AppConfig.WeeklyPlanner.GEO_AFFINITY_MAX_BONUS).toInt()
-                    } else 0
-                } else 0
 
-                // Cluster cohesion: heavy bonus if this client's cluster already has members on this day.
-                val clusterBonus = if (clusterRoot != null && clusterDayAssignment[clusterRoot] == day) {
-                    AppConfig.WeeklyPlanner.CLUSTER_COHESION_BONUS
-                } else 0
+                // Hard block: mow day, day-after-mow, and day-before-mow are ineligible.
+                // 0 = mow day, 1 = day after, 6 = day before next mow
+                val daysSinceMow = if (clientMowDay != null) {
+                    ((day.dayOfWeek - clientMowDay + 7) % 7)
+                } else null
+                val blockedByMow = daysSinceMow != null && (daysSinceMow in 0..1 || daysSinceMow == 6)
 
-                DayFitness(day, fitnessScore + geoBonus + clusterBonus, reason)
+                // Zone density bonus: reward days that already have same-zone clients.
+                // Applied AFTER mow filter — never added to a blocked day.
+                // Encourages zones to cluster (N09/S09→Mon, PW→Tue, RIC→Wed, KAL→Thu/Fri)
+                // without being able to override meaningful mow-window or weather differences.
+                val zoneDensityBonus = if (blockedByMow || suggestion.client.zone.isBlank()) {
+                    0
+                } else {
+                    val sameZoneCount = day.clients.count { it.client.zone == suggestion.client.zone }
+                    minOf(
+                        sameZoneCount * AppConfig.WeeklyPlanner.ZONE_DENSITY_BONUS_PER_CLIENT,
+                        AppConfig.WeeklyPlanner.ZONE_DENSITY_BONUS_MAX
+                    )
+                }
+
+                // Corridor bonus: when a day has an anchor, clients near the shop→anchor
+                // travel corridor score higher.  Replaces zone density when active.
+                val corridorBonus = if (blockedByMow || day.anchorLat == null || day.anchorLng == null) {
+                    0
+                } else {
+                    corridorScore(suggestion.client, lat, lng, day.anchorLat, day.anchorLng)
+                }
+
+                val geoBonus = maxOf(zoneDensityBonus, corridorBonus)
+                val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
+                DayFitness(day, finalScore, reason)
             }
 
-            val best = dayFitness
+            // Filter 1: Exclude mow-blocked days (hard rule, never override)
+            // Filter 2: Prefer days under softCap, but allow up to hard cap
+            val eligible = dayFitness.filter { it.score != Int.MIN_VALUE }
+            
+            val best = eligible
                 .filter { fitness ->
                     val d = fitness.day
                     if (d.clients.size >= AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY) return@filter false
@@ -177,9 +165,10 @@ class WeeklyPlannerUseCase(
                     true
                 }
                 .maxByOrNull { it.score }
-                ?: dayFitness
+                ?: eligible
+                    // Fallback: softCap exceeded, but allow up to hard cap (still respecting mow block)
                     .filter { it.day.clients.size < AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY }
-                    .minByOrNull { it.day.clients.size }
+                    .maxByOrNull { it.score }
 
             if (best != null) {
                 best.day.clients += PlannedClient(
@@ -192,10 +181,6 @@ class WeeklyPlannerUseCase(
                 )
                 if (clientSqFt != null) {
                     sqFtPerDay[best.day] = sqFtPerDay.getOrDefault(best.day, 0) + clientSqFt
-                }
-                // Record cluster assignment so subsequent cluster members follow.
-                if (clusterRoot != null && clusterRoot !in clusterDayAssignment) {
-                    clusterDayAssignment[clusterRoot] = best.day
                 }
                 assignedCount++
             }
@@ -228,7 +213,10 @@ class WeeklyPlannerUseCase(
         val dayScore: Int,
         val dayScoreLabel: String,
         var isWorkDay: Boolean = false,
-        val clients: MutableList<PlannedClient> = mutableListOf()
+        val clients: MutableList<PlannedClient> = mutableListOf(),
+        val anchorLat: Double? = null,
+        val anchorLng: Double? = null,
+        val anchorLabel: String? = null
     ) {
         fun build(): PlannedDay {
             return PlannedDay(
@@ -239,7 +227,10 @@ class WeeklyPlannerUseCase(
                 dayScore = dayScore,
                 dayScoreLabel = dayScoreLabel,
                 clients = clients.toList(),
-                isWorkDay = isWorkDay
+                isWorkDay = isWorkDay,
+                anchorLat = anchorLat,
+                anchorLng = anchorLng,
+                anchorLabel = anchorLabel
             )
         }
     }
@@ -395,26 +386,33 @@ class WeeklyPlannerUseCase(
         }
 
         if (client.mowDayOfWeek in Calendar.SUNDAY..Calendar.SATURDAY) {
-            // Circular distance from mow day: 0 = mow day, 3 = farthest possible.
-            // Heavy penalties ensure mow day is avoided even with cluster/geo bonuses.
+            // Days since last mow (0 = mow day, 1 = day after, ... 6 = day before next mow).
+            // Prefer mid-cycle (2-5 days after mow) when grass has grown but treatment won't be mowed off.
             val daysSinceMow = ((dayOfWeek - client.mowDayOfWeek + 7) % 7)
-            val distFromMow = minOf(daysSinceMow, 7 - daysSinceMow)
-            when (distFromMow) {
+            when (daysSinceMow) {
                 0 -> {
-                    score -= 100  // Effectively disqualifies this day
-                    reasons += "Mow day — freshly cut, avoid"
+                    score -= 100  // Mow day — freshly cut or about to be cut
+                    reasons += "Mow day — avoid"
                 }
                 1 -> {
-                    score -= 60
-                    reasons += "1 day from mow — grass too short/tall"
+                    score -= 60  // Day after mow — grass too short
+                    reasons += "Day after mow — grass too short"
                 }
                 2 -> {
-                    score += 10
-                    reasons += "2 days from mow — moderate growth"
+                    score += 10  // Grass starting to grow
+                    reasons += "2 days after mow — OK"
                 }
-                3 -> {
-                    score += 30
-                    reasons += "Farthest from mow day — ideal"
+                3, 4 -> {
+                    score += 30  // Ideal window — grass grown, time to absorb
+                    reasons += "$daysSinceMow days after mow — ideal"
+                }
+                5 -> {
+                    score += 15  // Still good, grass taller
+                    reasons += "5 days after mow — good"
+                }
+                6 -> {
+                    score -= 40  // Day before mow — treatment may be mowed off
+                    reasons += "Day before mow — may be mowed off"
                 }
             }
         } else {
@@ -501,4 +499,52 @@ class WeeklyPlannerUseCase(
 
         return sorted + ungeocoded
     }
+
+    /**
+     * Perpendicular distance from a client to the shop→anchor travel corridor.
+     * Returns a bonus (0 to CORRIDOR_BONUS_MAX) that scales linearly:
+     * 0 miles off-line → full bonus, ≥CORRIDOR_MAX_OFFSET_MILES → zero.
+     */
+    private fun corridorScore(
+        client: Client,
+        shopLat: Double, shopLng: Double,
+        anchorLat: Double, anchorLng: Double
+    ): Int {
+        val cLat = client.latitude ?: return 0
+        val cLng = client.longitude ?: return 0
+
+        // Work in approximate miles: 1° lat ≈ 69 mi, 1° lng ≈ 69 * cos(lat) mi
+        val cosLat = kotlin.math.cos(Math.toRadians(shopLat))
+        val ax = 0.0
+        val ay = 0.0
+        val bx = (anchorLng - shopLng) * 69.0 * cosLat
+        val by = (anchorLat - shopLat) * 69.0
+        val px = (cLng - shopLng) * 69.0 * cosLat
+        val py = (cLat - shopLat) * 69.0
+
+        // Project point P onto segment A→B, clamping to [0,1] so points beyond
+        // the anchor or behind the shop don't get credit.
+        val dx = bx - ax
+        val dy = by - ay
+        val segLenSq = dx * dx + dy * dy
+        if (segLenSq < 1e-9) return 0  // shop ≈ anchor — degenerate
+
+        val t = ((px - ax) * dx + (py - ay) * dy) / segLenSq
+        val tc = t.coerceIn(0.0, 1.0)
+        val projX = ax + tc * dx
+        val projY = ay + tc * dy
+        val distMiles = sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
+
+        val maxOffset = AppConfig.WeeklyPlanner.CORRIDOR_MAX_OFFSET_MILES
+        if (distMiles >= maxOffset) return 0
+        val fraction = 1.0 - (distMiles / maxOffset)
+        return (fraction * AppConfig.WeeklyPlanner.CORRIDOR_BONUS_MAX).toInt()
+    }
 }
+
+/** Anchor point for a day — the furthest destination for that day's travel corridor. */
+data class DayAnchor(
+    val lat: Double,
+    val lng: Double,
+    val label: String
+)

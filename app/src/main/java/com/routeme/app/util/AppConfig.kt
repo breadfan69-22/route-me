@@ -48,6 +48,22 @@ object AppConfig {
         /** Bonus added to keep cluster members on the same day as the first-assigned member. */
         const val CLUSTER_COHESION_BONUS = 50
 
+        /**
+         * Zone density bonus: per same-zone client already assigned to a day.
+         * Accumulates up to ZONE_DENSITY_BONUS_MAX so that zones cluster together
+         * without overriding a meaningful mow-window or weather score difference.
+         */
+        const val ZONE_DENSITY_BONUS_PER_CLIENT = 12
+        const val ZONE_DENSITY_BONUS_MAX = 30
+
+        /**
+         * Corridor bonus: when a day has an anchor point set, clients near the
+         * shop→anchor travel line receive this bonus.  Scales linearly from max
+         * at 0 miles off-corridor to zero at CORRIDOR_MAX_OFFSET_MILES.
+         */
+        const val CORRIDOR_BONUS_MAX = 40
+        const val CORRIDOR_MAX_OFFSET_MILES = 8.0
+
         /** Steps that are liquid applications and must not be rained on for 24 hours. */
         val LIQUID_STEPS = setOf(2, 5)
         /** Steps that are granular — rain logic takes precedence when mixed with liquid steps. */

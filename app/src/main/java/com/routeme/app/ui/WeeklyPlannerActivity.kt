@@ -21,19 +21,26 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import com.routeme.app.R
+import com.routeme.app.SavedDestination
+import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.db.SavedWeekPlanEntity
 import com.routeme.app.data.db.WeekPlanDao
+import com.routeme.app.domain.DayAnchor
 import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.WeekPlan
+import com.routeme.app.network.GeocodingHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 import org.koin.android.ext.android.inject
 
 class WeeklyPlannerActivity : AppCompatActivity() {
 
     private val weekPlanDao: WeekPlanDao by inject()
+    private val clientRepository: ClientRepository by inject()
 
     private lateinit var viewPager: ViewPager2
     private lateinit var tabLayout: TabLayout
@@ -62,6 +69,8 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         } else {
             loadPlanFromRoom()
         }
+
+        computeZoneCentroids()
     }
 
     override fun onResume() {
@@ -251,6 +260,10 @@ class WeeklyPlannerActivity : AppCompatActivity() {
 
     private fun onMenuItemClick(item: MenuItem): Boolean {
         return when (item.itemId) {
+            R.id.action_start_route -> {
+                startCurrentDayRoute()
+                true
+            }
             R.id.action_regenerate -> {
                 confirmRegenerate()
                 true
@@ -259,26 +272,189 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         }
     }
 
+    private fun startCurrentDayRoute() {
+        val plan = weekPlan ?: return
+        val currentDayIndex = viewPager.currentItem
+        val day = plan.days.getOrNull(currentDayIndex) ?: return
+
+        if (day.clients.isEmpty()) {
+            Snackbar.make(viewPager, "No clients planned for ${day.dayName}", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        // Convert PlannedClients to SavedDestinations
+        val destinations = day.clients.mapNotNull { plannedClient ->
+            val c = plannedClient.client
+            if (c.latitude == null || c.longitude == null) return@mapNotNull null
+            SavedDestination(
+                id = UUID.randomUUID().toString(),
+                name = c.name,
+                address = c.address,
+                lat = c.latitude,
+                lng = c.longitude
+            )
+        }
+
+        if (destinations.isEmpty()) {
+            Snackbar.make(viewPager, "No clients with GPS coordinates", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+
+        // Return result to MainActivity
+        val intent = Intent().apply {
+            putExtra(EXTRA_ROUTE_DESTINATIONS, encodeDestinations(destinations))
+        }
+        setResult(RESULT_START_ROUTE, intent)
+        finish()
+    }
+
+    private fun encodeDestinations(destinations: List<SavedDestination>): String {
+        val arr = JSONArray()
+        destinations.forEach { dest ->
+            arr.put(JSONObject().apply {
+                put("id", dest.id)
+                put("name", dest.name)
+                put("address", dest.address)
+                put("lat", dest.lat)
+                put("lng", dest.lng)
+            })
+        }
+        return arr.toString()
+    }
+
     private fun confirmRegenerate() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Regenerate Plan?")
-            .setMessage("This will discard any manual edits and create a fresh plan.")
+            .setMessage("This will discard any manual edits and create a fresh plan.\nAnchors will be preserved.")
             .setPositiveButton("Regenerate") { _, _ ->
-                setResult(RESULT_REGENERATE)
+                // Pass current anchors back so they survive the regeneration
+                val anchorsJson = encodeAnchors()
+                val intent = Intent().apply {
+                    putExtra(EXTRA_ANCHORS_JSON, anchorsJson)
+                }
+                setResult(RESULT_REGENERATE, intent)
                 finish()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
+    // ── Anchors ──
+
+    /** Zone centroid data for the anchor picker dialog. */
+    data class ZoneCentroid(val label: String, val lat: Double, val lng: Double)
+
+    private var zoneCentroids: List<ZoneCentroid> = emptyList()
+
+    /** Compute zone centroids from all geocoded clients — called once after plan loads. */
+    private fun computeZoneCentroids() {
+        lifecycleScope.launch {
+            val clients = withContext(Dispatchers.IO) { clientRepository.loadAllClients() }
+            val geocoded = clients.filter { it.latitude != null && it.longitude != null && it.zone.isNotBlank() }
+            zoneCentroids = geocoded
+                .groupBy { it.zone }
+                .map { (zone, members) ->
+                    val avgLat = members.map { it.latitude!! }.average()
+                    val avgLng = members.map { it.longitude!! }.average()
+                    ZoneCentroid(zone, avgLat, avgLng)
+                }
+                .sortedBy { it.label }
+        }
+    }
+
+    fun getAvailableZones(): List<ZoneCentroid> = zoneCentroids
+
+    fun setAnchor(dayIndex: Int, lat: Double, lng: Double, label: String) {
+        val plan = weekPlan ?: return
+        val days = plan.days.toMutableList()
+        if (dayIndex !in days.indices) return
+        days[dayIndex] = days[dayIndex].copy(anchorLat = lat, anchorLng = lng, anchorLabel = label)
+        weekPlan = plan.copy(days = days)
+        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
+        savePlanToRoom()
+        Snackbar.make(viewPager, "Anchor set: $label", Snackbar.LENGTH_SHORT).show()
+    }
+
+    fun clearAnchor(dayIndex: Int) {
+        val plan = weekPlan ?: return
+        val days = plan.days.toMutableList()
+        if (dayIndex !in days.indices) return
+        days[dayIndex] = days[dayIndex].copy(anchorLat = null, anchorLng = null, anchorLabel = null)
+        weekPlan = plan.copy(days = days)
+        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
+        savePlanToRoom()
+        Snackbar.make(viewPager, "Anchor cleared", Snackbar.LENGTH_SHORT).show()
+    }
+
+    fun geocodeAndSetAnchor(dayIndex: Int, address: String) {
+        lifecycleScope.launch {
+            val coords = withContext(Dispatchers.IO) { GeocodingHelper.geocodeAddress(address) }
+            if (coords != null) {
+                setAnchor(dayIndex, coords.first, coords.second, address)
+            } else {
+                Snackbar.make(viewPager, "Could not geocode: $address", Snackbar.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun encodeAnchors(): String {
+        val plan = weekPlan ?: return "{}"
+        val obj = JSONObject()
+        for (day in plan.days) {
+            if (day.anchorLat != null && day.anchorLng != null && day.anchorLabel != null) {
+                obj.put(day.dayOfWeek.toString(), JSONObject().apply {
+                    put("lat", day.anchorLat)
+                    put("lng", day.anchorLng)
+                    put("label", day.anchorLabel)
+                })
+            }
+        }
+        return obj.toString()
+    }
+
     companion object {
         private const val EXTRA_PLAN_JSON = "plan_json"
+        const val EXTRA_ROUTE_DESTINATIONS = "route_destinations"
+        const val EXTRA_ANCHORS_JSON = "anchors_json"
         const val RESULT_REGENERATE = 42
+        const val RESULT_START_ROUTE = 43
 
         fun createIntent(context: Context, plan: WeekPlan): Intent {
             return Intent(context, WeeklyPlannerActivity::class.java).apply {
                 putExtra(EXTRA_PLAN_JSON, plan.toJson().toString())
             }
+        }
+
+        fun extractAnchors(intent: Intent?): Map<Int, DayAnchor> {
+            val json = intent?.getStringExtra(EXTRA_ANCHORS_JSON) ?: return emptyMap()
+            return runCatching {
+                val obj = JSONObject(json)
+                obj.keys().asSequence().associate { key ->
+                    val dayObj = obj.getJSONObject(key)
+                    key.toInt() to DayAnchor(
+                        lat = dayObj.getDouble("lat"),
+                        lng = dayObj.getDouble("lng"),
+                        label = dayObj.getString("label")
+                    )
+                }
+            }.getOrDefault(emptyMap())
+        }
+
+        fun extractRouteDestinations(intent: Intent?): List<SavedDestination>? {
+            val json = intent?.getStringExtra(EXTRA_ROUTE_DESTINATIONS) ?: return null
+            return runCatching {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    SavedDestination(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        address = obj.getString("address"),
+                        lat = obj.getDouble("lat"),
+                        lng = obj.getDouble("lng")
+                    )
+                }
+            }.getOrNull()
         }
     }
 }

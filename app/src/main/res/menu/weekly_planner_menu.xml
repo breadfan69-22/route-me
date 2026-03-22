@@ -3,6 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
+        android:id="@+id/action_start_route"
+        android:icon="@drawable/ic_navigation"
+        android:title="Start Today"
+        app:showAsAction="always" />
+
+    <item
         android:id="@+id/action_regenerate"
         android:title="Regenerate"
         app:showAsAction="ifRoom" />

@@ -45,7 +45,10 @@ data class PlannedDay(
     val dayScore: Int,
     val dayScoreLabel: String,
     val clients: List<PlannedClient>,
-    val isWorkDay: Boolean
+    val isWorkDay: Boolean,
+    val anchorLat: Double? = null,
+    val anchorLng: Double? = null,
+    val anchorLabel: String? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("dateMillis", dateMillis)
@@ -56,6 +59,9 @@ data class PlannedDay(
         put("isWorkDay", isWorkDay)
         if (forecast != null) put("forecast", forecastToJson(forecast))
         put("clients", JSONArray().apply { clients.forEach { put(it.toJson()) } })
+        if (anchorLat != null) put("anchorLat", anchorLat)
+        if (anchorLng != null) put("anchorLng", anchorLng)
+        if (anchorLabel != null) put("anchorLabel", anchorLabel)
     }
 
     companion object {
@@ -69,7 +75,10 @@ data class PlannedDay(
             clients = json.getJSONArray("clients").let { arr ->
                 (0 until arr.length()).map { PlannedClient.fromJson(arr.getJSONObject(it)) }
             },
-            isWorkDay = json.getBoolean("isWorkDay")
+            isWorkDay = json.getBoolean("isWorkDay"),
+            anchorLat = if (json.has("anchorLat")) json.getDouble("anchorLat") else null,
+            anchorLng = if (json.has("anchorLng")) json.getDouble("anchorLng") else null,
+            anchorLabel = if (json.has("anchorLabel")) json.getString("anchorLabel") else null
         )
     }
 }
