@@ -8,6 +8,7 @@ import com.routeme.app.ServiceType
 import com.routeme.app.SunShade
 import com.routeme.app.WindExposure
 import com.routeme.app.model.DailyWeather
+import com.routeme.app.model.RecentWeatherSignal
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -212,6 +213,71 @@ class RoutingEngineTest {
         )
 
         assertEquals("flat", results.first().client.id)
+    }
+
+    @Test
+    fun `rankClients penalizes saturated soil on steep slopes`() {
+        val steep = testClient(id = "steep-soil")
+        val flat = testClient(id = "flat-soil")
+        val weather = DailyWeather(
+            dateMillis = System.currentTimeMillis(),
+            highTempF = 74,
+            lowTempF = 58,
+            windSpeedMph = 7,
+            windGustMph = null,
+            windDirection = "W",
+            precipitationInches = 0.0,
+            description = "Clear"
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(steep, flat),
+            serviceTypes = setOf(ServiceType.ROUND_1),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD,
+            weather = weather,
+            recentPrecipInches = 0.0,
+            propertyMap = mapOf(
+                steep.id to ClientProperty(
+                    clientId = steep.id,
+                    lawnSizeSqFt = 11000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.UNKNOWN,
+                    hasSteepSlopes = true,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                ),
+                flat.id to ClientProperty(
+                    clientId = flat.id,
+                    lawnSizeSqFt = 11000,
+                    sunShade = SunShade.UNKNOWN,
+                    windExposure = WindExposure.UNKNOWN,
+                    hasSteepSlopes = false,
+                    hasIrrigation = false,
+                    propertyNotes = "",
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+            ),
+            recentWeatherByClientId = mapOf(
+                steep.id to RecentWeatherSignal(
+                    rainLast24hInches = 0.02,
+                    rainLast48hInches = 0.04,
+                    soilMoistureSurface = 0.52,
+                    fetchedAtMillis = System.currentTimeMillis()
+                ),
+                flat.id to RecentWeatherSignal(
+                    rainLast24hInches = 0.02,
+                    rainLast48hInches = 0.04,
+                    soilMoistureSurface = 0.18,
+                    fetchedAtMillis = System.currentTimeMillis()
+                )
+            )
+        )
+
+        assertEquals("flat-soil", results.first().client.id)
     }
 
     private fun testClient(

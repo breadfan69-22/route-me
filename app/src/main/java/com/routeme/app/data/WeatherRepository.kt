@@ -1,5 +1,6 @@
 package com.routeme.app.data
 
+import com.routeme.app.Client
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.data.db.DailyWeatherEntity
@@ -8,8 +9,11 @@ import com.routeme.app.data.db.ForecastDayEntity
 import com.routeme.app.data.db.WeatherDao
 import com.routeme.app.model.DailyWeather
 import com.routeme.app.model.ForecastDay
+import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.network.NwsWeatherService
+import com.routeme.app.network.OpenMeteoWeatherService
 import java.util.Calendar
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -27,7 +31,15 @@ class WeatherRepository(
     companion object {
         private const val STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000L // 3 hours
         private const val FORECAST_STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000L // 6 hours
+        private const val RECENT_SIGNAL_TTL_MS = 30 * 60 * 1000L // 30 minutes
     }
+
+    private data class CachedRecentSignal(
+        val signal: RecentWeatherSignal,
+        val cachedAtMillis: Long
+    )
+
+    private val recentSignalCache = ConcurrentHashMap<String, CachedRecentSignal>()
 
     /**
      * Get weather for a day. Uses the shop location as default coordinates.
@@ -114,6 +126,36 @@ class WeatherRepository(
         if (hasAny) sum else null
     }
 
+    suspend fun getRecentWeatherSignal(
+        lat: Double,
+        lng: Double
+    ): RecentWeatherSignal? = withContext(Dispatchers.IO) {
+        val cacheKey = roundedCoordinateKey(lat, lng)
+        val now = System.currentTimeMillis()
+        val cached = recentSignalCache[cacheKey]
+        if (cached != null && (now - cached.cachedAtMillis) <= RECENT_SIGNAL_TTL_MS) {
+            return@withContext cached.signal
+        }
+
+        val fetched = runCatching { OpenMeteoWeatherService.fetchRecentWeatherSignal(lat, lng) }.getOrNull()
+            ?: return@withContext cached?.signal
+
+        recentSignalCache[cacheKey] = CachedRecentSignal(signal = fetched, cachedAtMillis = now)
+        fetched
+    }
+
+    suspend fun getRecentWeatherSignals(clients: List<Client>): Map<String, RecentWeatherSignal> =
+        withContext(Dispatchers.IO) {
+            val result = mutableMapOf<String, RecentWeatherSignal>()
+            for (client in clients) {
+                val lat = client.latitude ?: continue
+                val lng = client.longitude ?: continue
+                val signal = getRecentWeatherSignal(lat, lng) ?: continue
+                result[client.id] = signal
+            }
+            result
+        }
+
     private fun startOfTodayMillis(): Long {
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -121,6 +163,10 @@ class WeatherRepository(
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
         return calendar.timeInMillis
+    }
+
+    private fun roundedCoordinateKey(lat: Double, lng: Double): String {
+        return "%.3f,%.3f".format(lat, lng)
     }
 
     suspend fun getForecastDays(

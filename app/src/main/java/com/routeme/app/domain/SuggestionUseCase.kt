@@ -8,6 +8,7 @@ import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
 import com.routeme.app.model.DailyWeather
+import com.routeme.app.model.RecentWeatherSignal
 
 class SuggestionUseCase(
     private val routingEngine: RoutingEngine,
@@ -51,7 +52,8 @@ class SuggestionUseCase(
         currentLocation: Location?,
         weather: DailyWeather? = null,
         recentPrecipInches: Double? = null,
-        propertyMap: Map<String, ClientProperty> = emptyMap()
+        propertyMap: Map<String, ClientProperty> = emptyMap(),
+        recentWeatherByClientId: Map<String, RecentWeatherSignal> = emptyMap()
     ): SuggestNextResult {
         val location = currentLocation ?: lastSuggestionLocation
         lastSuggestionLocation = location
@@ -74,7 +76,8 @@ class SuggestionUseCase(
             destination = activeDestination,
             weather = weather,
             recentPrecipInches = recentPrecipInches,
-            propertyMap = propertyMap
+            propertyMap = propertyMap,
+            recentWeatherByClientId = recentWeatherByClientId
         )
 
         if (ranked.isEmpty()) {

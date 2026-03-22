@@ -17,46 +17,47 @@ phone, and the debug APK is sideloaded.
 ## Car UX Flow
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ANDROID AUTO HEAD UNIT                                      │
-│                                                              │
-│  1. Launch RouteMe from Auto app drawer                      │
-│         │                                                    │
-│         ▼                                                    │
-│  ┌──────────────┐    tap     ┌────────────────────────┐      │
-│  │ StepSelect   │ ────────→  │ SuggestionListScreen   │      │
-│  │ Screen       │            │ (top 5 ranked clients) │      │
-│  │              │            │                        │      │
-│  │ Step 1       │            │ John Smith  – 0.8 mi   │      │
-│  │ Step 2       │            │ Jane Doe    – 1.2 mi   │      │
-│  │ Step 3       │            │ Bob Jones   – 1.7 mi   │      │
-│  │  ...         │            │ ...                    │      │
-│  └──────────────┘            └───────┬────────────────┘      │
-│                                      │ tap client            │
-│                                      ▼                       │
-│                              ┌────────────────────────┐      │
-│                              │ ClientDetailScreen     │      │
-│                              │                        │      │
-│                              │ John Smith              │      │
-│                              │ 123 Oak St, Portage    │      │
-│                              │ 0.8 mi · Step 3 due   │      │
-│                              │                        │      │
-│                              │ [Navigate]  [Complete] │      │
-│                              │ [Skip]                 │      │
-│                              └───────┬────────────────┘      │
-│                                      │                       │
-│                        Navigate      │      Complete         │
-│                     (open G-Maps)    │   (write record,      │
-│                                      │    return to list)    │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  ANDROID AUTO HEAD UNIT                                          │
+│                                                                  │
+│  1. Launch RouteMe from Auto app drawer                          │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────────┐                                            │
+│  │ SuggestionList   │  ← uses phone-selected steps from prefs   │
+│  │ Screen           │                                            │
+│  │                  │  ┌── if Errands Mode ON ──────────────┐    │
+│  │ John Smith  0.8mi│  │  Shows destination queue instead   │    │
+│  │ Jane Doe   1.2mi │  │  "Stop 1: Tractor Supply"          │    │
+│  │ Bob Jones  1.7mi │  │  "Stop 2: Meijer"                  │    │
+│  │ ...              │  │  [Navigate] only                    │    │
+│  │ [⚙ Change Steps] │  └────────────────────────────────────┘    │
+│  └───────┬──────────┘                                            │
+│          │ tap client                                            │
+│          ▼                                                       │
+│  ┌────────────────────────┐                                      │
+│  │ ClientDetailScreen     │                                      │
+│  │                        │                                      │
+│  │ John Smith              │                                      │
+│  │ 123 Oak St, Portage    │                                      │
+│  │ 0.8 mi · Step 3 due   │                                      │
+│  │                        │                                      │
+│  │ [Navigate]  [Complete] │                                      │
+│  │ [Skip]                 │                                      │
+│  └───────┬────────────────┘                                      │
+│          │                                                       │
+│          ├── Navigate → open Google Maps                         │
+│          ├── Complete → write record → confirmation              │
+│          └── Skip → back to list                                 │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **Screens (4 total):**
 
 | # | Screen class              | Template used          | Purpose |
 |---|---------------------------|------------------------|---------|
-| 1 | `StepSelectScreen`        | `ListTemplate`         | Pick service step(s) for today's route |
-| 2 | `SuggestionListScreen`    | `ListTemplate`         | Show top-N ranked suggestions with address + distance |
+| 1 | `SuggestionListScreen`    | `ListTemplate`         | Landing screen — ranked suggestions (or destination queue in Errands Mode). Defaults to phone-selected steps. |
+| 2 | `StepSelectScreen`        | `ListTemplate`         | Override step selection (accessed via action button on suggestion list) |
 | 3 | `ClientDetailScreen`      | `PaneTemplate`         | Single client info + action buttons (Navigate / Complete / Skip) |
 | 4 | `ServiceCompleteScreen`   | `MessageTemplate`      | Confirmation after marking a service complete |
 
@@ -145,31 +146,34 @@ package com.routeme.app.auto
 import android.content.Intent
 import androidx.car.app.Screen
 import androidx.car.app.Session
-import com.routeme.app.domain.SuggestionUseCase
 import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 
 class RouteMeSession : Session(), KoinComponent {
 
-    internal val suggestionUseCase: SuggestionUseCase by inject()
-
     override fun onCreateScreen(intent: Intent): Screen =
-        StepSelectScreen(carContext)
+        SuggestionListScreen(carContext)
 }
 ```
 
 > **Koin note:** `Session` is not an Android `Context` subclass, but
 > `KoinComponent` gives it access to the global Koin graph that
 > `RouteMeApplication.onCreate()` already starts. No DI changes needed.
+> Car screens inject their own use-cases via `KoinComponent`.
 
 ---
 
-### Phase 2 — Step Selection Screen
+### Phase 2 — Step Selection Screen (secondary)
 
 **File:** `auto/StepSelectScreen.kt`
 
-Presents a `ListTemplate` with one row per step (Step 1–6, Grub, Incidental).
-Tapping a row pushes `SuggestionListScreen` with the selected `ServiceType` set.
+This screen is **not** the landing screen — the car launches directly into
+`SuggestionListScreen` using whatever steps are already selected on the phone
+(stored in `PreferencesRepository.selectedSteps`). The step selector is accessible
+via an action button on the suggestion list for cases where the driver wants to
+override the phone's selection without pulling it out.
+
+Tapping a step writes it to `PreferencesRepository` (so phone and car stay
+in sync) and pops back to the suggestion list, which re-queries on `onStart()`.
 
 ```kotlin
 package com.routeme.app.auto
@@ -177,48 +181,65 @@ package com.routeme.app.auto
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.*
-import com.routeme.app.RouteModels.ServiceType
+import com.routeme.app.ServiceType
+import com.routeme.app.data.PreferencesRepository
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
-class StepSelectScreen(carContext: CarContext) : Screen(carContext) {
+class StepSelectScreen(carContext: CarContext) : Screen(carContext), KoinComponent {
+
+    private val prefs: PreferencesRepository by inject()
 
     override fun onGetTemplate(): Template {
+        val currentSteps = prefs.selectedSteps
+            .split(",")
+            .mapNotNull { runCatching { ServiceType.valueOf(it.trim()) }.getOrNull() }
+            .toSet()
+
         val listBuilder = ItemList.Builder()
         ServiceType.entries.forEach { step ->
+            val checked = step in currentSteps
             listBuilder.addItem(
                 Row.Builder()
-                    .setTitle(step.label)
+                    .setTitle("${if (checked) "✓ " else ""}${step.label}")
                     .setOnClickListener {
-                        screenManager.push(
-                            SuggestionListScreen(carContext, setOf(step))
-                        )
+                        // Toggle this step and persist
+                        val updated = if (checked) currentSteps - step else currentSteps + step
+                        prefs.selectedSteps = updated.joinToString(",") { it.name }
+                        invalidate()  // re-render with updated checkmarks
                     }
                     .build()
             )
         }
+
         return ListTemplate.Builder()
             .setSingleList(listBuilder.build())
-            .setTitle("Select Step")
-            .setHeaderAction(Action.APP_ICON)
+            .setTitle("Select Steps")
+            .setHeaderAction(Action.BACK)
+            .addAction(
+                Action.Builder()
+                    .setTitle("Done")
+                    .setOnClickListener { screenManager.pop() }
+                    .build()
+            )
             .build()
     }
 }
 ```
 
-**Enhancements to consider later:**
-- Multi-step selection (tap to toggle, then a "Go" action button) similar to
-  how the phone UI allows multiple steps. This would use `Toggle` rows or a
-  two-screen flow: select → confirm.
-- Remember the last phone-selected steps via `PreferencesRepository` so the
-  car screen pre-selects them.
+> **Sync note:** Writing to `PreferencesRepository.selectedSteps` keeps the
+> phone and car in sync. When the driver pops back, `SuggestionListScreen`
+> re-reads the steps in `onStart()` and re-ranks automatically.
 
 ---
 
-### Phase 3 — Suggestion List Screen
+### Phase 3 — Suggestion List Screen (landing screen)
 
 **File:** `auto/SuggestionListScreen.kt`
 
-Calls `SuggestionUseCase.suggestNextClients()` to get ranked suggestions,
-then displays the top 5 as a `ListTemplate`.
+This is the **first screen** the driver sees. It reads the phone-selected steps
+from `PreferencesRepository`, checks whether Errands Mode is active, and renders
+either ranked client suggestions or the destination queue.
 
 ```kotlin
 package com.routeme.app.auto
@@ -227,51 +248,100 @@ import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.*
 import androidx.lifecycle.lifecycleScope
-import com.routeme.app.RouteModels.ClientSuggestion
-import com.routeme.app.RouteModels.ServiceType
+import com.routeme.app.ClientSuggestion
+import com.routeme.app.SavedDestination
+import com.routeme.app.ServiceType
+import com.routeme.app.TrackingEventBus
+import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.PreferencesRepository
+import com.routeme.app.domain.DestinationQueueUseCase
 import com.routeme.app.domain.SuggestionUseCase
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
 class SuggestionListScreen(
-    carContext: CarContext,
-    private val selectedSteps: Set<ServiceType>
+    carContext: CarContext
 ) : Screen(carContext), KoinComponent {
 
     private val suggestionUseCase: SuggestionUseCase by inject()
+    private val clientRepository: ClientRepository by inject()
+    private val prefs: PreferencesRepository by inject()
+    private val trackingEventBus: TrackingEventBus by inject()
+    private val destinationQueueUseCase: DestinationQueueUseCase by inject()
+
     private var suggestions: List<ClientSuggestion> = emptyList()
+    private var destinations: List<SavedDestination> = emptyList()
+    private var errandsMode = false
     private var loading = true
 
-    init {
+    override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+        super.onStart(owner)
+        loadData()
+    }
+
+    private fun loadData() {
+        loading = true
+        invalidate()
         lifecycleScope.launch {
-            suggestions = suggestionUseCase.suggestNextClients(
-                selectedSteps = selectedSteps,
-                /* pass current location, direction, etc. */
-            ).take(5)
+            errandsMode = prefs.errandsModeEnabled
+
+            if (errandsMode) {
+                destinations = destinationQueueUseCase.loadSavedDestinations()
+            } else {
+                val selectedSteps = prefs.selectedSteps
+                    .split(",")
+                    .mapNotNull { runCatching { ServiceType.valueOf(it.trim()) }.getOrNull() }
+                    .toSet()
+                    .ifEmpty { setOf(ServiceType.ROUND_1) }
+
+                val clients = clientRepository.loadClients()
+                val location = trackingEventBus.latestLocation.value
+                val activeDestIndex = prefs.activeDestinationIndex
+                val queue = destinationQueueUseCase.loadSavedDestinations()
+                val activeDest = queue.getOrNull(activeDestIndex)
+
+                val result = suggestionUseCase.suggestNextClients(
+                    clients = clients,
+                    selectedServiceTypes = selectedSteps,
+                    minDays = prefs.minDays,
+                    cuOverrideEnabled = prefs.cuOverrideEnabled,
+                    routeDirection = prefs.routeDirection,
+                    activeDestination = activeDest,
+                    currentLocation = location
+                )
+                suggestions = result.suggestions.take(5)
+            }
+
             loading = false
-            invalidate()   // re-render with data
+            invalidate()
         }
     }
 
     override fun onGetTemplate(): Template {
         if (loading) {
-            return MessageTemplate.Builder("Loading suggestions…")
-                .setTitle("Suggestions")
+            return MessageTemplate.Builder(
+                if (errandsMode) "Loading destinations…" else "Loading suggestions…"
+            )
+                .setTitle(if (errandsMode) "Errands" else "Next Clients")
                 .setLoading(true)
                 .build()
         }
 
+        return if (errandsMode) buildErrandsTemplate() else buildSuggestionsTemplate()
+    }
+
+    private fun buildSuggestionsTemplate(): Template {
         val listBuilder = ItemList.Builder()
         suggestions.forEach { s ->
-            val distText = s.drivingDistance ?: s.distanceMiles?.let { "%.1f mi".format(it) } ?: ""
+            val distText = s.distanceToShopMiles?.let { "%.1f mi".format(it) } ?: ""
             listBuilder.addItem(
                 Row.Builder()
                     .setTitle(s.client.name)
                     .addText("${s.client.address}  ·  $distText")
                     .setOnClickListener {
                         screenManager.push(
-                            ClientDetailScreen(carContext, s, selectedSteps)
+                            ClientDetailScreen(carContext, s)
                         )
                     }
                     .build()
@@ -281,19 +351,62 @@ class SuggestionListScreen(
         return ListTemplate.Builder()
             .setSingleList(listBuilder.build())
             .setTitle("Next Clients")
-            .setHeaderAction(Action.BACK)
+            .setHeaderAction(Action.APP_ICON)
+            .addAction(
+                Action.Builder()
+                    .setTitle("Steps")
+                    .setOnClickListener {
+                        screenManager.push(StepSelectScreen(carContext))
+                    }
+                    .build()
+            )
+            .build()
+    }
+
+    private fun buildErrandsTemplate(): Template {
+        val listBuilder = ItemList.Builder()
+        destinations.forEachIndexed { index, dest ->
+            listBuilder.addItem(
+                Row.Builder()
+                    .setTitle(dest.name)
+                    .addText(dest.address)
+                    .setOnClickListener {
+                        // Launch Google Maps navigation to this destination
+                        val uri = android.net.Uri.parse(
+                            "google.navigation:q=${dest.lat},${dest.lng}"
+                        )
+                        carContext.startCarApp(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                        )
+                    }
+                    .build()
+            )
+        }
+
+        if (destinations.isEmpty()) {
+            return MessageTemplate.Builder("No destinations queued.\nAdd stops on your phone.")
+                .setTitle("Errands Mode")
+                .setHeaderAction(Action.APP_ICON)
+                .build()
+        }
+
+        return ListTemplate.Builder()
+            .setSingleList(listBuilder.build())
+            .setTitle("Errands")
+            .setHeaderAction(Action.APP_ICON)
             .build()
     }
 }
 ```
 
 **Data flow:**
-1. Screen gets current location from `LocationTrackingService` (already running
-   as a foreground service; expose last-known location via `TrackingEventBus` or
-   a simple `LiveData`/`StateFlow` on the service).
-2. Passes location + selected steps to `SuggestionUseCase`.
-3. `RoutingEngine` scores & orders candidates.
-4. Top 5 rendered.
+1. On every `onStart()`, reads `PreferencesRepository` for steps, errands mode,
+   route direction, and active destination.
+2. Gets current location from `TrackingEventBus.latestLocation` (already
+   populated by `LocationTrackingService` on every GPS fix).
+3. In normal mode: calls `SuggestionUseCase.suggestNextClients()` → top 5.
+4. In errands mode: loads destination queue → renders navigate-only items.
+5. "Steps" action button pushes `StepSelectScreen` for in-car override.
 
 ---
 
@@ -313,8 +426,12 @@ import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.*
 import androidx.lifecycle.lifecycleScope
-import com.routeme.app.RouteModels.ClientSuggestion
-import com.routeme.app.RouteModels.ServiceType
+import com.routeme.app.ClientSuggestion
+import com.routeme.app.GeoPoint
+import com.routeme.app.ServiceType
+import com.routeme.app.TrackingEventBus
+import com.routeme.app.data.ClientRepository
+import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.domain.ServiceCompletionUseCase
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
@@ -322,11 +439,13 @@ import org.koin.core.component.inject
 
 class ClientDetailScreen(
     carContext: CarContext,
-    private val suggestion: ClientSuggestion,
-    private val selectedSteps: Set<ServiceType>
+    private val suggestion: ClientSuggestion
 ) : Screen(carContext), KoinComponent {
 
     private val completionUseCase: ServiceCompletionUseCase by inject()
+    private val clientRepository: ClientRepository by inject()
+    private val prefs: PreferencesRepository by inject()
+    private val trackingEventBus: TrackingEventBus by inject()
 
     override fun onGetTemplate(): Template {
         val client = suggestion.client
@@ -347,7 +466,27 @@ class ClientDetailScreen(
             .setTitle("Complete")
             .setOnClickListener {
                 lifecycleScope.launch {
-                    completionUseCase.completeService(client, selectedSteps)
+                    val clients = clientRepository.loadClients()
+                    val selectedSteps = prefs.selectedSteps
+                        .split(",")
+                        .mapNotNull { runCatching { ServiceType.valueOf(it.trim()) }.getOrNull() }
+                        .toSet()
+                    val loc = trackingEventBus.latestLocation.value
+                    val geoPoint = loc?.let { GeoPoint(it.latitude, it.longitude) }
+
+                    completionUseCase.confirmSelectedClientService(
+                        ServiceCompletionUseCase.ConfirmSelectedRequest(
+                            clients = clients,
+                            selectedClient = client,
+                            arrivalStartedAtMillis = null,
+                            arrivalLat = loc?.latitude,
+                            arrivalLng = loc?.longitude,
+                            selectedSuggestionEligibleSteps = suggestion.eligibleSteps,
+                            selectedServiceTypes = selectedSteps,
+                            currentLocation = geoPoint,
+                            visitNotes = ""
+                        )
+                    )
                     screenManager.push(ServiceCompleteScreen(carContext, client.name))
                 }
             }
@@ -358,10 +497,7 @@ class ClientDetailScreen(
             .setOnClickListener { screenManager.pop() }
             .build()
 
-        val distText = suggestion.drivingDistance
-            ?: suggestion.distanceMiles?.let { "%.1f mi".format(it) }
-            ?: ""
-
+        val distText = suggestion.distanceToShopMiles?.let { "%.1f mi".format(it) } ?: ""
         val stepsText = suggestion.eligibleSteps.joinToString { it.label }
 
         val pane = Pane.Builder()
@@ -385,9 +521,10 @@ class ClientDetailScreen(
 `carContext.startCarApp(intent)`. Google Maps for Auto handles the turn-by-turn.
 This avoids the need to draw a custom map surface.
 
-**Complete action:** Calls `ServiceCompletionUseCase` to write the
-`ServiceRecordEntity` + `ClientStopEventEntity`, then shows a confirmation
-screen and pops back to the suggestion list.
+**Complete action:** Calls `ServiceCompletionUseCase.confirmSelectedClientService()`
+with a proper `ConfirmSelectedRequest`, writing the `ServiceRecordEntity` +
+`ClientStopEventEntity`, then shows a confirmation screen and pops back to the
+suggestion list.
 
 ---
 
@@ -428,43 +565,29 @@ class ServiceCompleteScreen(
 
 ---
 
-### Phase 6 — Expose Current Location to Car Screens
+### Phase 6 — Auto-Refresh Suggestion List
 
-The car screens need the technician's current location for suggestion ranking.
-`LocationTrackingService` already tracks GPS; we need to surface the latest fix.
+After completing a service and popping back to `SuggestionListScreen`, the list
+should re-rank. The `onStart()` lifecycle hook (already implemented in Phase 3's
+`SuggestionListScreen`) handles this: each time the screen becomes visible, it
+re-reads `PreferencesRepository` and re-queries `SuggestionUseCase`.
 
-**Option A (preferred): StateFlow in TrackingEventBus**
-
-`TrackingEventBus` already exists for event dispatch. Add a `StateFlow`:
-
-```kotlin
-// In TrackingEventBus.kt (existing file)
-val lastLocation = MutableStateFlow<Location?>(null)
-```
-
-`LocationTrackingService` writes to it on every GPS fix (it already dispatches
-events — add one line). Car screens collect from it.
-
-**Option B: SharedPreferences last-known-location**
-
-Write lat/lng to `PreferencesRepository` on each fix. Car screens read it.
-Simpler but less reactive.
+> **Note:** `TrackingEventBus.latestLocation` already exists as a `StateFlow`
+> populated by `LocationTrackingService` on every GPS fix. No new code is needed
+> to expose the current location — car screens read it directly.
 
 ---
 
-### Phase 7 — Auto-Refresh Suggestion List
+### Phase 7 — Cluster Completion (future)
 
-After completing a service and popping back to `SuggestionListScreen`, the list
-should re-rank. Two approaches:
+When `LocationTrackingService` detects departure from a cluster of 2+ adjacent
+clients, the phone receives a `ClusterComplete` event and shows a multi-client
+completion dialog. The current plan does **not** implement a car-side equivalent.
 
-1. **`onStart()` refresh:** Override `onStart()` in `SuggestionListScreen` to
-   re-query `SuggestionUseCase` and `invalidate()`. This runs each time the
-   screen becomes visible again.
-
-2. **Observe `TrackingEventBus`:** Listen for service-completion events and
-   re-query automatically.
-
-Option 1 is simpler and sufficient.
+For now, cluster completions are handled via the phone notification (which
+already works even when Android Auto is projected). A future enhancement could
+add a car-side `ClusterCompleteScreen` using `ListTemplate` with checkable rows,
+triggered by observing `TrackingEventBus.events` for `ClusterComplete`.
 
 ---
 
@@ -475,10 +598,10 @@ Option 1 is simpler and sufficient.
 | Path | Description |
 |------|-------------|
 | `app/src/main/java/com/routeme/app/auto/RouteMeCarAppService.kt` | CarAppService entry point |
-| `app/src/main/java/com/routeme/app/auto/RouteMeSession.kt` | Session lifecycle + Koin bridge |
-| `app/src/main/java/com/routeme/app/auto/StepSelectScreen.kt` | Step picker (ListTemplate) |
-| `app/src/main/java/com/routeme/app/auto/SuggestionListScreen.kt` | Ranked suggestion list |
-| `app/src/main/java/com/routeme/app/auto/ClientDetailScreen.kt` | Client info + Navigate/Complete/Skip |
+| `app/src/main/java/com/routeme/app/auto/RouteMeSession.kt` | Session lifecycle — pushes `SuggestionListScreen` as landing |
+| `app/src/main/java/com/routeme/app/auto/SuggestionListScreen.kt` | Landing screen — ranked suggestions (or destination queue in errands mode) |
+| `app/src/main/java/com/routeme/app/auto/StepSelectScreen.kt` | Secondary step-override picker (reads/writes `PreferencesRepository`) |
+| `app/src/main/java/com/routeme/app/auto/ClientDetailScreen.kt` | Client info + Navigate / Complete / Skip |
 | `app/src/main/java/com/routeme/app/auto/ServiceCompleteScreen.kt` | Completion confirmation |
 | `app/src/main/res/xml/automotive_app_desc.xml` | Required Auto descriptor |
 
@@ -488,8 +611,6 @@ Option 1 is simpler and sufficient.
 |------|--------|
 | `app/build.gradle.kts` | Add `androidx.car.app:app:1.4.0` dependency |
 | `app/src/main/AndroidManifest.xml` | Register `RouteMeCarAppService` + `automotive_app_desc` metadata |
-| `app/src/main/java/com/routeme/app/TrackingEventBus.kt` | Add `lastLocation` StateFlow |
-| `app/src/main/java/com/routeme/app/LocationTrackingService.kt` | Emit to `lastLocation` on GPS fix |
 
 ### No changes needed
 
@@ -499,6 +620,10 @@ Option 1 is simpler and sufficient.
 | `ClientRepository` | Already provides all needed data |
 | `SuggestionUseCase` / `RoutingEngine` | Already provides ranked suggestions — car screens call them directly |
 | `ServiceCompletionUseCase` | Already handles writing service records |
+| `TrackingEventBus.kt` | `latestLocation` StateFlow already exists — car screens observe it directly |
+| `LocationTrackingService.kt` | Already emits to `TrackingEventBus.latestLocation` on GPS fix |
+| `PreferencesRepository` | Already stores `selectedSteps`, `errandsModeEnabled`, etc. — car screens read it |
+| `DestinationQueueUseCase` | Already manages saved destinations — car errands mode reads it |
 | Room DB / DAOs | Shared as-is |
 | `GeocodingHelper` / `DistanceMatrixHelper` | Used indirectly through existing use-cases |
 

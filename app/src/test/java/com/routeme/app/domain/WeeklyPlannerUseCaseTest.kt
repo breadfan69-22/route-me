@@ -60,6 +60,7 @@ class WeeklyPlannerUseCaseTest {
         val suggestion = testSuggestion(client)
 
         coEvery { weatherRepository.getForecastDays(dayCount = 7, lat = SHOP_LAT, lng = SHOP_LNG) } returns forecast
+        coEvery { weatherRepository.getRecentWeatherSignals(listOf(client)) } returns emptyMap()
         coEvery { clientRepository.loadAllClients() } returns listOf(client)
         coEvery {
             routingEngine.rankClients(
@@ -71,7 +72,8 @@ class WeeklyPlannerUseCaseTest {
                 routeDirection = com.routeme.app.RouteDirection.OUTWARD,
                 weather = null,
                 recentPrecipInches = null,
-                propertyMap = mapOf(client.id to client.property!!)
+                propertyMap = mapOf(client.id to client.property!!),
+                recentWeatherByClientId = emptyMap()
             )
         } returns listOf(suggestion)
 
@@ -125,6 +127,7 @@ class WeeklyPlannerUseCaseTest {
         val suggestion = testSuggestion(client)
 
         coEvery { weatherRepository.getForecastDays(dayCount = 7, lat = SHOP_LAT, lng = SHOP_LNG) } returns listOf(windyMonday, calmTuesday)
+        coEvery { weatherRepository.getRecentWeatherSignals(listOf(client)) } returns emptyMap()
         coEvery { clientRepository.loadAllClients() } returns listOf(client)
         coEvery {
             routingEngine.rankClients(
@@ -136,7 +139,8 @@ class WeeklyPlannerUseCaseTest {
                 routeDirection = com.routeme.app.RouteDirection.OUTWARD,
                 weather = null,
                 recentPrecipInches = null,
-                propertyMap = mapOf(client.id to client.property!!)
+                propertyMap = mapOf(client.id to client.property!!),
+                recentWeatherByClientId = emptyMap()
             )
         } returns listOf(suggestion)
 

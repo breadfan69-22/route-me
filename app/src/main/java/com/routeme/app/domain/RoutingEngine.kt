@@ -14,6 +14,7 @@ import com.routeme.app.ServiceType
 import com.routeme.app.SunShade
 import com.routeme.app.WindExposure
 import com.routeme.app.model.DailyWeather
+import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GeocodingHelper
 import com.routeme.app.util.AppConfig
@@ -83,7 +84,8 @@ class RoutingEngine {
         destination: SavedDestination? = null,
         weather: DailyWeather? = null,
         recentPrecipInches: Double? = null,
-        propertyMap: Map<String, ClientProperty> = emptyMap()
+        propertyMap: Map<String, ClientProperty> = emptyMap(),
+        recentWeatherByClientId: Map<String, RecentWeatherSignal> = emptyMap()
     ): List<ClientSuggestion> {
         val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
         val destLat = destination?.lat ?: SHOP_LAT
@@ -140,7 +142,8 @@ class RoutingEngine {
                     suggestion = suggestion,
                     weather = weather,
                     recentPrecipInches = recentPrecipInches,
-                    property = propertyMap[client.id]
+                    property = propertyMap[client.id],
+                    recentWeatherSignal = recentWeatherByClientId[client.id]
                 )
                 suggestion
             }
@@ -155,7 +158,8 @@ class RoutingEngine {
                         today = today,
                         weather = weather,
                         recentPrecipInches = recentPrecipInches,
-                        property = propertyMap[it.client.id]
+                        property = propertyMap[it.client.id],
+                        recentWeatherSignal = recentWeatherByClientId[it.client.id]
                     )
                 )
             }
@@ -300,7 +304,8 @@ class RoutingEngine {
         today: Int,
         weather: DailyWeather? = null,
         recentPrecipInches: Double? = null,
-        property: ClientProperty? = null
+        property: ClientProperty? = null,
+        recentWeatherSignal: RecentWeatherSignal? = null
     ): Double {
         var score = 0.0
 
@@ -388,7 +393,8 @@ class RoutingEngine {
             suggestion = suggestion,
             weather = weather,
             recentPrecipInches = recentPrecipInches,
-            property = property
+            property = property,
+            recentWeatherSignal = recentWeatherSignal
         )
         score += weatherAdj
 
@@ -408,13 +414,15 @@ class RoutingEngine {
         suggestion: ClientSuggestion,
         weather: DailyWeather?,
         recentPrecipInches: Double?,
-        property: ClientProperty?
+        property: ClientProperty?,
+        recentWeatherSignal: RecentWeatherSignal?
     ): Double {
         return evaluateWeatherPropertyImpact(
             suggestion = suggestion,
             weather = weather,
             recentPrecipInches = recentPrecipInches,
-            property = property
+            property = property,
+            recentWeatherSignal = recentWeatherSignal
         ).scoreAdjustment
     }
 
@@ -422,13 +430,15 @@ class RoutingEngine {
         suggestion: ClientSuggestion,
         weather: DailyWeather?,
         recentPrecipInches: Double?,
-        property: ClientProperty?
+        property: ClientProperty?,
+        recentWeatherSignal: RecentWeatherSignal? = null
     ): String? {
         val result = evaluateWeatherPropertyImpact(
             suggestion = suggestion,
             weather = weather,
             recentPrecipInches = recentPrecipInches,
-            property = property
+            property = property,
+            recentWeatherSignal = recentWeatherSignal
         )
         if (result.reasons.isEmpty()) return null
         return result.reasons.joinToString("; ")
@@ -438,7 +448,8 @@ class RoutingEngine {
         suggestion: ClientSuggestion,
         weather: DailyWeather?,
         recentPrecipInches: Double?,
-        property: ClientProperty?
+        property: ClientProperty?,
+        recentWeatherSignal: RecentWeatherSignal?
     ): WeatherImpactResult {
         val weatherData = weather ?: return WeatherImpactResult(0.0, emptyList())
         val propertyData = property ?: return WeatherImpactResult(0.0, emptyList())
@@ -449,6 +460,9 @@ class RoutingEngine {
         val windGust = weatherData.windGustMph
         val highTemp = weatherData.highTempF
         val todayPrecip = weatherData.precipitationInches
+        val rain24Inches = recentWeatherSignal?.rainLast24hInches
+        val rain48Inches = recentWeatherSignal?.rainLast48hInches ?: recentPrecipInches
+        val soilMoistureSurface = recentWeatherSignal?.soilMoistureSurface
 
         if (propertyData.windExposure == WindExposure.EXPOSED) {
             val windy = (windSpeed != null && windSpeed >= AppConfig.Routing.WEATHER_WIND_THRESHOLD_MPH) ||
@@ -476,11 +490,30 @@ class RoutingEngine {
 
         if (
             propertyData.hasSteepSlopes &&
-            recentPrecipInches != null &&
-            recentPrecipInches >= AppConfig.Routing.WEATHER_SLOPE_RAIN_THRESHOLD_INCHES
+            rain48Inches != null &&
+            rain48Inches >= AppConfig.Routing.WEATHER_SLOPE_RAIN_THRESHOLD_INCHES
         ) {
-            adjustment += AppConfig.Routing.WEATHER_SLOPE_RAIN_PENALTY
+            adjustment += AppConfig.Routing.WEATHER_RECENT_SLOPE_RAIN_PENALTY
             reasons += "Steep slopes penalized after rain"
+        }
+
+        if (propertyData.hasSteepSlopes && soilMoistureSurface != null) {
+            when {
+                soilMoistureSurface >= AppConfig.Routing.WEATHER_SOIL_MOISTURE_HIGH_THRESHOLD -> {
+                    adjustment += AppConfig.Routing.WEATHER_SLOPE_SOIL_HIGH_PENALTY
+                    reasons += "Steep slopes saturated"
+                }
+                soilMoistureSurface >= AppConfig.Routing.WEATHER_SOIL_MOISTURE_MODERATE_THRESHOLD -> {
+                    adjustment += AppConfig.Routing.WEATHER_SLOPE_SOIL_MODERATE_PENALTY
+                    reasons += "Steep slopes still damp"
+                }
+            }
+        } else if (
+            soilMoistureSurface != null &&
+            soilMoistureSurface >= AppConfig.Routing.WEATHER_SOIL_MOISTURE_HIGH_THRESHOLD
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_SOIL_HIGH_GENERAL_PENALTY
+            reasons += "Soil moisture remains high"
         }
 
         if (todayPrecip != null && todayPrecip >= AppConfig.Routing.WEATHER_RAIN_LIGHT_THRESHOLD) {
@@ -498,6 +531,21 @@ class RoutingEngine {
             adjustment += AppConfig.Routing.WEATHER_IRRIGATED_DRY_BONUS
             reasons += "Irrigated property favored in dry heat"
         }
+
+        if (
+            !propertyData.hasIrrigation &&
+            highTemp != null && highTemp >= AppConfig.Routing.WEATHER_DRY_HOT_THRESHOLD_F &&
+            rain24Inches != null && rain24Inches <= AppConfig.Routing.WEATHER_DRY_WINDOW_RAIN24_MAX_INCHES &&
+            soilMoistureSurface != null && soilMoistureSurface <= AppConfig.Routing.WEATHER_SOIL_DRY_THRESHOLD
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_DRY_WINDOW_NON_IRRIGATED_BONUS
+            reasons += "Drying window for non-irrigated lawn"
+        }
+
+        adjustment = adjustment.coerceIn(
+            AppConfig.Routing.WEATHER_ADJUSTMENT_MIN,
+            AppConfig.Routing.WEATHER_ADJUSTMENT_MAX
+        )
 
         return WeatherImpactResult(
             scoreAdjustment = adjustment,

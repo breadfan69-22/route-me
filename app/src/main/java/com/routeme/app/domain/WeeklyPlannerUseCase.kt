@@ -16,11 +16,13 @@ import com.routeme.app.model.FitnessLabel
 import com.routeme.app.model.ForecastDay
 import com.routeme.app.model.PlannedClient
 import com.routeme.app.model.PlannedDay
+import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
 import kotlin.math.atan2
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,6 +45,7 @@ class WeeklyPlannerUseCase(
         val forecastDays = weatherRepository.getForecastDays(dayCount = 7, lat = lat, lng = lng)
         val allClients = clientRepository.loadAllClients()
         val propertyMap = allClients.mapNotNull { client -> client.property?.let { client.id to it } }.toMap()
+        val recentWeatherByClientId = weatherRepository.getRecentWeatherSignals(allClients)
 
         val noteOnlyClients = allClients.filter {
             it.subscribedSteps.isEmpty() && !it.hasGrub && it.notes.isNotBlank()
@@ -57,7 +60,8 @@ class WeeklyPlannerUseCase(
             routeDirection = RouteDirection.OUTWARD,
             weather = null,
             recentPrecipInches = null,
-            propertyMap = propertyMap
+            propertyMap = propertyMap,
+            recentWeatherByClientId = recentWeatherByClientId
         )
 
         val dayBuilders = forecastDays.map { forecast ->
@@ -113,7 +117,8 @@ class WeeklyPlannerUseCase(
                     property = suggestion.client.property,
                     forecast = day.forecast,
                     dayOfWeek = day.dayOfWeek,
-                    eligibleSteps = suggestion.eligibleSteps
+                    eligibleSteps = suggestion.eligibleSteps,
+                    recentWeatherSignal = recentWeatherByClientId[suggestion.client.id]
                 )
 
                 // Hard block: mow day, day-after-mow, and day-before-mow are ineligible.
@@ -304,7 +309,8 @@ class WeeklyPlannerUseCase(
         property: ClientProperty?,
         forecast: ForecastDay,
         dayOfWeek: Int,
-        eligibleSteps: Set<ServiceType> = emptySet()
+        eligibleSteps: Set<ServiceType> = emptySet(),
+        recentWeatherSignal: RecentWeatherSignal? = null
     ): Pair<Int, String> {
         if (property == null) {
             return 50 to "No property data — neutral fit"
@@ -382,6 +388,15 @@ class WeeklyPlannerUseCase(
             reasons += "Slopes slippery after rain"
         }
 
+        val recentWeatherImpact = recentWeatherAdjustmentForPlanner(
+            property = property,
+            forecast = forecast,
+            recentWeatherSignal = recentWeatherSignal,
+            eligibleSteps = eligibleSteps
+        )
+        score += recentWeatherImpact.first
+        recentWeatherImpact.second?.let { reasons += it }
+
         if (property.hasIrrigation &&
             forecast.highTempF >= AppConfig.Routing.WEATHER_DRY_HOT_THRESHOLD_F &&
             forecast.precipProbabilityPct < AppConfig.WeeklyPlanner.PRECIP_LOW_PCT
@@ -427,6 +442,67 @@ class WeeklyPlannerUseCase(
         }
 
         return score.coerceAtMost(100) to (reasons.firstOrNull() ?: "Standard fit")
+    }
+
+    private fun recentWeatherAdjustmentForPlanner(
+        property: ClientProperty,
+        forecast: ForecastDay,
+        recentWeatherSignal: RecentWeatherSignal?,
+        eligibleSteps: Set<ServiceType>
+    ): Pair<Int, String?> {
+        if (recentWeatherSignal == null) return 0 to null
+
+        var adjustment = 0.0
+        var reason: String? = null
+
+        val rain24 = recentWeatherSignal.rainLast24hInches
+        val rain48 = recentWeatherSignal.rainLast48hInches
+        val soil = recentWeatherSignal.soilMoistureSurface
+        val hasLiquidStep = eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.LIQUID_STEPS }
+        val hasGranularStep = eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+
+        if (property.hasSteepSlopes && rain48 != null && rain48 >= AppConfig.Routing.WEATHER_SLOPE_RAIN_THRESHOLD_INCHES) {
+            adjustment += AppConfig.Routing.WEATHER_RECENT_SLOPE_RAIN_PENALTY
+            reason = "Recent rain on steep slopes"
+        }
+
+        if (property.hasSteepSlopes && soil != null) {
+            when {
+                soil >= AppConfig.Routing.WEATHER_SOIL_MOISTURE_HIGH_THRESHOLD -> {
+                    adjustment += AppConfig.Routing.WEATHER_SLOPE_SOIL_HIGH_PENALTY
+                    reason = reason ?: "Soil saturated on slopes"
+                }
+                soil >= AppConfig.Routing.WEATHER_SOIL_MOISTURE_MODERATE_THRESHOLD -> {
+                    adjustment += AppConfig.Routing.WEATHER_SLOPE_SOIL_MODERATE_PENALTY
+                    reason = reason ?: "Soil still damp on slopes"
+                }
+            }
+        }
+
+        if (
+            hasLiquidStep && !hasGranularStep &&
+            rain24 != null && rain24 >= AppConfig.Routing.WEATHER_RECENT_RAIN_24H_WET_THRESHOLD_INCHES
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_RECENT_LIQUID_RAIN_PENALTY
+            reason = reason ?: "Liquid step after recent rain"
+        }
+
+        if (
+            !property.hasIrrigation &&
+            forecast.highTempF >= AppConfig.Routing.WEATHER_DRY_HOT_THRESHOLD_F &&
+            rain24 != null && rain24 <= AppConfig.Routing.WEATHER_DRY_WINDOW_RAIN24_MAX_INCHES &&
+            soil != null && soil <= AppConfig.Routing.WEATHER_SOIL_DRY_THRESHOLD
+        ) {
+            adjustment += AppConfig.Routing.WEATHER_DRY_WINDOW_NON_IRRIGATED_BONUS
+            reason = reason ?: "Drying window on non-irrigated lawn"
+        }
+
+        adjustment = adjustment.coerceIn(
+            AppConfig.Routing.WEATHER_ADJUSTMENT_MIN,
+            AppConfig.Routing.WEATHER_ADJUSTMENT_MAX
+        )
+
+        return adjustment.roundToInt() to reason
     }
 
     private fun fitnessScoreToLabel(score: Int): FitnessLabel = when {

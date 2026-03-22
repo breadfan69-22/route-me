@@ -33,6 +33,7 @@ import com.routeme.app.domain.ServiceCompletionUseCase
 import com.routeme.app.domain.SuggestionUseCase
 import com.routeme.app.domain.SyncSettingsUseCase
 import com.routeme.app.domain.WeeklyPlannerUseCase
+import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.DateUtils
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -746,7 +747,7 @@ class MainViewModel(
         currentLocation: Location?
     ): SuggestionUseCase.SuggestNextResult {
         val latestState = _uiState.value
-        val weatherInputs = loadSuggestionWeatherInputs()
+        val weatherInputs = loadSuggestionWeatherInputs(latestState.clients)
         val propertyMap = latestState.clients
             .mapNotNull { client -> client.property?.let { client.id to it } }
             .toMap()
@@ -765,25 +766,40 @@ class MainViewModel(
             currentLocation = currentLocation,
             weather = weatherInputs.today,
             recentPrecipInches = weatherInputs.recentPrecipInches,
-            propertyMap = propertyMap
+            propertyMap = propertyMap,
+            recentWeatherByClientId = weatherInputs.recentWeatherByClientId
         )
     }
 
     private data class SuggestionWeatherInputs(
         val today: com.routeme.app.model.DailyWeather?,
-        val recentPrecipInches: Double?
+        val recentPrecipInches: Double?,
+        val recentWeatherByClientId: Map<String, RecentWeatherSignal>
     )
 
-    private suspend fun loadSuggestionWeatherInputs(): SuggestionWeatherInputs {
-        val repo = weatherRepository ?: return SuggestionWeatherInputs(today = null, recentPrecipInches = null)
+    private suspend fun loadSuggestionWeatherInputs(clients: List<Client>): SuggestionWeatherInputs {
+        val repo = weatherRepository ?: return SuggestionWeatherInputs(
+            today = null,
+            recentPrecipInches = null,
+            recentWeatherByClientId = emptyMap()
+        )
 
         return withContext(ioDispatcher) {
             val dayStartMillis = startOfTodayMillis()
             val today = runCatching { repo.getWeatherForDay(dayStartMillis) }.getOrNull()
+            val perClientSignals = runCatching {
+                repo.getRecentWeatherSignals(clients)
+            }.getOrDefault(emptyMap())
+            val shopSignal = runCatching { repo.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) }.getOrNull()
             val recentPrecip = runCatching {
-                repo.getRecentPrecip(com.routeme.app.util.AppConfig.Routing.WEATHER_RAIN_LOOKBACK_DAYS)
+                shopSignal?.rainLast48hInches
+                    ?: repo.getRecentPrecip(com.routeme.app.util.AppConfig.Routing.WEATHER_RAIN_LOOKBACK_DAYS)
             }.getOrNull()
-            SuggestionWeatherInputs(today = today, recentPrecipInches = recentPrecip)
+            SuggestionWeatherInputs(
+                today = today,
+                recentPrecipInches = recentPrecip,
+                recentWeatherByClientId = perClientSignals
+            )
         }
     }
 
