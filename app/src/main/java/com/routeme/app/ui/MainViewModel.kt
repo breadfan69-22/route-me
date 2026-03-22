@@ -123,13 +123,15 @@ class MainViewModel(
     private val _uiState = MutableStateFlow(
         MainUiState(
             selectedServiceTypes = resolveInitialSteps(),
-            minDays = savedStateHandle.get<Int>(KEY_MIN_DAYS) ?: 21,
-            cuOverrideEnabled = savedStateHandle.get<Boolean>(KEY_CU_OVERRIDE) ?: false,
+            minDays = savedStateHandle.get<Int>(KEY_MIN_DAYS)
+                ?: preferencesRepository.minDays,
+            cuOverrideEnabled = savedStateHandle.get<Boolean>(KEY_CU_OVERRIDE)
+                ?: preferencesRepository.cuOverrideEnabled,
             errandsModeEnabled = savedStateHandle.get<Boolean>(KEY_ERRANDS_MODE)
                 ?: preferencesRepository.errandsModeEnabled,
             routeDirection = savedStateHandle.get<String>(KEY_ROUTE_DIRECTION)
                 ?.let { runCatching { RouteDirection.valueOf(it) }.getOrNull() }
-                ?: RouteDirection.OUTWARD,
+                ?: preferencesRepository.routeDirection,
             suggestionOffset = savedStateHandle.get<Int>(KEY_SUGGESTION_OFFSET) ?: 0,
             arrivalStartedAtMillis = savedStateHandle.get<Long?>(KEY_ARRIVAL_STARTED_AT),
             arrivalLat = savedStateHandle.get<Double?>(KEY_ARRIVAL_LAT),
@@ -405,6 +407,40 @@ class MainViewModel(
         }
     }
 
+    /**
+     * Debug: run the aerial estimation pipeline on a single lat/lng and show results
+     * via snackbar + logcat. Use this to validate parcel, imagery, and classification
+     * before wiring up batch processing or UI.
+     */
+    fun debugEstimateProperty(lat: Double, lng: Double, clientName: String = "DEBUG") {
+        viewModelScope.launch {
+            setLoading(true)
+            setStatus("Estimating property for $clientName…", emitSnackbar = false)
+            try {
+                val result = withContext(ioDispatcher) {
+                    com.routeme.app.domain.PropertyEstimator.estimate(lat, lng, clientName)
+                }
+                val msg = buildString {
+                    append("${result.confidence}: ${result.lawnSizeSqFt} sqft, ${result.sunShade}")
+                    if (result.parcelId != null) append(" — parcel ${result.parcelId}")
+                    if (result.assessedAcres != null) append(" (${result.assessedAcres}ac)")
+                }
+                android.util.Log.i("AerialDebug", "=== Estimation for $clientName ===")
+                android.util.Log.i("AerialDebug", msg)
+                android.util.Log.i("AerialDebug", "Pixels: turf=${result.turfPixels} tree=${result.treePixels} " +
+                    "building=${result.buildingPixels} hardscape=${result.hardscapePixels} " +
+                    "other=${result.otherPixels} total=${result.totalParcelPixels}")
+                android.util.Log.i("AerialDebug", result.notes)
+                setStatus(msg)
+            } catch (e: Exception) {
+                android.util.Log.e("AerialDebug", "Estimation failed", e)
+                setStatus("Aerial estimation failed: ${e.message}")
+            } finally {
+                setLoading(false)
+            }
+        }
+    }
+
     private suspend fun handleGeocodeResult(result: SyncSettingsUseCase.GeocodeResult) {
         when (result) {
             is SyncSettingsUseCase.GeocodeResult.Error -> {
@@ -460,11 +496,13 @@ class MainViewModel(
     fun setMinDays(minDays: Int) {
         _uiState.update { it.copy(minDays = minDays) }
         savedStateHandle[KEY_MIN_DAYS] = minDays
+        preferencesRepository.minDays = minDays
     }
 
     fun toggleCuOverride() {
         _uiState.update { it.copy(cuOverrideEnabled = !it.cuOverrideEnabled) }
         savedStateHandle[KEY_CU_OVERRIDE] = _uiState.value.cuOverrideEnabled
+        preferencesRepository.cuOverrideEnabled = _uiState.value.cuOverrideEnabled
     }
 
     fun toggleErrandsMode() {
@@ -500,6 +538,7 @@ class MainViewModel(
             )
         }
         savedStateHandle[KEY_ROUTE_DIRECTION] = _uiState.value.routeDirection.name
+        preferencesRepository.routeDirection = _uiState.value.routeDirection
     }
 
     // ─── Non-client stop logging settings ──────────────────────
