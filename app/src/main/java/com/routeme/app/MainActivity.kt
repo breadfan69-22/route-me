@@ -495,8 +495,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyHeroIconLayout(primaryRes: Int, secondaryRes: Int) {
         val hasSecondary = secondaryRes != 0
-        val dualBaseDp = 112f
-        val singleBaseDp = 160f
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val dualBaseDp   = if (isLandscape) 90f  else 112f
+        val singleBaseDp = if (isLandscape) 120f else 160f
 
         if (hasSecondary) {
             val primarySizeDp = if (primaryRes == R.drawable.permagreen_turf_spreader_sprayer) {
@@ -717,6 +718,7 @@ class MainActivity : AppCompatActivity() {
         setupDirectionTileActions()
         setupSuggestionRefreshActions()
         setupWeatherTapAction()
+        setupTileLongPressActions()
     }
 
     private fun setupWeatherTapAction() {
@@ -730,7 +732,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUpcomingTileActions() {
-        binding.badgeUpcoming.setOnClickListener {
+        // Tap the tile itself navigates to upcoming events (also covers landscape where badge is absent)
+        binding.tileUpcoming.setOnClickListener {
+            startActivity(Intent(this, UpcomingEventsActivity::class.java))
+        }
+        // Badge dot — only present in portrait; null in landscape layout
+        binding.badgeUpcoming?.setOnClickListener {
             startActivity(Intent(this, UpcomingEventsActivity::class.java))
         }
     }
@@ -743,7 +750,7 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, "No sheet URL configured — tap ⋯ to set one", Snackbar.LENGTH_SHORT).show()
             }
         }
-        binding.badgeSync.setOnClickListener {
+        binding.badgeSync?.setOnClickListener {
             launchSyncSheetScreen()
         }
     }
@@ -764,7 +771,7 @@ class MainActivity : AppCompatActivity() {
         binding.tileTracking.setOnClickListener {
             trackingUiController.toggleTracking()
         }
-        binding.badgeTracking.setOnClickListener {
+        binding.badgeTracking?.setOnClickListener {
             viewModel.showDailySummary()
         }
     }
@@ -783,8 +790,35 @@ class MainActivity : AppCompatActivity() {
                 launchDestinationsScreen()
             }
         }
-        binding.badgeDirection.setOnClickListener {
+        binding.badgeDirection?.setOnClickListener {
             launchDestinationsScreen()
+        }
+    }
+
+    private fun setupTileLongPressActions() {
+        // Long-press on each tile triggers its overflow (badge) action.
+        // Works in both orientations; in landscape the badge dots are absent so long-press is the only path.
+        binding.tileTracking.setOnLongClickListener {
+            viewModel.showDailySummary()
+            true
+        }
+        binding.tileDirection.setOnLongClickListener {
+            launchDestinationsScreen()
+            true
+        }
+        binding.tileUpcoming.setOnLongClickListener {
+            startActivity(Intent(this, UpcomingEventsActivity::class.java))
+            true
+        }
+        binding.tileSync.setOnLongClickListener {
+            launchSyncSheetScreen()
+            true
+        }
+        binding.tileStep.setOnLongClickListener {
+            StepPickerBottomSheet
+                .newInstance(viewModel.uiState.value.selectedServiceTypes)
+                .show(supportFragmentManager, "step_picker")
+            true
         }
     }
 

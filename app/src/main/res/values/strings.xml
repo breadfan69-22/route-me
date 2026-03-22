@@ -197,6 +197,7 @@
     <string name="tile_suggested_title">Suggested Next</string>
     <string name="tile_suggest_button">Suggest Next</string>
     <string name="tile_refresh_suggestions">Refresh suggestions</string>
+    <string name="landscape_suggestions_empty">Tap ↺ to load\nroute suggestions</string>
     <string name="tile_selected_title">Selected Next</string>
     <string name="tile_property">Property</string>
     <string name="dialog_arrive">Arrive</string>

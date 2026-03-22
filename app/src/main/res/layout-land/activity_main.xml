@@ -1,0 +1,536 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/neumorph_surface"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/topToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorPrimaryContainer"
+        android:minHeight="?attr/actionBarSize"
+        app:popupTheme="@style/ThemeOverlay.RouteMe.PopupMenu"
+        app:title="@string/app_name"
+        app:titleTextColor="?attr/colorOnPrimaryContainer" />
+
+    <!-- ═══════ 3-COLUMN CONTENT (fills remaining height) ═══════ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- ═══ LEFT COLUMN: 5 tiles, icon-only, stacked ═══ -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:padding="4dp">
+
+            <!-- tileTracking -->
+            <com.routeme.app.ui.NeumorphTileLayout
+                android:id="@+id/tileTracking"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginBottom="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="6dp">
+
+                    <ImageView
+                        android:id="@+id/trackingButton"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/start_tracking"
+                        android:src="@drawable/ic_location_on"
+                        app:tint="?attr/colorPrimary" />
+
+                    <!-- Hidden — binding-present but not shown in landscape -->
+                    <TextView
+                        android:id="@+id/trackingStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.routeme.app.ui.NeumorphTileLayout>
+
+            <!-- tileDirection -->
+            <com.routeme.app.ui.NeumorphTileLayout
+                android:id="@+id/tileDirection"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginBottom="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="6dp">
+
+                    <ImageView
+                        android:id="@+id/directionIcon"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/tile_direction_icon"
+                        android:src="@drawable/ic_arrow_upward"
+                        app:tint="?attr/colorPrimary" />
+
+                    <!-- Hidden — binding-present but not shown in landscape -->
+                    <TextView
+                        android:id="@+id/directionText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/destinationBanner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.routeme.app.ui.NeumorphTileLayout>
+
+            <!-- tileUpcoming -->
+            <com.routeme.app.ui.NeumorphTileLayout
+                android:id="@+id/tileUpcoming"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginBottom="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="6dp">
+
+                    <ImageView
+                        android:id="@+id/upcomingIcon"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:contentDescription="@string/tile_upcoming_title"
+                        android:src="@drawable/ic_event_available"
+                        app:tint="?attr/colorPrimary" />
+
+                    <!-- Hidden — binding-present but not shown in landscape -->
+                    <TextView
+                        android:id="@+id/upcomingStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.routeme.app.ui.NeumorphTileLayout>
+
+            <!-- tileSync -->
+            <com.routeme.app.ui.NeumorphTileLayout
+                android:id="@+id/tileSync"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginBottom="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="6dp">
+
+                    <ImageView
+                        android:id="@+id/syncIcon"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:contentDescription="@string/tile_sync_title"
+                        android:src="@drawable/ic_cloud_off"
+                        app:tint="?attr/colorPrimary" />
+
+                    <!-- Hidden — binding-present but not shown in landscape -->
+                    <TextView
+                        android:id="@+id/syncStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.routeme.app.ui.NeumorphTileLayout>
+
+            <!-- tileStep -->
+            <com.routeme.app.ui.NeumorphTileLayout
+                android:id="@+id/tileStep"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="6dp">
+
+                    <ImageView
+                        android:id="@+id/stepIcon"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:contentDescription="@string/tile_step_title"
+                        android:src="@drawable/ic_sil_spreader"
+                        app:tint="?attr/colorPrimary" />
+
+                    <!-- Hidden — binding-present but not shown in landscape -->
+                    <TextView
+                        android:id="@+id/stepLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone" />
+
+                </LinearLayout>
+            </com.routeme.app.ui.NeumorphTileLayout>
+
+        </LinearLayout>
+
+        <!-- ═══ CENTER COLUMN: Dashboard hero (structure identical to portrait) ═══ -->
+        <FrameLayout
+            android:id="@+id/dashboardHero"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="2.5">
+
+            <!-- Gradient background (unused, kept for reference) -->
+            <ImageView
+                android:id="@+id/heroBackground"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@drawable/bg_hero_gradient"
+                android:scaleType="fitXY"
+                android:importantForAccessibility="no"
+                android:visibility="gone" />
+
+            <!-- Top scrim gradient -->
+            <View
+                android:id="@+id/heroScrimTop"
+                android:layout_width="match_parent"
+                android:layout_height="80dp"
+                android:layout_gravity="top"
+                android:background="@drawable/bg_hero_scrim_top" />
+
+            <!-- Weather block (top-left) -->
+            <LinearLayout
+                android:id="@+id/heroWeatherChip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|start"
+                android:layout_marginStart="12dp"
+                android:layout_marginTop="8dp"
+                android:gravity="start"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/heroWeatherIcon"
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:importantForAccessibility="no" />
+
+                <TextView
+                    android:id="@+id/heroWeatherTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/hero_weather_temp_color"
+                    android:layout_marginTop="2dp" />
+
+                <TextView
+                    android:id="@+id/heroWeatherWind"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="@color/hero_weather_temp_color"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/heroWeatherGust"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="@color/hero_weather_temp_color"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+            <!-- Countdown row (top-right) -->
+            <LinearLayout
+                android:id="@+id/heroCountdownRow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|end"
+                android:layout_marginTop="10dp"
+                android:paddingEnd="12dp"
+                android:gravity="end|center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/heroCountdownPrefix"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_metric_chip"
+                    android:paddingStart="6dp"
+                    android:paddingTop="3dp"
+                    android:paddingEnd="6dp"
+                    android:paddingBottom="3dp"
+                    android:text="@string/hero_stops_remaining_prefix"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/heroSplitFlapContainer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+
+            </LinearLayout>
+
+            <!-- Large centered equipment icon -->
+            <ImageView
+                android:id="@+id/heroIcon"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_hero_default"
+                android:contentDescription="@string/hero_icon_desc" />
+
+            <ImageView
+                android:id="@+id/heroIconSecondary"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_hero_default"
+                android:contentDescription="@string/hero_icon_desc"
+                android:visibility="gone" />
+
+            <!-- Dark mode overlay -->
+            <View
+                android:id="@+id/heroDarkOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#80000000"
+                android:visibility="gone" />
+
+            <!-- Bottom scrim gradient -->
+            <View
+                android:id="@+id/heroScrim"
+                android:layout_width="match_parent"
+                android:layout_height="80dp"
+                android:layout_gravity="bottom"
+                android:background="@drawable/bg_hero_scrim" />
+
+            <!-- Metric chip row (over scrim, at bottom) -->
+            <LinearLayout
+                android:id="@+id/heroMetrics"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="8dp">
+
+                <LinearLayout
+                    android:id="@+id/heroStepChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/bg_metric_chip"
+                    android:layout_marginStart="6dp"
+                    android:visibility="gone">
+                    <ImageView
+                        android:id="@+id/heroStepIcon"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:importantForAccessibility="no" />
+                    <TextView
+                        android:id="@+id/heroStepLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:textSize="13sp"
+                        android:textColor="#FFFFFF" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/heroClientName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:textSize="13sp"
+                    android:textColor="#FFFFFF"
+                    android:background="@drawable/bg_metric_chip"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:maxWidth="160dp"
+                    android:visibility="gone" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <LinearLayout
+                    android:id="@+id/heroDestChip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/bg_metric_chip"
+                    android:layout_marginStart="6dp"
+                    android:visibility="gone">
+                    <TextView
+                        android:id="@+id/heroDestText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="13sp"
+                        android:textColor="#FFFFFF"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:maxWidth="140dp" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <!-- ═══ RIGHT COLUMN: Suggestions ═══ -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="2"
+            android:padding="6dp">
+
+            <!-- Empty-state placeholder — visible when tileSuggested is GONE -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:padding="16dp"
+                android:text="@string/landscape_suggestions_empty"
+                android:textAlignment="center"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?attr/colorOutline" />
+
+            <!-- Suggestion list — GONE until data loads, covers placeholder when visible -->
+            <LinearLayout
+                android:id="@+id/tileSuggested"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@color/neumorph_surface"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:paddingBottom="4dp">
+
+                    <TextView
+                        android:id="@+id/suggestionHeader"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/tile_suggested_title"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+
+                    <ImageView
+                        android:id="@+id/badgeSuggestedRefresh"
+                        android:layout_width="28dp"
+                        android:layout_height="28dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/tile_refresh_suggestions"
+                        android:padding="4dp"
+                        android:src="@drawable/ic_refresh"
+                        app:tint="?attr/colorPrimary" />
+
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/suggestionRecyclerView"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+            </LinearLayout>
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- ═══════ SLIM STATUS BAR (bottom footer) ═══════ -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
+
+        <TextView
+            android:id="@+id/summaryText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
+
+        <TextView
+            android:id="@+id/errandsBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/colorTertiaryContainer"
+            android:paddingStart="8dp"
+            android:paddingTop="3dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="3dp"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="?attr/colorOnTertiaryContainer"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</LinearLayout>
