@@ -10,11 +10,14 @@ import android.location.Location
 import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognizerIntent
-import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
-import android.widget.LinearLayout
+import java.util.Collections
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
@@ -108,14 +111,20 @@ class DestinationsActivity : AppCompatActivity() {
             optimizeStartPoint = DestinationQueueUseCase.GeoPoint(startLat, startLng)
         }
 
-        queueAdapter = DestinationQueueAdapter { index ->
-            val result = destinationQueueUseCase.removeFromDestinationQueue(
-                destinationQueue = destinationQueue,
-                activeDestinationIndex = activeDestinationIndex,
-                indexToRemove = index
-            )
-            applyQueueMutation(result)
-        }
+        queueAdapter = DestinationQueueAdapter(
+            onRemoveAt = { index ->
+                val result = destinationQueueUseCase.removeFromDestinationQueue(
+                    destinationQueue = destinationQueue,
+                    activeDestinationIndex = activeDestinationIndex,
+                    indexToRemove = index
+                )
+                applyQueueMutation(result)
+            },
+            onNavigateTo = { destination ->
+                val uri = Uri.parse("google.navigation:q=${destination.lat},${destination.lng}")
+                startActivity(Intent(Intent.ACTION_VIEW, uri))
+            }
+        )
 
         destinationRecyclerView.layoutManager = LinearLayoutManager(this)
         destinationRecyclerView.adapter = queueAdapter
@@ -129,27 +138,30 @@ class DestinationsActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean {
-                val fromIndex = viewHolder.adapterPosition
-                val toIndex = target.adapterPosition
-                if (fromIndex == RecyclerView.NO_POSITION || toIndex == RecyclerView.NO_POSITION || fromIndex == toIndex) {
+                val from = viewHolder.adapterPosition
+                val to = target.adapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION || from == to) {
                     return false
                 }
-
-                val result = destinationQueueUseCase.moveDestinationInQueue(
-                    destinationQueue = destinationQueue,
-                    activeDestinationIndex = activeDestinationIndex,
-                    fromIndex = fromIndex,
-                    toIndex = toIndex
-                )
-                applyQueueMutation(result)
+                queueAdapter.onItemDragTo(from, to)
                 return true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
 
-            override fun isLongPressDragEnabled(): Boolean = true
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                val result = destinationQueueUseCase.replaceDestinationQueue(
+                    destinationQueue = queueAdapter.getDraggedList(),
+                    activeDestinationIndex = queueAdapter.getActiveIndex()
+                )
+                applyQueueMutation(result)
+            }
+
+            override fun isLongPressDragEnabled(): Boolean = false
         })
         touchHelper.attachToRecyclerView(destinationRecyclerView)
+        queueAdapter.onStartDrag = { holder -> touchHelper.startDrag(holder) }
 
         optimizeButton.setOnClickListener {
             val result = destinationQueueUseCase.optimizeDestinationQueue(
@@ -374,69 +386,76 @@ class DestinationsActivity : AppCompatActivity() {
     }
 
     private class DestinationQueueAdapter(
-        private val onRemoveAt: (Int) -> Unit
+        private val onRemoveAt: (Int) -> Unit,
+        private val onNavigateTo: (SavedDestination) -> Unit
     ) : RecyclerView.Adapter<DestinationQueueAdapter.DestinationViewHolder>() {
-        private val items = mutableListOf<SavedDestination>()
+        private val dragItems = mutableListOf<SavedDestination>()
         private var activeIndex: Int = 0
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DestinationViewHolder {
-            val row = LinearLayout(parent.context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 10, 0, 10)
-            }
-
-            val dragHandle = TextView(parent.context).apply {
-                text = "☰"
-                textSize = 16f
-                setPadding(0, 0, 16, 0)
-            }
-
-            val name = TextView(parent.context).apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-
-            val remove = TextView(parent.context).apply {
-                text = "✖"
-                textSize = 18f
-                setPadding(16, 0, 0, 0)
-            }
-
-            row.addView(dragHandle)
-            row.addView(name)
-            row.addView(remove)
-
-            return DestinationViewHolder(row, name, remove)
-        }
-
-        override fun onBindViewHolder(holder: DestinationViewHolder, position: Int) {
-            val destination = items[position]
-            val prefix = if (position == activeIndex) "▶ " else "${position + 1}. "
-            holder.nameView.text = "$prefix${destination.name}"
-            holder.nameView.setTypeface(null, if (position == activeIndex) Typeface.BOLD else Typeface.NORMAL)
-
-            holder.removeView.setOnClickListener {
-                val adapterPosition = holder.adapterPosition
-                if (adapterPosition != RecyclerView.NO_POSITION) {
-                    onRemoveAt(adapterPosition)
-                }
-            }
-        }
-
-        override fun getItemCount(): Int = items.size
+        var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
 
         fun submitQueue(queue: List<SavedDestination>, newActiveIndex: Int) {
-            items.clear()
-            items.addAll(queue)
+            dragItems.clear()
+            dragItems.addAll(queue)
             activeIndex = newActiveIndex
             notifyDataSetChanged()
         }
 
-        class DestinationViewHolder(
-            view: LinearLayout,
-            val nameView: TextView,
-            val removeView: TextView
-        ) : RecyclerView.ViewHolder(view)
+        fun onItemDragTo(from: Int, to: Int) {
+            if (from !in dragItems.indices || to !in dragItems.indices || from == to) return
+            if (activeIndex == from) {
+                activeIndex = to
+            } else if (from < to && activeIndex in (from + 1)..to) {
+                activeIndex--
+            } else if (from > to && activeIndex in to until from) {
+                activeIndex++
+            }
+            Collections.swap(dragItems, from, to)
+            notifyItemMoved(from, to)
+        }
+
+        fun getDraggedList(): List<SavedDestination> = dragItems.toList()
+        fun getActiveIndex(): Int = activeIndex
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): DestinationViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_destination_row, parent, false)
+            return DestinationViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: DestinationViewHolder, position: Int) {
+            val destination = dragItems[position]
+            val isActive = position == activeIndex
+
+            holder.destinationName.text = "${position + 1}. ${destination.name}"
+            holder.destinationName.setTypeface(null, if (isActive) Typeface.BOLD else Typeface.NORMAL)
+
+            val dotColor = if (isActive) 0xFF4CAF50.toInt() else 0xFF9E9E9E.toInt()
+            holder.activeDot.background.mutate().setTint(dotColor)
+
+            holder.navButton.setOnClickListener { onNavigateTo(destination) }
+            holder.removeButton.setOnClickListener {
+                val pos = holder.adapterPosition
+                if (pos != RecyclerView.NO_POSITION) onRemoveAt(pos)
+            }
+
+            @Suppress("ClickableViewAccessibility")
+            holder.dragHandle.setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    onStartDrag?.invoke(holder)
+                }
+                false
+            }
+        }
+
+        override fun getItemCount() = dragItems.size
+
+        class DestinationViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+            val dragHandle: ImageView = view.findViewById(R.id.dragHandle)
+            val activeDot: View = view.findViewById(R.id.activeDot)
+            val destinationName: TextView = view.findViewById(R.id.destinationName)
+            val navButton: ImageButton = view.findViewById(R.id.navButton)
+            val removeButton: ImageButton = view.findViewById(R.id.removeButton)
+        }
     }
 
     companion object {
