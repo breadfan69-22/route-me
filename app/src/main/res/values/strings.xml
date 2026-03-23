@@ -166,6 +166,7 @@
     <string name="status_errands_enabled">Errands Mode enabled</string>
     <string name="status_errands_disabled">Errands Mode disabled</string>
     <string name="status_errands_no_destinations">Add destinations first</string>
+    <string name="navigate_to_destination">Navigate to destination</string>
 
     <!-- Sync Sheet Activity -->
     <string name="sync_sheet_save">Save</string>

@@ -163,7 +163,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         suggestionUiController = SuggestionUiController(binding, viewModel,
-            onSuggestionTapped = { suggestion -> showClientActionDialog(suggestion.client) })
+            onSuggestionTapped = { suggestion -> showClientActionDialog(suggestion.client) },
+            onNavigateToDestination = { dest -> openDestinationInMaps(dest) })
         trackingUiController = TrackingUiController(
             activity = this,
             viewModel = viewModel,
@@ -386,7 +387,7 @@ class MainActivity : AppCompatActivity() {
                 R.string.errands_banner_active,
                 state.destinationQueue.size
             )
-            binding.tileSuggested.visibility = View.GONE
+            binding.tileSuggested.visibility = View.VISIBLE
         } else {
             binding.errandsBanner.visibility = View.GONE
             binding.tileSuggested.visibility =
@@ -844,7 +845,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupSuggestionRefreshActions() {
         binding.badgeSuggestedRefresh.setOnClickListener {
             if (viewModel.uiState.value.errandsModeEnabled) {
-                Snackbar.make(binding.root, "Errands Mode is active", Snackbar.LENGTH_SHORT).show()
+                launchDestinationsScreen()
                 return@setOnClickListener
             }
             suggestNextClients()
@@ -859,6 +860,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCurrentPage() {
         suggestionUiController.showCurrentPage()
+    }
+
+    private fun openDestinationInMaps(dest: com.routeme.app.SavedDestination) {
+        val uri = Uri.parse("google.navigation:q=${dest.lat},${dest.lng}")
+        openMapsUri(uri)
     }
 
     private fun openClientInMaps(client: Client) {
