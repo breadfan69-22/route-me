@@ -205,6 +205,12 @@ class RoutingEngine {
         // Street name of the last-picked stop. Null at the start (raw GPS, no address).
         var currentStreet: String? = null
 
+        if (AppConfig.Routing.DEBUG_SCORING_ENABLED) {
+            Log.d("RoutingOrder", "START loc=(%.4f,%.4f) distShop=%.1f dir=%s dest=%s".format(
+                currentLat, currentLng, currentDistToShop, routeDirection,
+                destination?.name ?: "shop"))
+        }
+
         val ordered = mutableListOf<ScoredSuggestion>()
 
         while (withCoords.isNotEmpty()) {
@@ -269,6 +275,18 @@ class RoutingEngine {
 
                 (candidate.score * AppConfig.Routing.ORDER_BASE_SCORE_WEIGHT) - hopPenalty + clusterBonus + sameStreetBonus + directionAdjustment + overdueBonus
             } ?: break
+
+            if (AppConfig.Routing.DEBUG_SCORING_ENABLED) {
+                val lat = next.suggestion.client.latitude ?: currentLat
+                val lng = next.suggestion.client.longitude ?: currentLng
+                val hopMiles = distanceMilesBetween(currentLat, currentLng, lat, lng)
+                val distToShop = next.suggestion.distanceToShopMiles
+                    ?: distanceMilesBetween(lat, lng, destLat, destLng)
+                Log.d("RoutingOrder", "#${ordered.size} ${next.suggestion.client.name}: " +
+                    "score=%+.0f hop=%.1fmi hopPen=%.0f distShop=%.1f (%.4f,%.4f)".format(
+                        next.score, hopMiles, hopMiles * AppConfig.Routing.ORDER_HOP_PENALTY_PER_MILE,
+                        distToShop, lat, lng))
+            }
 
             ordered.add(next)
             withCoords.remove(next)

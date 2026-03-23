@@ -3,8 +3,8 @@ package com.routeme.app
 import java.time.LocalDate
 import java.time.MonthDay
 
-const val SHOP_LAT = 42.2478
-const val SHOP_LNG = -85.5640
+const val SHOP_LAT = 42.3385
+const val SHOP_LNG = -85.5576
 
 /**
  * Seasonal date windows for each treatment step.

@@ -114,7 +114,7 @@ object AppConfig {
 
     object Routing {
         /** Set to true to log per-client score breakdowns to Logcat (tag: RoutingScore). */
-        const val DEBUG_SCORING_ENABLED = false
+        const val DEBUG_SCORING_ENABLED = true
 
         const val ORDER_HOP_PENALTY_PER_MILE = 14.0
         const val ORDER_BASE_SCORE_WEIGHT = 0.65
