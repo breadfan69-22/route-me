@@ -707,7 +707,9 @@ class RoutingEngine {
             }
         }
 
-        // Map back, skipping index 0 (the virtual start node)
-        return (1 until n).map { destinations[order[it] - 1] }
+        // Map back using `route` (the NN-ordered list), not the original `destinations`.
+        // lats/lngs indices 1..n-1 correspond to route[0..n-2], so order[it]-1 is a
+        // 0-based index into `route`, not into the original `destinations`.
+        return (1 until n).map { route[order[it] - 1] }
     }
 }
