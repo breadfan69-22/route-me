@@ -99,7 +99,7 @@ object AppConfig {
         const val NON_CLIENT_SHOP_LABEL_RADIUS_METERS = 100f
 
         const val DESTINATION_RADIUS_METERS = 150f
-        const val DESTINATION_DWELL_MS = 3 * 60 * 1000L
+        const val DESTINATION_DWELL_MS = 90 * 1000L
     }
 
     object SheetsWriteBack {
