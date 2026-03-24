@@ -13,12 +13,13 @@ import androidx.room.RoomDatabase
         PendingWriteBackEntity::class,
         NonClientStopEntity::class,
         ClientStopEventEntity::class,
+        TruckInventoryEntity::class,
         com.routeme.app.data.db.DailyWeatherEntity::class,
         com.routeme.app.data.db.ForecastDayEntity::class,
         com.routeme.app.data.db.GeocodeCacheEntity::class,
         com.routeme.app.data.db.SavedWeekPlanEntity::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun forecastDao(): com.routeme.app.data.db.ForecastDao
     abstract fun geocodeCacheDao(): com.routeme.app.data.db.GeocodeCacheDao
     abstract fun weekPlanDao(): com.routeme.app.data.db.WeekPlanDao
+    abstract fun truckInventoryDao(): TruckInventoryDao
 
     companion object {
         @Volatile
@@ -55,7 +57,8 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabaseMigrations.MIGRATION_11_12,
                         AppDatabaseMigrations.MIGRATION_12_13,
                         AppDatabaseMigrations.MIGRATION_13_14,
-                        AppDatabaseMigrations.MIGRATION_14_15
+                        AppDatabaseMigrations.MIGRATION_14_15,
+                        AppDatabaseMigrations.MIGRATION_15_16
                     )
                     .build()
                 INSTANCE = instance

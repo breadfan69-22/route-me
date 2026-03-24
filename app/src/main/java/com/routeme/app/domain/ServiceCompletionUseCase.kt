@@ -18,6 +18,7 @@ class ServiceCompletionUseCase(
     private val clientRepository: ClientRepository,
     private val retryQueue: WriteBackRetryQueue,
     private val preferencesRepository: PreferencesRepository,
+    private val truckInventoryUseCase: TruckInventoryUseCase? = null,
     private val nowProvider: () -> Long = { System.currentTimeMillis() }
 ) {
     data class GeoPoint(
@@ -166,6 +167,21 @@ class ServiceCompletionUseCase(
                 clientRepository.saveServiceRecord(client.id, record)
             } catch (e: Exception) {
                 return ConfirmSelectedResult.Error("Save record failed: ${e.message ?: "Unknown error"}")
+            }
+        }
+
+        val primaryServiceType = stepsToConfirm.firstOrNull()
+        if (primaryServiceType != null) {
+            runCatching {
+                truckInventoryUseCase?.deductForService(
+                    serviceType = primaryServiceType,
+                    amountUsed = request.amountUsed,
+                    amountUsed2 = request.amountUsed2,
+                    clientSqFt = client.lawnSizeSqFt.takeIf { it > 0 },
+                    granularRate = if (!primaryServiceType.isSpray)
+                        preferencesRepository.getGranularRate(primaryServiceType).takeIf { it > 0.0 }
+                    else null
+                )
             }
         }
 

@@ -13,10 +13,12 @@ import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ClientProperty
 import com.routeme.app.PropertyInput
+import com.routeme.app.ProductType
 import com.routeme.app.ServiceType
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.NonClientStop
+import com.routeme.app.TruckInventory
 import com.routeme.app.suggestedStepsForDate
 import com.routeme.app.TrackingEvent
 import com.routeme.app.TrackingEventBus
@@ -33,6 +35,7 @@ import com.routeme.app.domain.RoutingEngine
 import com.routeme.app.domain.ServiceCompletionUseCase
 import com.routeme.app.domain.SuggestionUseCase
 import com.routeme.app.domain.SyncSettingsUseCase
+import com.routeme.app.domain.TruckInventoryUseCase
 import com.routeme.app.domain.WeeklyPlannerUseCase
 import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.model.WeekPlan
@@ -59,6 +62,7 @@ class MainViewModel(
     private val suggestionUseCase: SuggestionUseCase = SuggestionUseCase(routingEngine),
     private val arrivalUseCase: ArrivalUseCase = ArrivalUseCase(routingEngine),
     private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue, preferencesRepository),
+    private val truckInventoryUseCase: TruckInventoryUseCase? = null,
     private val destinationQueueUseCase: DestinationQueueUseCase = DestinationQueueUseCase(preferencesRepository, routingEngine),
     private val routeHistoryUseCase: RouteHistoryUseCase = RouteHistoryUseCase(clientRepository),
     private val mapsExportUseCase: MapsExportUseCase = MapsExportUseCase(),
@@ -190,7 +194,42 @@ class MainViewModel(
         loadSyncSettings()
         loadClients()
         loadSavedDestinations()
+        refreshGranularInventory()
         // Weather will be fetched once location is available via fetchWeatherAtLocation()
+    }
+
+    fun addBagsToTruck(bagsAdded: Int) {
+        val useCase = truckInventoryUseCase ?: return
+        viewModelScope.launch {
+            withContext(ioDispatcher) {
+                useCase.addBags(ProductType.GRANULAR, bagsAdded)
+            }
+            refreshGranularInventory()
+            setStatus("Added $bagsAdded bag(s) to truck")
+        }
+    }
+
+    fun setBagsOnTruck(exactBags: Int) {
+        val useCase = truckInventoryUseCase ?: return
+        viewModelScope.launch {
+            withContext(ioDispatcher) {
+                useCase.setStock(ProductType.GRANULAR, exactBags)
+            }
+            refreshGranularInventory()
+            setStatus("Truck inventory set to $exactBags bag(s)")
+        }
+    }
+
+    fun refreshGranularInventory() {
+        val useCase = truckInventoryUseCase ?: return
+        viewModelScope.launch {
+            val granular = withContext(ioDispatcher) {
+                useCase.loadInventory()[ProductType.GRANULAR]
+            }
+            _uiState.update { state ->
+                state.copy(granularInventory = granular?.toInventoryStatus())
+            }
+        }
     }
 
     /**
@@ -1674,9 +1713,18 @@ class MainViewModel(
         emitPropertyNudgeIfNeeded(result.selectedClient)
         removeClientFromPlannedRoute(result.selectedClient.id)
         removeClientFromSavedPlan(result.selectedClient.id)
+        refreshGranularInventory()
 
         onSuccess?.invoke()
     }
+
+    private fun TruckInventory.toInventoryStatus(): InventoryStatus =
+        InventoryStatus(
+            current = currentStock,
+            capacity = capacity,
+            pctRemaining = pctRemaining,
+            isLow = isLow
+        )
 
     private fun removeClientFromPlannedRoute(clientId: String) {
         val currentState = _uiState.value

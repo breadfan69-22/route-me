@@ -6,6 +6,13 @@ import com.routeme.app.RouteDirection
 import com.routeme.app.SavedDestination
 import com.routeme.app.ServiceType
 
+data class InventoryStatus(
+    val current: Double,
+    val capacity: Double,
+    val pctRemaining: Int,
+    val isLow: Boolean
+)
+
 data class MainUiState(
     val clients: List<Client> = emptyList(),
     val summaryText: String = "",
@@ -61,7 +68,9 @@ data class MainUiState(
     /** Total eligible client count (full ranked list size before pagination). */
     val eligibleClientCount: Int = 0,
     /** Name of the client we are currently stopped at, null when driving/idle. */
-    val currentStopClientName: String? = null
+    val currentStopClientName: String? = null,
+    /** Granular truck inventory, tracked in bags. */
+    val granularInventory: InventoryStatus? = null
 ) {
     /** The current active destination, or null if the queue is empty/exhausted. */
     val activeDestination: SavedDestination?

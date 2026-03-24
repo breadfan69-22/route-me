@@ -14,6 +14,7 @@ import com.routeme.app.domain.RoutingEngine
 import com.routeme.app.domain.ServiceCompletionUseCase
 import com.routeme.app.domain.SuggestionUseCase
 import com.routeme.app.domain.SyncSettingsUseCase
+import com.routeme.app.domain.TruckInventoryUseCase
 import com.routeme.app.domain.WeeklyPlannerUseCase
 import com.routeme.app.ui.MainViewModel
 import org.koin.android.ext.koin.androidContext
@@ -29,6 +30,7 @@ val appModule = module {
     single { get<AppDatabase>().forecastDao() }
     single { get<AppDatabase>().geocodeCacheDao() }
     single { get<AppDatabase>().weekPlanDao() }
+    single { get<AppDatabase>().truckInventoryDao() }
 
     single { ClientRepository(androidContext(), get(), get(), get(), get()) }
     single { PreferencesRepository(androidContext()) }
@@ -41,9 +43,10 @@ val appModule = module {
     factory { MapsExportUseCase() }
     single { TrackingEventBus() }
     single { WriteBackRetryQueue(get()) }
-    factory { ServiceCompletionUseCase(get(), get(), get()) }
+    factory { ServiceCompletionUseCase(get(), get(), get(), get()) }
     factory { SyncSettingsUseCase(get(), get(), get()) }
-    factory { WeeklyPlannerUseCase(get(), get(), get(), get()) }
+    factory { WeeklyPlannerUseCase(get(), get(), get(), get(), getOrNull()) }
+    single { TruckInventoryUseCase(get()) }
 
-    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }

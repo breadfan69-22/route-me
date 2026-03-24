@@ -129,7 +129,8 @@ class PlannerDayFragment : Fragment() {
         }
 
         // Score badge
-        scoreBadge.text = "${day.dayScoreLabel} (${day.dayScore})"
+        val refillBadge = if (day.supplyStopNeeded) " • 📦" else ""
+        scoreBadge.text = "${day.dayScoreLabel} (${day.dayScore})$refillBadge"
         val badgeColor = when {
             day.dayScore >= 80 -> 0xFF4CAF50.toInt()
             day.dayScore >= 60 -> 0xFF8BC34A.toInt()

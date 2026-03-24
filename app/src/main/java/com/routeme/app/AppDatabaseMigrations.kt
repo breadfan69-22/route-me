@@ -232,6 +232,22 @@ object AppDatabaseMigrations {
         }
     }
 
+    val MIGRATION_15_16 = object : Migration(15, 16) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS truck_inventory (
+                    productType TEXT NOT NULL PRIMARY KEY,
+                    currentStock REAL NOT NULL DEFAULT 0,
+                    capacity REAL NOT NULL DEFAULT 0,
+                    unit TEXT NOT NULL DEFAULT 'bags',
+                    lastUpdatedMillis INTEGER NOT NULL DEFAULT 0
+                )
+                """.trimIndent()
+            )
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -246,6 +262,7 @@ object AppDatabaseMigrations {
         MIGRATION_11_12,
         MIGRATION_12_13,
         MIGRATION_13_14,
-        MIGRATION_14_15
+        MIGRATION_14_15,
+        MIGRATION_15_16
     )
 }

@@ -72,6 +72,21 @@ object AppConfig {
         const val LIQUID_STEP_RAIN_PENALTY_PCT = 70
         /** Score penalty applied when rain is expected on a liquid-step day. */
         const val LIQUID_STEP_RAIN_PENALTY = 40
+
+        /** Trigger threshold for marking a day as requiring a supply refill stop. */
+        const val REFILL_THRESHOLD_PCT = 0.20
+        /** Bonus for supply-house-adjacent zones on refill days. */
+        const val REFILL_DAY_ZONE_BONUS = 40
+        /** Penalty for out-of-way zones on refill days. */
+        const val REFILL_DAY_ZONE_PENALTY = -60
+    }
+
+    object SupplyHouse {
+        const val NAME = "SiteOne"
+        const val ADDRESS = "6395 Technology Ave Ste D, Kalamazoo, MI 49009"
+        const val LAT = 42.24653
+        const val LNG = -85.67462
+        val SUPPLY_HOUSE_ZONES = setOf("S09", "N09", "POR")
     }
 
     object Tracking {

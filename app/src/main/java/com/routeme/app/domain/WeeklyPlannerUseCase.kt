@@ -3,12 +3,15 @@ package com.routeme.app.domain
 import com.routeme.app.Client
 import com.routeme.app.ClientProperty
 import com.routeme.app.ClientSuggestion
+import com.routeme.app.DEFAULT_SQFT_ESTIMATE
+import com.routeme.app.ProductType
 import com.routeme.app.RouteDirection
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.ServiceType
 import com.routeme.app.SunShade
 import com.routeme.app.WindExposure
+import com.routeme.app.estimateGranularConsumptionBags
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WeatherRepository
@@ -33,6 +36,7 @@ class WeeklyPlannerUseCase(
     private val clientRepository: ClientRepository,
     private val routingEngine: RoutingEngine,
     private val preferencesRepository: PreferencesRepository,
+    private val truckInventoryUseCase: TruckInventoryUseCase? = null,
     private val nowProvider: () -> Long = System::currentTimeMillis
 ) {
     suspend fun generateWeekPlan(
@@ -41,7 +45,20 @@ class WeeklyPlannerUseCase(
         serviceTypes: Set<ServiceType> = ServiceType.entries.toSet(),
         minDays: Int = 7,
         dayAnchors: Map<Int, DayAnchor> = emptyMap()
-    ): WeekPlan = withContext(Dispatchers.Default) {
+    ): WeekPlan {
+        val inventorySnapshot = runCatching { truckInventoryUseCase?.loadInventory() }.getOrNull()
+        val granularCapacity = inventorySnapshot
+            ?.get(ProductType.GRANULAR)
+            ?.capacity
+            ?.takeIf { it > 0.0 }
+            ?: TruckInventoryUseCase.GRANULAR_CAPACITY_BAGS
+        val startingGranularBags = inventorySnapshot
+            ?.get(ProductType.GRANULAR)
+            ?.currentStock
+            ?.coerceIn(0.0, granularCapacity)
+            ?: granularCapacity
+
+        return withContext(Dispatchers.Default) {
         val forecastDays = weatherRepository.getForecastDays(dayCount = 7, lat = lat, lng = lng)
         val allClients = clientRepository.loadAllClients()
         val propertyMap = allClients.mapNotNull { client -> client.property?.let { client.id to it } }.toMap()
@@ -66,6 +83,68 @@ class WeeklyPlannerUseCase(
             recentWeatherByClientId = emptyMap()
         )
 
+        // Sort by urgency (most overdue first) — tiebreaker only, not primary driver.
+        val sortedClients = eligibleSuggestions.sortedWith(
+            compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
+                .thenByDescending { it.daysSinceLast == null }
+        )
+
+        val initialAssignment = assignClientsToDays(
+            forecastDays = forecastDays,
+            dayAnchors = dayAnchors,
+            sortedClients = sortedClients,
+            shopWeatherSignal = shopWeatherSignal,
+            lat = lat,
+            lng = lng,
+            refillDayOfWeek = emptySet()
+        )
+
+        val predictedRefillDayOfWeek = predictRefillDayOfWeek(
+            dayBuilders = initialAssignment.dayBuilders,
+            startingGranularBags = startingGranularBags,
+            capacityBags = granularCapacity
+        )
+
+        val finalAssignment = assignClientsToDays(
+            forecastDays = forecastDays,
+            dayAnchors = dayAnchors,
+            sortedClients = sortedClients,
+            shopWeatherSignal = shopWeatherSignal,
+            lat = lat,
+            lng = lng,
+            refillDayOfWeek = predictedRefillDayOfWeek
+        )
+
+        applyInventoryProjection(
+            dayBuilders = finalAssignment.dayBuilders,
+            startingGranularBags = startingGranularBags,
+            capacityBags = granularCapacity
+        )
+
+        WeekPlan(
+            days = finalAssignment.dayBuilders.map { it.build() },
+            generatedAtMillis = nowProvider(),
+            totalClients = eligibleSuggestions.size,
+            unassignedCount = (eligibleSuggestions.size - finalAssignment.assignedCount).coerceAtLeast(0),
+            noteOnlyClients = noteOnlyClients
+        )
+        }
+    }
+
+    private data class AssignmentResult(
+        val dayBuilders: MutableList<PlannedDayBuilder>,
+        val assignedCount: Int
+    )
+
+    private fun assignClientsToDays(
+        forecastDays: List<ForecastDay>,
+        dayAnchors: Map<Int, DayAnchor>,
+        sortedClients: List<ClientSuggestion>,
+        shopWeatherSignal: RecentWeatherSignal?,
+        lat: Double,
+        lng: Double,
+        refillDayOfWeek: Set<Int>
+    ): AssignmentResult {
         val dayBuilders = forecastDays.map { forecast ->
             val dayOfWeek = dayOfWeekForDate(forecast.dateMillis)
             val score = scoreDayWeather(forecast)
@@ -84,31 +163,13 @@ class WeeklyPlannerUseCase(
 
         val workDays = dayBuilders.filter { shouldIncludeAsWorkDay(it) }
         workDays.forEach { it.isWorkDay = true }
+        if (workDays.isEmpty()) return AssignmentResult(dayBuilders, 0)
 
-        if (workDays.isEmpty()) {
-            return@withContext WeekPlan(
-                days = dayBuilders.map { it.build() },
-                generatedAtMillis = nowProvider(),
-                totalClients = eligibleSuggestions.size,
-                unassignedCount = eligibleSuggestions.size,
-                noteOnlyClients = noteOnlyClients
-            )
-        }
-
-        val targetPerDay = ceil(eligibleSuggestions.size.toDouble() / workDays.size.toDouble()).toInt().coerceAtLeast(1)
+        val targetPerDay = ceil(sortedClients.size.toDouble() / workDays.size.toDouble()).toInt().coerceAtLeast(1)
         val softCap = minOf(targetPerDay + 2, AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY)
-
-        // Track accumulated sq ft per day for the sq-ft hard cap.
         val sqFtPerDay = mutableMapOf<PlannedDayBuilder, Int>()
 
-        // Sort by urgency (most overdue first) — tiebreaker only, not primary driver.
-        val sortedClients = eligibleSuggestions.sortedWith(
-            compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
-                .thenByDescending { it.daysSinceLast == null }
-        )
-
         var assignedCount = 0
-
         for (suggestion in sortedClients) {
             val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
             val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
@@ -120,20 +181,15 @@ class WeeklyPlannerUseCase(
                     forecast = day.forecast,
                     dayOfWeek = day.dayOfWeek,
                     eligibleSteps = suggestion.eligibleSteps,
-                    recentWeatherSignal = shopWeatherSignal
+                    recentWeatherSignal = shopWeatherSignal,
+                    dayIsRefillDay = day.dayOfWeek in refillDayOfWeek
                 )
 
-                // Hard block: mow day, day-after-mow, and day-before-mow are ineligible.
-                // 0 = mow day, 1 = day after, 6 = day before next mow
                 val daysSinceMow = if (clientMowDay != null) {
                     ((day.dayOfWeek - clientMowDay + 7) % 7)
                 } else null
                 val blockedByMow = daysSinceMow != null && (daysSinceMow in 0..1 || daysSinceMow == 6)
 
-                // Zone density bonus: reward days that already have same-zone clients.
-                // Applied AFTER mow filter — never added to a blocked day.
-                // Encourages zones to cluster (N09/S09→Mon, PW→Tue, RIC→Wed, KAL→Thu/Fri)
-                // without being able to override meaningful mow-window or weather differences.
                 val zoneDensityBonus = if (blockedByMow || suggestion.client.zone.isBlank()) {
                     0
                 } else {
@@ -144,27 +200,19 @@ class WeeklyPlannerUseCase(
                     )
                 }
 
-                // Corridor bonus: when a day has an anchor, clients near the shop→anchor
-                // travel corridor score higher.  Replaces zone density when active.
                 val corridorBonus = if (blockedByMow || day.anchorLat == null || day.anchorLng == null) {
                     0
                 } else {
                     corridorScore(suggestion.client, lat, lng, day.anchorLat, day.anchorLng)
                 }
 
-                // Proximity bonus: reward being physically near an already-assigned client
-                val proximityBonus = if (blockedByMow) 0 else
-                    proximityScore(suggestion.client, day.clients)
-
+                val proximityBonus = if (blockedByMow) 0 else proximityScore(suggestion.client, day.clients)
                 val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus
                 val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
                 DayFitness(day, finalScore, reason)
             }
 
-            // Filter 1: Exclude mow-blocked days (hard rule, never override)
-            // Filter 2: Prefer days under softCap, but allow up to hard cap
             val eligible = dayFitness.filter { it.score != Int.MIN_VALUE }
-            
             val best = eligible
                 .filter { fitness ->
                     val d = fitness.day
@@ -178,7 +226,6 @@ class WeeklyPlannerUseCase(
                 }
                 .maxByOrNull { it.score }
                 ?: eligible
-                    // Fallback: softCap exceeded, but allow up to hard cap (still respecting mow block)
                     .filter { it.day.clients.size < AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY }
                     .maxByOrNull { it.score }
 
@@ -198,23 +245,84 @@ class WeeklyPlannerUseCase(
             }
         }
 
-        // Sort each work day's clients into nearest-neighbour route order starting from the shop.
         dayBuilders.forEach { day ->
             if (day.clients.size > 1) {
-                day.clients.replaceAll { it }  // no-op to keep mutable
+                day.clients.replaceAll { it }
                 val ordered = nearestNeighbourOrder(day.clients, lat, lng)
                 day.clients.clear()
                 day.clients.addAll(ordered)
             }
         }
 
-        WeekPlan(
-            days = dayBuilders.map { it.build() },
-            generatedAtMillis = nowProvider(),
-            totalClients = eligibleSuggestions.size,
-            unassignedCount = (eligibleSuggestions.size - assignedCount).coerceAtLeast(0),
-            noteOnlyClients = noteOnlyClients
-        )
+        return AssignmentResult(dayBuilders, assignedCount)
+    }
+
+    private fun predictRefillDayOfWeek(
+        dayBuilders: List<PlannedDayBuilder>,
+        startingGranularBags: Double,
+        capacityBags: Double
+    ): Set<Int> {
+        if (capacityBags <= 0.0) return emptySet()
+
+        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
+        var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
+        val refillDays = mutableSetOf<Int>()
+
+        dayBuilders.forEach { day ->
+            if (!day.isWorkDay) return@forEach
+            runningBags = (runningBags - estimateDayGranularConsumptionBags(day)).coerceAtLeast(0.0)
+            if (runningBags < thresholdBags) {
+                refillDays += day.dayOfWeek
+                runningBags = capacityBags
+            }
+        }
+        return refillDays
+    }
+
+    private fun applyInventoryProjection(
+        dayBuilders: List<PlannedDayBuilder>,
+        startingGranularBags: Double,
+        capacityBags: Double
+    ) {
+        if (capacityBags <= 0.0) {
+            dayBuilders.forEach {
+                it.supplyStopNeeded = false
+                it.projectedInventoryPct = 0
+            }
+            return
+        }
+
+        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
+        var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
+
+        dayBuilders.forEach { day ->
+            if (day.isWorkDay) {
+                runningBags = (runningBags - estimateDayGranularConsumptionBags(day)).coerceAtLeast(0.0)
+                if (runningBags < thresholdBags) {
+                    day.supplyStopNeeded = true
+                    runningBags = capacityBags
+                } else {
+                    day.supplyStopNeeded = false
+                }
+            } else {
+                day.supplyStopNeeded = false
+            }
+
+            day.projectedInventoryPct = ((runningBags / capacityBags) * 100.0)
+                .roundToInt()
+                .coerceIn(0, 100)
+        }
+    }
+
+    private fun estimateDayGranularConsumptionBags(day: PlannedDayBuilder): Double {
+        return day.clients.sumOf { plannedClient ->
+            val hasGranularStep = plannedClient.eligibleSteps.any {
+                it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS
+            }
+            if (!hasGranularStep) return@sumOf 0.0
+            val sqFt = plannedClient.client.lawnSizeSqFt.takeIf { it > 0 } ?: DEFAULT_SQFT_ESTIMATE
+            estimateGranularConsumptionBags(sqFt)
+        }
     }
 
     private data class PlannedDayBuilder(
@@ -228,7 +336,9 @@ class WeeklyPlannerUseCase(
         val clients: MutableList<PlannedClient> = mutableListOf(),
         val anchorLat: Double? = null,
         val anchorLng: Double? = null,
-        val anchorLabel: String? = null
+        val anchorLabel: String? = null,
+        var supplyStopNeeded: Boolean = false,
+        var projectedInventoryPct: Int = 100
     ) {
         fun build(): PlannedDay {
             return PlannedDay(
@@ -242,7 +352,9 @@ class WeeklyPlannerUseCase(
                 isWorkDay = isWorkDay,
                 anchorLat = anchorLat,
                 anchorLng = anchorLng,
-                anchorLabel = anchorLabel
+                anchorLabel = anchorLabel,
+                supplyStopNeeded = supplyStopNeeded,
+                projectedInventoryPct = projectedInventoryPct
             )
         }
     }
@@ -312,7 +424,8 @@ class WeeklyPlannerUseCase(
         forecast: ForecastDay,
         dayOfWeek: Int,
         eligibleSteps: Set<ServiceType> = emptySet(),
-        recentWeatherSignal: RecentWeatherSignal? = null
+        recentWeatherSignal: RecentWeatherSignal? = null,
+        dayIsRefillDay: Boolean = false
     ): Pair<Int, String> {
         if (property == null) {
             return 50 to "No property data — neutral fit"
@@ -441,6 +554,17 @@ class WeeklyPlannerUseCase(
             // No mow day set — flexible schedule, treat every day as ideal.
             score += 30
             reasons += "No mow day — flexible schedule"
+        }
+
+        if (dayIsRefillDay) {
+            val zone = client.zone.trim().uppercase()
+            if (zone in AppConfig.SupplyHouse.SUPPLY_HOUSE_ZONES) {
+                score += AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_BONUS
+                reasons += "Refill day near supply house"
+            } else {
+                score += AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_PENALTY
+                reasons += "Refill day detour"
+            }
         }
 
         return score.coerceAtMost(100) to (reasons.firstOrNull() ?: "Standard fit")

@@ -48,7 +48,9 @@ data class PlannedDay(
     val isWorkDay: Boolean,
     val anchorLat: Double? = null,
     val anchorLng: Double? = null,
-    val anchorLabel: String? = null
+    val anchorLabel: String? = null,
+    val supplyStopNeeded: Boolean = false,
+    val projectedInventoryPct: Int = 100
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("dateMillis", dateMillis)
@@ -62,6 +64,8 @@ data class PlannedDay(
         if (anchorLat != null) put("anchorLat", anchorLat)
         if (anchorLng != null) put("anchorLng", anchorLng)
         if (anchorLabel != null) put("anchorLabel", anchorLabel)
+        put("supplyStopNeeded", supplyStopNeeded)
+        put("projectedInventoryPct", projectedInventoryPct)
     }
 
     companion object {
@@ -78,7 +82,9 @@ data class PlannedDay(
             isWorkDay = json.getBoolean("isWorkDay"),
             anchorLat = if (json.has("anchorLat")) json.getDouble("anchorLat") else null,
             anchorLng = if (json.has("anchorLng")) json.getDouble("anchorLng") else null,
-            anchorLabel = if (json.has("anchorLabel")) json.getString("anchorLabel") else null
+            anchorLabel = if (json.has("anchorLabel")) json.getString("anchorLabel") else null,
+            supplyStopNeeded = json.optBoolean("supplyStopNeeded", false),
+            projectedInventoryPct = json.optInt("projectedInventoryPct", 100)
         )
     }
 }

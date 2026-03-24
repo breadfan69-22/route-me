@@ -14,6 +14,8 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.Spinner
 import android.widget.TextView
 import com.google.android.material.button.MaterialButton
@@ -711,6 +713,78 @@ object DialogFactory {
                 }
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    fun showTruckInventoryDialog(
+        context: Context,
+        currentBags: Int,
+        capacityBags: Int,
+        onAddBags: (bagsAdded: Int) -> Unit,
+        onSetTotal: (exactBags: Int) -> Unit
+    ) {
+        val density = context.resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, 0)
+        }
+
+        val modeGroup = RadioGroup(context).apply {
+            orientation = RadioGroup.HORIZONTAL
+        }
+        val addMode = RadioButton(context).apply {
+            text = "Add bags"
+            id = View.generateViewId()
+            isChecked = true
+        }
+        val setMode = RadioButton(context).apply {
+            text = "Set total"
+            id = View.generateViewId()
+        }
+        modeGroup.addView(addMode)
+        modeGroup.addView(setMode)
+
+        val summary = TextView(context).apply {
+            text = "Current: $currentBags / $capacityBags bags"
+            textSize = 13f
+            setPadding(0, (8 * density).toInt(), 0, (8 * density).toInt())
+        }
+
+        val input = EditText(context).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "Enter # of bags added"
+        }
+
+        container.addView(modeGroup)
+        container.addView(summary)
+        container.addView(input)
+
+        modeGroup.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == addMode.id) {
+                input.hint = "Enter # of bags added"
+                input.setText("")
+            } else {
+                input.hint = "Set exact bags on truck"
+                input.setText(currentBags.toString())
+                input.setSelection(input.text?.length ?: 0)
+            }
+        }
+
+        AlertDialog.Builder(context)
+            .setTitle("Truck Inventory")
+            .setView(container)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text?.toString()?.toIntOrNull() ?: return@setPositiveButton
+                val clamped = value.coerceIn(0, capacityBags)
+                if (modeGroup.checkedRadioButtonId == addMode.id) {
+                    onAddBags(clamped)
+                } else {
+                    onSetTotal(clamped)
+                }
+            }
             .show()
     }
 

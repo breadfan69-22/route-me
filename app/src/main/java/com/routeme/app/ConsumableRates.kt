@@ -7,6 +7,15 @@ const val HOSE_SQFT_PER_GAL = 1_000.0
 /** Perma-Green (ride-on): 1 gallon covers 5,500 sqft. */
 const val PG_SQFT_PER_GAL = 5_500.0
 
+/** Granular application default: pounds per 1,000 sqft. */
+const val GRANULAR_LBS_PER_1000_SQFT = 3.5
+
+/** Granular application default: bags per 1,000 sqft (50 lb bags). */
+const val GRANULAR_BAGS_PER_1000_SQFT = GRANULAR_LBS_PER_1000_SQFT / LBS_PER_BAG
+
+/** Fallback lot size when property sqft is missing. */
+const val DEFAULT_SQFT_ESTIMATE = 10_000
+
 /** Whether a service type is a spray (liquid) step. */
 val ServiceType.isSpray: Boolean
     get() = this == ServiceType.ROUND_2 || this == ServiceType.ROUND_5
@@ -35,6 +44,14 @@ fun estimateGranularSqFt(lbsUsed: Double?, rateLbsPerThousand: Double): Int? {
     if (lbsUsed == null || lbsUsed <= 0.0 || rateLbsPerThousand <= 0.0) return null
     return ((lbsUsed / rateLbsPerThousand) * 1000.0).toInt()
 }
+
+/** Estimate granular consumption in 50-lb bags using the default application rate. */
+fun estimateGranularConsumptionBags(sqFt: Int): Double =
+    (sqFt / 1000.0) * GRANULAR_BAGS_PER_1000_SQFT
+
+/** Estimate granular consumption in 50-lb bags using a per-product rate (lbs/1000sqft). */
+fun estimateGranularConsumptionBags(sqFt: Int, rateLbsPerThousand: Double): Double =
+    (sqFt / 1000.0) * (rateLbsPerThousand / LBS_PER_BAG)
 
 // ─── Property stats collected on-site ──────────────────────
 data class PropertyInput(

@@ -150,7 +150,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         dayPickerBar.removeAllViews()
         for ((index, day) in days.withIndex()) {
             val btn = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                text = day.dayName.take(3)
+                text = if (day.supplyStopNeeded) "${day.dayName.take(3)} 📦" else day.dayName.take(3)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 textSize = 12f
 

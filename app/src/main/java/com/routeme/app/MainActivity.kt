@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.location.Location
 import android.location.LocationManager
 import android.net.Uri
@@ -306,6 +307,7 @@ class MainActivity : AppCompatActivity() {
             binding.heroStepChip.visibility = View.VISIBLE
             binding.heroStepLabel.text = buildHeroStepLabel(state.selectedServiceTypes)
             binding.heroStepIcon.setImageResource(stepTypeToSmallIcon(state.selectedServiceTypes))
+            bindHeroBagCount(state)
         } else {
             binding.heroStepChip.visibility = View.GONE
         }
@@ -745,7 +747,47 @@ class MainActivity : AppCompatActivity() {
         setupDirectionTileActions()
         setupSuggestionRefreshActions()
         setupWeatherTapAction()
+        setupHeroInventoryAction()
         setupTileLongPressActions()
+    }
+
+    private fun setupHeroInventoryAction() {
+        binding.heroStepChip.setOnClickListener {
+            showTruckInventoryDialog()
+        }
+    }
+
+    private fun bindHeroBagCount(state: MainUiState) {
+        val bagCountView = binding.heroBagCount ?: return
+        val inventory = state.granularInventory
+        if (inventory == null) {
+            bagCountView.text = "-- bags"
+            bagCountView.setTextColor(Color.parseColor("#CCE0FF"))
+            return
+        }
+
+        val current = inventory.current.coerceAtLeast(0.0)
+        bagCountView.text = if (current == kotlin.math.floor(current)) "${current.toInt()} bags" else "${"%,.1f".format(current)} bags"
+        val color = when {
+            inventory.pctRemaining < 15 -> "#FF4444"
+            inventory.pctRemaining < 30 -> "#FF8C00"
+            else -> "#CCE0FF"
+        }
+        bagCountView.setTextColor(Color.parseColor(color))
+    }
+
+    private fun showTruckInventoryDialog() {
+        val inventory = viewModel.uiState.value.granularInventory ?: return
+        val currentBags = inventory.current.toInt().coerceAtLeast(0)
+        val capacityBags = inventory.capacity.toInt().coerceAtLeast(1)
+
+        DialogFactory.showTruckInventoryDialog(
+            context = this,
+            currentBags = currentBags,
+            capacityBags = capacityBags,
+            onAddBags = { bagsAdded -> viewModel.addBagsToTruck(bagsAdded) },
+            onSetTotal = { exactBags -> viewModel.setBagsOnTruck(exactBags) }
+        )
     }
 
     private fun setupWeatherTapAction() {
