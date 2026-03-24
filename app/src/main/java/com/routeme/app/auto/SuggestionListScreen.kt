@@ -54,7 +54,14 @@ class SuggestionListScreen(
         lifecycleScope.launch {
             errandsMode = showDestinations || prefs.errandsModeEnabled
             if (errandsMode) {
-                destinations = prefs.savedDestinations
+                val queue = prefs.destinationQueue
+                val activeIndex = prefs.destinationQueueActiveIndex
+                destinations = when {
+                    queue.isEmpty() -> emptyList()
+                    activeIndex <= 0 -> queue
+                    activeIndex >= queue.size -> emptyList()
+                    else -> queue.drop(activeIndex)
+                }
             } else {
                 val selectedSteps = prefs.selectedSteps
                     .split(",")

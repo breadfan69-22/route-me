@@ -8,6 +8,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class PreferencesRepository(context: Context) {
+    data class DestinationQueueSnapshot(
+        val destinationQueue: List<SavedDestination>,
+        val activeDestinationIndex: Int
+    )
+
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     var sheetsReadUrl: String
@@ -163,6 +168,83 @@ class PreferencesRepository(context: Context) {
             }
         }
 
+    /** Persisted destination queue for background tracking progression. */
+    var destinationQueue: List<SavedDestination>
+        get() {
+            val json = prefs.getString(PREF_DESTINATION_QUEUE, null) ?: return emptyList()
+            return try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).mapNotNull { i ->
+                    val obj = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val id = obj.optString("id", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val name = obj.optString("name", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val address = obj.optString("address", "").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    if (!obj.has("lat") || !obj.has("lng")) return@mapNotNull null
+                    SavedDestination(
+                        id = id,
+                        name = name,
+                        address = address,
+                        lat = obj.optDouble("lat"),
+                        lng = obj.optDouble("lng")
+                    )
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { d ->
+                arr.put(JSONObject().apply {
+                    put("id", d.id)
+                    put("name", d.name)
+                    put("address", d.address)
+                    put("lat", d.lat)
+                    put("lng", d.lng)
+                })
+            }
+            prefs.edit().putString(PREF_DESTINATION_QUEUE, arr.toString()).apply()
+        }
+
+    /** Persisted active index for [destinationQueue]. */
+    var destinationQueueActiveIndex: Int
+        get() = prefs.getInt(PREF_DESTINATION_QUEUE_ACTIVE_INDEX, 0)
+        set(value) = prefs.edit().putInt(PREF_DESTINATION_QUEUE_ACTIVE_INDEX, value.coerceAtLeast(0)).apply()
+
+    /**
+     * Advance the destination queue after tracking confirms arrival at the active destination.
+     * This runs in background service context, independent of UI lifecycle.
+     */
+    fun advanceDestinationQueueOnArrival(arrivedDestinationId: String): DestinationQueueSnapshot {
+        val queue = destinationQueue
+        if (queue.isEmpty()) {
+            activeDestination = null
+            destinationQueueActiveIndex = 0
+            return DestinationQueueSnapshot(emptyList(), 0)
+        }
+
+        val clampedIndex = destinationQueueActiveIndex.coerceIn(0, queue.lastIndex)
+        val active = queue[clampedIndex]
+        if (active.id != arrivedDestinationId) {
+            activeDestination = active
+            destinationQueueActiveIndex = clampedIndex
+            return DestinationQueueSnapshot(queue, clampedIndex)
+        }
+
+        val nextIndex = clampedIndex + 1
+        if (nextIndex >= queue.size) {
+            destinationQueue = emptyList()
+            destinationQueueActiveIndex = 0
+            activeDestination = null
+            return DestinationQueueSnapshot(emptyList(), 0)
+        }
+
+        destinationQueue = queue
+        destinationQueueActiveIndex = nextIndex
+        activeDestination = queue[nextIndex]
+        return DestinationQueueSnapshot(queue, nextIndex)
+    }
+
     // ─── Granular application rates ──────────────────────────
 
     /** Get granular application rate (lbs/1000sqft) for a non-spray step. */
@@ -195,6 +277,8 @@ class PreferencesRepository(context: Context) {
         private const val PREF_CU_OVERRIDE = "cu_override"
         private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
         private const val PREF_ACTIVE_DESTINATION = "active_destination"
+        private const val PREF_DESTINATION_QUEUE = "destination_queue"
+        private const val PREF_DESTINATION_QUEUE_ACTIVE_INDEX = "destination_queue_active_index"
         private const val PREF_PLANNED_ROUTE_CLIENT_IDS = "planned_route_client_ids"
 
         data class SheetPreset(val label: String, val readUrl: String, val writeUrl: String)

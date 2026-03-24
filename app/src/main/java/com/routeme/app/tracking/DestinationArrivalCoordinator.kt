@@ -29,6 +29,11 @@ class DestinationArrivalCoordinator(
         val reached = outcome.destinationReached ?: return
         logDebug("Destination reached: ${reached.destination.name} (${reached.elapsedMillis / 1000}s dwell)")
 
+        val queueSnapshot = preferencesRepository.advanceDestinationQueueOnArrival(reached.destination.id)
+        logDebug(
+            "Destination queue advanced after reach: size=${queueSnapshot.destinationQueue.size}, activeIndex=${queueSnapshot.activeDestinationIndex}"
+        )
+
         val entity = NonClientStopEntity(
             lat = reached.anchorLat,
             lng = reached.anchorLng,

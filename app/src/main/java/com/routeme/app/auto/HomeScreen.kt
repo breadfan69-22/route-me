@@ -77,7 +77,7 @@ class HomeScreen(carContext: CarContext) : Screen(carContext), KoinComponent {
                     .setTitle("Destinations")
                     .addText(
                         if (errandsMode) "Errands ON — tap for stops"
-                        else "${prefs.savedDestinations.size} saved stops"
+                        else "${prefs.destinationQueue.size} queued stops"
                     )
                     .setBrowsable(true)
                     .setOnClickListener {

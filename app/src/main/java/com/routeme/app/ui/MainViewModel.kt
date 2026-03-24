@@ -122,6 +122,35 @@ class MainViewModel(
             ?.ifEmpty { null }
     }
 
+    private fun decodeDestinationQueueFromSavedState(): List<SavedDestination>? {
+        return savedStateHandle.get<String>(KEY_DEST_QUEUE)
+            ?.takeIf { it.isNotBlank() }
+            ?.split("|")
+            ?.mapNotNull { entry ->
+                val parts = entry.split(",", limit = 5)
+                if (parts.size == 5) {
+                    SavedDestination(
+                        id = parts[0],
+                        name = parts[1],
+                        address = parts[2],
+                        lat = parts[3].toDoubleOrNull() ?: return@mapNotNull null,
+                        lng = parts[4].toDoubleOrNull() ?: return@mapNotNull null
+                    )
+                } else {
+                    null
+                }
+            }
+    }
+
+    private fun clampDestinationIndex(queue: List<SavedDestination>, index: Int): Int {
+        return when {
+            queue.isEmpty() -> 0
+            index < 0 -> 0
+            index >= queue.size -> queue.lastIndex
+            else -> index
+        }
+    }
+
     private val _uiState = MutableStateFlow(
         MainUiState(
             selectedServiceTypes = resolveInitialSteps(),
@@ -143,18 +172,13 @@ class MainViewModel(
             arrivalWeatherWindMph = savedStateHandle.get<Int?>(KEY_ARRIVAL_WEATHER_WIND_MPH),
             arrivalWeatherDesc = savedStateHandle.get<String?>(KEY_ARRIVAL_WEATHER_DESC),
             isTracking = savedStateHandle.get<Boolean>(KEY_IS_TRACKING) ?: false,
-            destinationQueue = savedStateHandle.get<String>(KEY_DEST_QUEUE)
-                ?.takeIf { it.isNotBlank() }
-                ?.split("|")
-                ?.mapNotNull { entry ->
-                    val parts = entry.split(",", limit = 5)
-                    if (parts.size == 5) SavedDestination(
-                        parts[0], parts[1], parts[2],
-                        parts[3].toDoubleOrNull() ?: return@mapNotNull null,
-                        parts[4].toDoubleOrNull() ?: return@mapNotNull null
-                    ) else null
-                } ?: emptyList(),
-            activeDestinationIndex = savedStateHandle.get<Int>(KEY_DEST_INDEX) ?: 0
+            destinationQueue = decodeDestinationQueueFromSavedState()
+                ?: preferencesRepository.destinationQueue,
+            activeDestinationIndex = clampDestinationIndex(
+                queue = decodeDestinationQueueFromSavedState() ?: preferencesRepository.destinationQueue,
+                index = savedStateHandle.get<Int>(KEY_DEST_INDEX)
+                    ?: preferencesRepository.destinationQueueActiveIndex
+            )
         )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -748,19 +772,23 @@ class MainViewModel(
     /** Called when tracking detects arrival at the active destination. */
     fun onDestinationReached(destinationName: String) {
         viewModelScope.launch {
-            val state = _uiState.value
-            val result = destinationQueueUseCase.onDestinationReached(
-                destinationQueue = state.destinationQueue,
-                activeDestinationIndex = state.activeDestinationIndex,
-                destinationName = destinationName
-            )
-            _events.emit(MainEvent.ShowSnackbar(result.snackbarMessage))
+            val queue = preferencesRepository.destinationQueue
+            val activeIndex = clampDestinationIndex(queue, preferencesRepository.destinationQueueActiveIndex)
+            val snackbarMessage = if (queue.isEmpty()) {
+                "Arrived at $destinationName — all destinations reached"
+            } else {
+                val next = queue.getOrNull(activeIndex)
+                val remainingAfterNext = (queue.size - activeIndex - 1).coerceAtLeast(0)
+                "Arrived at $destinationName — next: ${next?.name ?: "(unknown)"} ($remainingAfterNext remaining)"
+            }
+            _events.emit(MainEvent.ShowSnackbar(snackbarMessage))
             _uiState.update {
                 it.copy(
-                    destinationQueue = result.destinationQueue,
-                    activeDestinationIndex = result.activeDestinationIndex
+                    destinationQueue = queue,
+                    activeDestinationIndex = activeIndex
                 )
             }
+            persistDestinationState(_uiState.value)
         }
     }
 
@@ -2681,6 +2709,8 @@ class MainViewModel(
             "${it.id},${it.name},${it.address},${it.lat},${it.lng}"
         }
         savedStateHandle[KEY_DEST_INDEX] = state.activeDestinationIndex
+        preferencesRepository.destinationQueue = state.destinationQueue
+        preferencesRepository.destinationQueueActiveIndex = state.activeDestinationIndex
     }
 
     // ─── Retry-queue helpers ───────────────────────────────────
