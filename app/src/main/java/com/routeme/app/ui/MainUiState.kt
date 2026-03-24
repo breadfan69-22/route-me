@@ -16,6 +16,8 @@ data class MainUiState(
     val sheetsReadUrl: String = "",
     val sheetsWriteUrl: String = "",
     val suggestions: List<ClientSuggestion> = emptyList(),
+    /** Ordered client IDs for an active weekly-planner route shown in Suggested Next. */
+    val plannedRouteClientIds: List<String> = emptyList(),
     val suggestionOffset: Int = 0,
     val selectedClient: Client? = null,
     val selectedClientDetails: String = "",

@@ -109,6 +109,25 @@ class PreferencesRepository(context: Context) {
             prefs.edit().putString(PREF_SAVED_DESTINATIONS, arr.toString()).apply()
         }
 
+    /** Ordered client IDs for a loaded weekly-planner daily route. Empty when no planned route is active. */
+    var plannedRouteClientIds: List<String>
+        get() {
+            val json = prefs.getString(PREF_PLANNED_ROUTE_CLIENT_IDS, null) ?: return emptyList()
+            return try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).mapNotNull { i ->
+                    arr.optString(i, null)?.takeIf { it.isNotBlank() }
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        set(value) {
+            val arr = JSONArray()
+            value.forEach { id -> arr.put(id) }
+            prefs.edit().putString(PREF_PLANNED_ROUTE_CLIENT_IDS, arr.toString()).apply()
+        }
+
     /**
      * The currently active destination (for tracking service dwell detection).
      * Null means no destination is active. This is a transient value set by the
@@ -176,6 +195,7 @@ class PreferencesRepository(context: Context) {
         private const val PREF_CU_OVERRIDE = "cu_override"
         private const val PREF_SAVED_DESTINATIONS = "saved_destinations"
         private const val PREF_ACTIVE_DESTINATION = "active_destination"
+        private const val PREF_PLANNED_ROUTE_CLIENT_IDS = "planned_route_client_ids"
 
         data class SheetPreset(val label: String, val readUrl: String, val writeUrl: String)
 

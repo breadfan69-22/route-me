@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.routeme.app.Client
+import com.routeme.app.ClientSuggestion
 import com.routeme.app.ClientStopRow
 import com.routeme.app.ClientStopStatus
 import com.routeme.app.RouteDirection
@@ -133,6 +134,7 @@ class MainViewModel(
             routeDirection = savedStateHandle.get<String>(KEY_ROUTE_DIRECTION)
                 ?.let { runCatching { RouteDirection.valueOf(it) }.getOrNull() }
                 ?: preferencesRepository.routeDirection,
+            plannedRouteClientIds = preferencesRepository.plannedRouteClientIds,
             suggestionOffset = savedStateHandle.get<Int>(KEY_SUGGESTION_OFFSET) ?: 0,
             arrivalStartedAtMillis = savedStateHandle.get<Long?>(KEY_ARRIVAL_STARTED_AT),
             arrivalLat = savedStateHandle.get<Double?>(KEY_ARRIVAL_LAT),
@@ -245,8 +247,27 @@ class MainViewModel(
                     ?: current.selectedClientDetails
             )
         }
-        persistCriticalState(_uiState.value)
+        val restoredPlannedRoute = restorePlannedRouteAfterClientsLoaded(loadedClients)
+        if (!restoredPlannedRoute) {
+            persistCriticalState(_uiState.value)
+        }
         setStatus(result.statusMessage)
+    }
+
+    private fun restorePlannedRouteAfterClientsLoaded(loadedClients: List<Client>): Boolean {
+        val plannedIds = preferencesRepository.plannedRouteClientIds
+        if (plannedIds.isEmpty()) return false
+
+        val plannedClients = matchClientsByOrderedIds(plannedIds, loadedClients)
+        if (plannedClients.isEmpty()) {
+            preferencesRepository.plannedRouteClientIds = emptyList()
+            _uiState.update { it.copy(plannedRouteClientIds = emptyList()) }
+            persistCriticalState(_uiState.value)
+            return false
+        }
+
+        applyPlannedRouteState(plannedClients, emitStatus = false)
+        return true
     }
 
     private fun resolveRestoredSelectedClient(clients: List<Client>): Client? {
@@ -642,6 +663,41 @@ class MainViewModel(
         }
     }
 
+    fun loadPlannedRoute(clients: List<Client>) {
+        if (clients.isEmpty()) {
+            preferencesRepository.plannedRouteClientIds = emptyList()
+            _uiState.update { it.copy(plannedRouteClientIds = emptyList()) }
+            viewModelScope.launch { setStatus("No planned stops to load") }
+            return
+        }
+        applyPlannedRouteState(clients, emitStatus = true)
+    }
+
+    private fun applyPlannedRouteState(clients: List<Client>, emitStatus: Boolean) {
+        val plannedIds = clients.map { it.id }
+        val plannedSuggestions = clients.toPlannedRouteSuggestions()
+        val firstClient = clients.firstOrNull()
+
+        preferencesRepository.plannedRouteClientIds = plannedIds
+        _uiState.update {
+            it.copy(
+                suggestions = plannedSuggestions,
+                plannedRouteClientIds = plannedIds,
+                suggestionOffset = 0,
+                selectedClient = firstClient,
+                selectedClientDetails = firstClient?.let(routingEngine::buildClientDetails) ?: "",
+                eligibleClientCount = plannedSuggestions.size
+            )
+        }
+        persistCriticalState(_uiState.value)
+
+        if (emitStatus) {
+            viewModelScope.launch {
+                setStatus("Planned route: ${plannedSuggestions.size} stops")
+            }
+        }
+    }
+
     fun clearDestinationQueue() {
         val result = destinationQueueUseCase.clearDestinationQueue()
         _uiState.update {
@@ -719,14 +775,26 @@ class MainViewModel(
         val state = _uiState.value
         if (!canSuggestForState(state)) return
 
+        val plannedRouteCleared = clearPlannedRouteForScoringIfNeeded(state)
+
         _uiState.update { it.copy(isSuggestionsLoading = true) }
 
         try {
             val result = computeSuggestionResult(currentLocation)
             applySuggestionResult(result)
+            if (plannedRouteCleared) {
+                setStatus("Planned route cleared. ${result.statusMessage}", emitSnackbar = false)
+            }
         } finally {
             clearSuggestionLoadingFlag()
         }
+    }
+
+    private fun clearPlannedRouteForScoringIfNeeded(state: MainUiState): Boolean {
+        if (state.plannedRouteClientIds.isEmpty()) return false
+        preferencesRepository.plannedRouteClientIds = emptyList()
+        _uiState.update { it.copy(plannedRouteClientIds = emptyList()) }
+        return true
     }
 
     private suspend fun canSuggestForState(state: MainUiState): Boolean {
@@ -1576,9 +1644,34 @@ class MainViewModel(
         emitConfirmSelectedEvents(result)
         emitConfirmSelectedSheetFeedback(result)
         emitPropertyNudgeIfNeeded(result.selectedClient)
+        removeClientFromPlannedRoute(result.selectedClient.id)
         removeClientFromSavedPlan(result.selectedClient.id)
 
         onSuccess?.invoke()
+    }
+
+    private fun removeClientFromPlannedRoute(clientId: String) {
+        val currentState = _uiState.value
+        if (currentState.plannedRouteClientIds.isEmpty()) return
+
+        val remainingIds = currentState.plannedRouteClientIds.filterNot { it == clientId }
+        preferencesRepository.plannedRouteClientIds = remainingIds
+
+        _uiState.update { state ->
+            val remainingClients = matchClientsByOrderedIds(remainingIds, state.clients)
+            val remainingSuggestions = remainingClients.toPlannedRouteSuggestions()
+            val selectedClient = remainingClients.firstOrNull()
+
+            state.copy(
+                plannedRouteClientIds = remainingIds,
+                suggestions = remainingSuggestions,
+                suggestionOffset = 0,
+                selectedClient = selectedClient,
+                selectedClientDetails = selectedClient?.let(routingEngine::buildClientDetails) ?: "",
+                eligibleClientCount = remainingSuggestions.size
+            )
+        }
+        persistCriticalState(_uiState.value)
     }
 
     private fun applyConfirmSelectedState(
@@ -2004,6 +2097,24 @@ class MainViewModel(
             summaryText = buildSummaryText(updatedClients),
             completedSteps = computeCompletedSteps(updatedClients)
         )
+    }
+
+    private fun matchClientsByOrderedIds(ids: List<String>, clients: List<Client>): List<Client> {
+        if (ids.isEmpty()) return emptyList()
+        val clientsById = clients.associateBy { it.id }
+        return ids.mapNotNull { clientsById[it] }
+    }
+
+    private fun List<Client>.toPlannedRouteSuggestions(): List<ClientSuggestion> {
+        return map { client ->
+            ClientSuggestion(
+                client = client,
+                daysSinceLast = null,
+                distanceMiles = null,
+                distanceToShopMiles = null,
+                mowWindowPreferred = true
+            )
+        }
     }
 
     private fun MainUiState.withClearedArrival(

@@ -137,8 +137,15 @@ class MainActivity : AppCompatActivity() {
             com.routeme.app.ui.WeeklyPlannerActivity.RESULT_START_ROUTE -> {
                 val destinations = com.routeme.app.ui.WeeklyPlannerActivity.extractRouteDestinations(result.data)
                 if (!destinations.isNullOrEmpty()) {
-                    viewModel.replaceDestinationQueue(destinations, activeDestinationIndex = 0)
-                    Snackbar.make(binding.root, "Route loaded: ${destinations.size} stops", Snackbar.LENGTH_SHORT).show()
+                    val clientsById = viewModel.uiState.value.clients.associateBy { it.id }
+                    val plannedClients = destinations.mapNotNull { destination ->
+                        clientsById[destination.id]
+                    }
+                    if (plannedClients.isNotEmpty()) {
+                        viewModel.loadPlannedRoute(plannedClients)
+                        showCurrentPage()
+                        Snackbar.make(binding.root, "Route loaded: ${plannedClients.size} stops", Snackbar.LENGTH_SHORT).show()
+                    }
                 }
             }
         }

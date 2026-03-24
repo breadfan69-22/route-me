@@ -36,7 +36,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.UUID
 import org.koin.android.ext.android.inject
 
 class WeeklyPlannerActivity : AppCompatActivity() {
@@ -335,7 +334,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
             val c = plannedClient.client
             if (c.latitude == null || c.longitude == null) return@mapNotNull null
             SavedDestination(
-                id = UUID.randomUUID().toString(),
+                id = c.id,
                 name = c.name,
                 address = c.address,
                 lat = c.latitude,
