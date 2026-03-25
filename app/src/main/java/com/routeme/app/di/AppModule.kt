@@ -32,7 +32,7 @@ val appModule = module {
     single { get<AppDatabase>().weekPlanDao() }
     single { get<AppDatabase>().truckInventoryDao() }
 
-    single { ClientRepository(androidContext(), get(), get(), get(), get()) }
+    single { ClientRepository(androidContext(), get(), get(), get(), get<com.routeme.app.data.db.GeocodeCacheDao>()) }
     single { PreferencesRepository(androidContext()) }
     single { WeatherRepository(get(), get()) }
     single { RoutingEngine() }

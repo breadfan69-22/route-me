@@ -52,11 +52,17 @@ class RoutingEngine {
      */
     fun precomputeClusterDrivingDistances(clients: List<Client>) {
         val geocoded = clients.filter { it.latitude != null && it.longitude != null }
-        val cache = mutableMapOf<Pair<String, String>, Double?>()
+        // Start from existing cache to avoid redundant API calls
+        val cache = clusterDrivingCache.toMutableMap()
+        // Limit API calls per invocation to prevent hanging
+        val maxNewFetches = 20
+        var fetchCount = 0
 
         for (i in geocoded.indices) {
+            if (fetchCount >= maxNewFetches) break
             val a = geocoded[i]
             for (j in i + 1 until geocoded.size) {
+                if (fetchCount >= maxNewFetches) break
                 val b = geocoded[j]
 
                 val haversine = distanceMilesBetween(a.latitude!!, a.longitude!!, b.latitude!!, b.longitude!!)
@@ -68,6 +74,7 @@ class RoutingEngine {
                 cache[key] = DistanceMatrixHelper.fetchDrivingDistanceMiles(
                     a.latitude, a.longitude, b.latitude, b.longitude
                 )
+                fetchCount++
             }
         }
         clusterDrivingCache = cache

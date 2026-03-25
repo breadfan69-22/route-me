@@ -36,6 +36,13 @@ class PreferencesRepository(context: Context) {
         }
         set(value) = prefs.edit().putString(PREF_PROPERTY_SHEET_WRITE_URL, value).apply()
 
+    var propertySheetReadUrl: String
+        get() {
+            val configured = prefs.getString(PREF_PROPERTY_SHEET_READ_URL, null)?.trim().orEmpty()
+            return if (configured.isBlank()) DEFAULT_PROPERTY_READ_URL else configured
+        }
+        set(value) = prefs.edit().putString(PREF_PROPERTY_SHEET_READ_URL, value).apply()
+
     /** Whether non-client stop logging is enabled. Default: true. */
     var nonClientLoggingEnabled: Boolean
         get() = prefs.getBoolean(PREF_NON_CLIENT_LOGGING, true)
@@ -264,9 +271,11 @@ class PreferencesRepository(context: Context) {
         private const val PREF_SHEETS_READ_URL = "sheets_read_url"
         private const val PREF_SHEETS_WRITE_URL = "sheets_write_url"
         private const val PREF_PROPERTY_SHEET_WRITE_URL = "property_sheet_write_url"
+        private const val PREF_PROPERTY_SHEET_READ_URL = "property_sheet_read_url"
         private const val DEFAULT_READ_URL = "https://docs.google.com/spreadsheets/d/1yHe6BUUVBV-5PEEXwZolPK-d-kW6x6ZGrcnDfhR-zOY/edit?usp=sharing"
         private const val DEFAULT_WRITE_URL = "https://script.google.com/macros/s/AKfycbwqJDDeurHB6fW7wiAbm6YvtLY3nsTJHenlj0rIfBStWSGcinIxWOOKh8oEqdvTquT_/exec"
         private const val DEFAULT_PROPERTY_WRITE_URL = "https://script.google.com/macros/s/AKfycbwTNiYfKK69jugL-PxhJk-aZaAlzw9DXyjZrs7SX6ZaAxjYymDpBKJZUieKmo-9xsqHQg/exec"
+        private const val DEFAULT_PROPERTY_READ_URL = "https://docs.google.com/spreadsheets/d/1WV5ct-a6HfujHKIbTPf7YcTeIqjP8_SIF9jycm10saA/edit?usp=sharing"
         private const val PREF_NON_CLIENT_LOGGING = "non_client_logging_enabled"
         private const val PREF_NON_CLIENT_THRESHOLD = "non_client_stop_threshold_min"
         private const val PREF_SELECTED_STEPS = "selected_steps"

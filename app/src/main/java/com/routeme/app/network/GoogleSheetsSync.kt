@@ -162,4 +162,60 @@ object GoogleSheetsSync {
             SyncResult(emptyList(), "Sheets sync error: ${e.javaClass.simpleName}: ${e.message}")
         }
     }
+
+    /**
+     * Fetches coordinates from a PropertySpecs-style sheet (direct CSV).
+     * Returns a map of lowercase client name -> (lat, lng).
+     * Must be called from a background thread.
+     */
+    fun fetchPropertyCoordinates(rawUrl: String): Map<String, Pair<Double, Double>> {
+        return try {
+            val csvUrl = normalizeUrl(rawUrl)
+            if (!csvUrl.startsWith("https://docs.google.com/")) return emptyMap()
+
+            val url = URL(csvUrl)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 15_000
+            conn.requestMethod = "GET"
+            conn.instanceFollowRedirects = true
+
+            if (conn.responseCode != 200) {
+                conn.disconnect()
+                return emptyMap()
+            }
+
+            val lines = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).readLines()
+            conn.disconnect()
+
+            if (lines.isEmpty()) return emptyMap()
+
+            val headers = CsvParsingUtils.parseCsvLine(lines.first())
+                .map { it.trim().lowercase(Locale.US) }
+
+            val nameIdx = headers.indexOfFirst { it == "name" }
+            val latIdx = headers.indexOfFirst { it == "lat" }
+            val lngIdx = headers.indexOfFirst { it == "lng" }
+
+            if (nameIdx < 0 || latIdx < 0 || lngIdx < 0) return emptyMap()
+
+            val result = mutableMapOf<String, Pair<Double, Double>>()
+            for (line in lines.drop(1)) {
+                if (line.isBlank()) continue
+                val cols = CsvParsingUtils.parseCsvLine(line)
+                if (cols.size <= maxOf(nameIdx, latIdx, lngIdx)) continue
+
+                val name = cols[nameIdx].trim().lowercase(Locale.US)
+                val lat = cols[latIdx].trim().toDoubleOrNull()
+                val lng = cols[lngIdx].trim().toDoubleOrNull()
+
+                if (name.isNotBlank() && lat != null && lng != null && lat in -90.0..90.0 && lng in -180.0..180.0) {
+                    result[name] = lat to lng
+                }
+            }
+            result
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
 }

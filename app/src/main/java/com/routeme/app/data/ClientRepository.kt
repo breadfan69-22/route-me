@@ -135,8 +135,17 @@ class ClientRepository(
         val newlyAddedClients: List<Client>
     )
 
-    suspend fun syncFromSheets(url: String): SyncResult = withContext(Dispatchers.IO) {
+    suspend fun syncFromSheets(url: String, propertySheetUrl: String = ""): SyncResult = withContext(Dispatchers.IO) {
         val result = GoogleSheetsSync.fetch(url)
+
+        // Fetch coordinates from PropertySpecs sheet (direct CSV)
+        val propertyCoords = if (propertySheetUrl.isNotBlank()) {
+            GoogleSheetsSync.fetchPropertyCoordinates(propertySheetUrl)
+        } else {
+            emptyMap()
+        }
+        android.util.Log.d("ClientSync", "PropertySpecs provided ${propertyCoords.size} coordinates")
+
         if (result.clients.isNotEmpty()) {
             val existingClients = clientDao.getAllClients()
             val existingPropertiesByClientKey = existingPropertiesByClientKey(existingClients)
@@ -180,36 +189,27 @@ class ClientRepository(
                 // irrigation is transient on Client (not stored in clients table) — keep import value
                 val mergedIrrigation = client.irrigation
 
-                if (client.latitude == null || client.longitude == null) {
-                    val saved = existingCoords[client.name.lowercase()]
-                    if (saved != null) {
-                        client.copy(
-                            latitude = saved.first,
-                            longitude = saved.second,
-                            lawnSizeSqFt = mergedLawnSize,
-                            sunShade = mergedSunShade,
-                            windExposure = mergedWindExposure,
-                            terrain = mergedTerrain,
-                            irrigation = mergedIrrigation
-                        )
-                    } else {
-                        client.copy(
-                            lawnSizeSqFt = mergedLawnSize,
-                            sunShade = mergedSunShade,
-                            windExposure = mergedWindExposure,
-                            terrain = mergedTerrain,
-                            irrigation = mergedIrrigation
-                        )
-                    }
-                } else {
-                    client.copy(
-                        lawnSizeSqFt = mergedLawnSize,
-                        sunShade = mergedSunShade,
-                        windExposure = mergedWindExposure,
-                        terrain = mergedTerrain,
-                        irrigation = mergedIrrigation
-                    )
+                // Coordinate lookup priority: 1. ClientSheet 2. PropertySpecs 3. Existing DB
+                val nameKey = client.name.lowercase()
+                val (finalLat, finalLng) = when {
+                    client.latitude != null && client.longitude != null ->
+                        client.latitude to client.longitude
+                    propertyCoords.containsKey(nameKey) ->
+                        propertyCoords[nameKey]!!.first to propertyCoords[nameKey]!!.second
+                    existingCoords[nameKey]?.first != null && existingCoords[nameKey]?.second != null ->
+                        existingCoords[nameKey]!!.first to existingCoords[nameKey]!!.second
+                    else -> null to null
                 }
+
+                client.copy(
+                    latitude = finalLat,
+                    longitude = finalLng,
+                    lawnSizeSqFt = mergedLawnSize,
+                    sunShade = mergedSunShade,
+                    windExposure = mergedWindExposure,
+                    terrain = mergedTerrain,
+                    irrigation = mergedIrrigation
+                )
             }
 
             val mergedClients = applyCachedCoordinates(mergedByNameClients)
@@ -347,13 +347,19 @@ class ClientRepository(
 
     suspend fun geocodeClients(clients: List<Client>): GeocodingHelper.GeocodingResult = withContext(Dispatchers.IO) {
         val clientsWithCachedCoordinates = applyCachedCoordinates(clients)
+        // Track which clients need geocoding (no coords before geocode call)
+        val clientsNeedingGeocode = clientsWithCachedCoordinates
+            .filter { it.latitude == null || it.longitude == null }
+            .map { it.id }
+            .toSet()
         val result = GeocodingHelper.geocodeClients(appContext, clientsWithCachedCoordinates)
         for (client in result.clients) {
             val lat = client.latitude
             val lng = client.longitude
             if (lat != null && lng != null) {
                 clientDao.updateClientCoordinates(client.id, lat, lng)
-                if (SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+                // Only write back coords for clients that were NEWLY geocoded
+                if (client.id in clientsNeedingGeocode && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
                     runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lat", "%.7f".format(lat)) }
                     runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lng", "%.7f".format(lng)) }
                 }
