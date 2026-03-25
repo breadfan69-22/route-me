@@ -174,28 +174,42 @@ class ClientRepository(
 
             val mergedByNameClients = result.clients.map { client ->
                 val existing = existingByName[client.name.lowercase()]
-                val mergedLawnSize = if (client.lawnSizeSqFt > 0) client.lawnSizeSqFt else existing?.lawnSizeSqFt ?: 0
-                val mergedSunShade = if (SunShade.fromStorage(client.sunShade) != SunShade.UNKNOWN) {
-                    client.sunShade
-                } else {
-                    existing?.sunShade ?: ""
-                }
-                val mergedWindExposure = if (WindExposure.fromStorage(client.windExposure) != WindExposure.UNKNOWN) {
-                    client.windExposure
-                } else {
-                    existing?.windExposure ?: ""
-                }
-                val mergedTerrain = client.terrain.ifBlank { existing?.terrain.orEmpty() }
-                // irrigation is transient on Client (not stored in clients table) — keep import value
-                val mergedIrrigation = client.irrigation
-
-                // Coordinate lookup priority: 1. ClientSheet 2. PropertySpecs 3. Existing DB
                 val nameKey = client.name.lowercase()
+                val propData = propertyCoords[nameKey]
+
+                // Property data priority: 1. PropertySpecs (source of truth) 2. ClientSheet 3. Existing DB
+                val mergedLawnSize = when {
+                    propData?.lawnSizeSqFt != null && propData.lawnSizeSqFt > 0 -> propData.lawnSizeSqFt
+                    client.lawnSizeSqFt > 0 -> client.lawnSizeSqFt
+                    else -> existing?.lawnSizeSqFt ?: 0
+                }
+                val mergedSunShade = when {
+                    propData?.sunShade != null && SunShade.fromStorage(propData.sunShade) != SunShade.UNKNOWN -> propData.sunShade
+                    SunShade.fromStorage(client.sunShade) != SunShade.UNKNOWN -> client.sunShade
+                    else -> existing?.sunShade ?: ""
+                }
+                val mergedWindExposure = when {
+                    propData?.windExposure != null && WindExposure.fromStorage(propData.windExposure) != WindExposure.UNKNOWN -> propData.windExposure
+                    WindExposure.fromStorage(client.windExposure) != WindExposure.UNKNOWN -> client.windExposure
+                    else -> existing?.windExposure ?: ""
+                }
+                val mergedTerrain = when {
+                    propData?.terrain != null && propData.terrain.isNotBlank() -> propData.terrain
+                    client.terrain.isNotBlank() -> client.terrain
+                    else -> existing?.terrain.orEmpty()
+                }
+                val mergedIrrigation = when {
+                    propData?.irrigation != null && propData.irrigation.isNotBlank() -> propData.irrigation
+                    client.irrigation.isNotBlank() -> client.irrigation
+                    else -> ""
+                }
+
+                // Coordinate priority: 1. PropertySpecs (source of truth) 2. ClientSheet 3. Existing DB
                 val (finalLat, finalLng) = when {
+                    propData?.lat != null && propData.lng != null ->
+                        propData.lat to propData.lng
                     client.latitude != null && client.longitude != null ->
                         client.latitude to client.longitude
-                    propertyCoords.containsKey(nameKey) ->
-                        propertyCoords[nameKey]!!.first to propertyCoords[nameKey]!!.second
                     existingCoords[nameKey]?.first != null && existingCoords[nameKey]?.second != null ->
                         existingCoords[nameKey]!!.first to existingCoords[nameKey]!!.second
                     else -> null to null

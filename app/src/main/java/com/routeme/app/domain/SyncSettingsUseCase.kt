@@ -107,7 +107,8 @@ class SyncSettingsUseCase(
 
     suspend fun syncFromSheets(url: String): SyncFromSheetsResult {
         return try {
-            val syncResult = clientRepository.syncFromSheets(url)
+            val propertySheetUrl = preferencesRepository.propertySheetReadUrl
+            val syncResult = clientRepository.syncFromSheets(url, propertySheetUrl)
             val didSyncClients = syncResult.clients.isNotEmpty()
             SyncFromSheetsResult.Success(
                 statusMessage = syncResult.message,

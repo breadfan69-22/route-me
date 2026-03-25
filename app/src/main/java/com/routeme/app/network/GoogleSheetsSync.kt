@@ -164,11 +164,21 @@ object GoogleSheetsSync {
     }
 
     /**
-     * Fetches coordinates from a PropertySpecs-style sheet (direct CSV).
-     * Returns a map of lowercase client name -> (lat, lng).
+     * Fetches property data from a PropertySpecs-style sheet (direct CSV).
+     * Returns a map of lowercase client name -> PropertyData (coords + property specs).
      * Must be called from a background thread.
      */
-    fun fetchPropertyCoordinates(rawUrl: String): Map<String, Pair<Double, Double>> {
+    data class PropertyData(
+        val lat: Double?,
+        val lng: Double?,
+        val lawnSizeSqFt: Int?,
+        val sunShade: String?,
+        val windExposure: String?,
+        val terrain: String?,
+        val irrigation: String?
+    )
+
+    fun fetchPropertyCoordinates(rawUrl: String): Map<String, PropertyData> {
         return try {
             val csvUrl = normalizeUrl(rawUrl)
             if (!csvUrl.startsWith("https://docs.google.com/")) return emptyMap()
@@ -196,21 +206,31 @@ object GoogleSheetsSync {
             val nameIdx = headers.indexOfFirst { it == "name" }
             val latIdx = headers.indexOfFirst { it == "lat" }
             val lngIdx = headers.indexOfFirst { it == "lng" }
+            val lawnSizeIdx = headers.indexOfFirst { it == "lawn size" || it == "lawnsize" || it == "lawn_size" || it == "sqft" }
+            val sunShadeIdx = headers.indexOfFirst { it == "sun/shade" || it == "sun shade" || it == "sunshade" || it == "sun_shade" }
+            val windIdx = headers.indexOfFirst { it == "wind exposure" || it == "windexposure" || it == "wind_exposure" || it == "wind" }
+            val terrainIdx = headers.indexOfFirst { it == "terrain" || it == "slope" || it == "slopes" || it == "steep slopes" || it == "steep_slopes" }
+            val irrigationIdx = headers.indexOfFirst { it == "irrigation" || it == "irrigated" || it == "has_irrigation" }
 
-            if (nameIdx < 0 || latIdx < 0 || lngIdx < 0) return emptyMap()
+            if (nameIdx < 0) return emptyMap()
 
-            val result = mutableMapOf<String, Pair<Double, Double>>()
+            val result = mutableMapOf<String, PropertyData>()
             for (line in lines.drop(1)) {
                 if (line.isBlank()) continue
                 val cols = CsvParsingUtils.parseCsvLine(line)
-                if (cols.size <= maxOf(nameIdx, latIdx, lngIdx)) continue
+                if (cols.size <= nameIdx) continue
 
                 val name = cols[nameIdx].trim().lowercase(Locale.US)
-                val lat = cols[latIdx].trim().toDoubleOrNull()
-                val lng = cols[lngIdx].trim().toDoubleOrNull()
+                val lat = cols.getOrNull(latIdx)?.trim()?.toDoubleOrNull()?.takeIf { it in -90.0..90.0 }
+                val lng = cols.getOrNull(lngIdx)?.trim()?.toDoubleOrNull()?.takeIf { it in -180.0..180.0 }
+                val lawnSize = cols.getOrNull(lawnSizeIdx)?.trim()?.replace(",", "")?.toIntOrNull()?.takeIf { it > 0 }
+                val sunShade = cols.getOrNull(sunShadeIdx)?.trim()?.takeIf { it.isNotBlank() }
+                val wind = cols.getOrNull(windIdx)?.trim()?.takeIf { it.isNotBlank() }
+                val terrain = cols.getOrNull(terrainIdx)?.trim()?.takeIf { it.isNotBlank() }
+                val irrigation = cols.getOrNull(irrigationIdx)?.trim()?.takeIf { it.isNotBlank() }
 
-                if (name.isNotBlank() && lat != null && lng != null && lat in -90.0..90.0 && lng in -180.0..180.0) {
-                    result[name] = lat to lng
+                if (name.isNotBlank()) {
+                    result[name] = PropertyData(lat, lng, lawnSize, sunShade, wind, terrain, irrigation)
                 }
             }
             result
