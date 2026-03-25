@@ -278,23 +278,30 @@ class MainViewModel(
         viewModelScope.launch {
             setLoading(true)
             setStatus("Loading clients…", emitSnackbar = false)
+            var shouldEmitLoadComplete = false
             try {
                 val result = syncSettingsUseCase.loadClients()
-                handleLoadClientsResult(result)
+                shouldEmitLoadComplete = handleLoadClientsResult(result)
             } finally {
                 setLoading(false)
+            }
+            // Emit after loading clears so suggestions can run
+            if (shouldEmitLoadComplete) {
+                _events.emit(MainEvent.SyncComplete)
             }
         }
     }
 
-    private suspend fun handleLoadClientsResult(result: SyncSettingsUseCase.LoadClientsResult) {
+    private suspend fun handleLoadClientsResult(result: SyncSettingsUseCase.LoadClientsResult): Boolean {
         when (result) {
             is SyncSettingsUseCase.LoadClientsResult.Error -> {
                 setStatus(result.message)
+                return false
             }
 
             is SyncSettingsUseCase.LoadClientsResult.Success -> {
                 handleLoadClientsSuccess(result)
+                return result.clients.isNotEmpty()
             }
         }
     }

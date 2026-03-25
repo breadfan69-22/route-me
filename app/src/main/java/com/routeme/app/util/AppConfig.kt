@@ -75,10 +75,10 @@ object AppConfig {
 
         /** Trigger threshold for marking a day as requiring a supply refill stop. */
         const val REFILL_THRESHOLD_PCT = 0.20
-        /** Bonus for supply-house-adjacent zones on refill days. */
-        const val REFILL_DAY_ZONE_BONUS = 50
-        /** Penalty for out-of-way zones on refill days. */
-        const val REFILL_DAY_ZONE_PENALTY = -80
+        /** Bonus for supply-house-adjacent zones on refill days (strong pull). */
+        const val REFILL_DAY_ZONE_BONUS = 80
+        /** Penalty for out-of-way zones on refill days (mild discouragement). */
+        const val REFILL_DAY_ZONE_PENALTY = -30
     }
 
     object SupplyHouse {
