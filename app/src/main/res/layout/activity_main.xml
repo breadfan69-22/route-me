@@ -641,6 +641,17 @@
                         app:tint="?attr/colorPrimary" />
                 </LinearLayout>
 
+                <!-- Loading spinner — shown while suggestions are being computed -->
+                <ProgressBar
+                    android:id="@+id/suggestionLoadingIndicator"
+                    style="?android:attr/progressBarStyle"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:layout_gravity="center_horizontal"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="16dp"
+                    android:visibility="gone" />
+
                 <!-- Fixed height = ~5 slot rows visible; snap-scroll through the full list -->
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/suggestionRecyclerView"

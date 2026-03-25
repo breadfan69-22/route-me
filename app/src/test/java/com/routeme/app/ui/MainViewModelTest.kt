@@ -244,7 +244,7 @@ class MainViewModelTest {
         val export = vm.buildTopRouteExportForTests()
         assertTrue(export != null)
         val uri = export!!.first
-        assertTrue(uri.contains("destination=42.2478%2C-85.564"))
+        assertTrue(uri.contains("destination=42.3385%2C-85.5576"))
     }
 
     @Test

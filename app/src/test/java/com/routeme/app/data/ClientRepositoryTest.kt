@@ -15,11 +15,13 @@ import com.routeme.app.ServiceType
 import com.routeme.app.network.DistanceMatrixHelper
 import com.routeme.app.network.GoogleSheetsSync
 import com.routeme.app.network.SheetsWriteBack
+import android.util.Log
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
+import io.mockk.mockkStatic
 import io.mockk.unmockkAll
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
@@ -39,6 +41,9 @@ class ClientRepositoryTest {
 
     @Before
     fun setup() {
+        mockkStatic(Log::class)
+        every { Log.d(any(), any()) } returns 0
+        every { Log.w(any(), any<String>()) } returns 0
         appContext = mockk(relaxed = true)
         dao = mockk(relaxed = true)
         propertyDao = mockk(relaxed = true)

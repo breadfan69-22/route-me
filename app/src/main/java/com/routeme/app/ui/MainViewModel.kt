@@ -379,6 +379,7 @@ class MainViewModel(
 
     fun syncFromSheets(url: String) {
         viewModelScope.launch {
+            _uiState.update { it.copy(isSuggestionsLoading = true) }
             setLoading(true)
             setStatus("Syncing from Google Sheets…", emitSnackbar = false)
             var postActions = SyncPostActions()
@@ -394,6 +395,11 @@ class MainViewModel(
                 }
             } finally {
                 setLoading(false)
+                // If sync failed, no SyncComplete will fire so suggestion loading will
+                // never be cleared by suggestNextClientsInternal — clear it here instead.
+                if (!postActions.shouldEmitSyncComplete) {
+                    _uiState.update { it.copy(isSuggestionsLoading = false) }
+                }
             }
 
             emitPostSyncActions(postActions)
@@ -451,7 +457,8 @@ class MainViewModel(
                     suggestions = emptyList(),
                     suggestionOffset = 0,
                     selectedClient = null,
-                    selectedClientDetails = ""
+                    selectedClientDetails = "",
+                    isSuggestionsLoading = true
                 )
         }
         persistCriticalState(_uiState.value)
@@ -464,21 +471,28 @@ class MainViewModel(
     }
 
     private suspend fun emitPostSyncActions(postActions: SyncPostActions) {
+        if (postActions.shouldAutoGeocode) {
+            geocodeMissingClientCoordinatesInternal(showNoopStatus = false)
+        }
         if (postActions.shouldEmitSyncComplete) {
             _events.emit(MainEvent.SyncComplete)
-        }
-        if (postActions.shouldAutoGeocode) {
-            geocodeMissingClientCoordinates()
         }
     }
 
     fun geocodeMissingClientCoordinates() {
         viewModelScope.launch {
+            geocodeMissingClientCoordinatesInternal(showNoopStatus = true)
+        }
+    }
+
+    private suspend fun geocodeMissingClientCoordinatesInternal(showNoopStatus: Boolean) {
             val clients = _uiState.value.clients
             val withoutCoordsCount = syncSettingsUseCase.missingCoordinatesCount(clients)
             if (withoutCoordsCount == 0) {
-                setStatus("All clients already have coordinates.")
-                return@launch
+                if (showNoopStatus) {
+                    setStatus("All clients already have coordinates.")
+                }
+                return
             }
 
             setLoading(true)
@@ -489,7 +503,6 @@ class MainViewModel(
             } finally {
                 setLoading(false)
             }
-        }
     }
 
     /**

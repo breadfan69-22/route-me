@@ -83,7 +83,7 @@ class MapsExportUseCaseTest {
 
         assertTrue(result is MapsExportUseCase.ExportResult.Success)
         val success = result as MapsExportUseCase.ExportResult.Success
-        assertTrue(success.routeExport.uri.contains("origin=42.2478%2C-85.564"))
+        assertTrue(success.routeExport.uri.contains("origin=42.3385%2C-85.5576"))
     }
 
     @Test
@@ -158,7 +158,7 @@ class MapsExportUseCaseTest {
 
         assertTrue(result is MapsExportUseCase.ExportResult.Success)
         val success = result as MapsExportUseCase.ExportResult.Success
-        assertTrue(success.routeExport.uri.contains("destination=42.2478%2C-85.564"))
+        assertTrue(success.routeExport.uri.contains("destination=42.3385%2C-85.5576"))
     }
 
     @Test

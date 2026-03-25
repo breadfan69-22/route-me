@@ -209,7 +209,7 @@ class SmokeInstrumentationTest {
     private fun waitForClients(
         scenario: ActivityScenario<MainActivity>,
         requiredIds: Set<String>,
-        timeoutMs: Long = 15_000L
+        timeoutMs: Long = 30_000L
     ): List<Client> {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {

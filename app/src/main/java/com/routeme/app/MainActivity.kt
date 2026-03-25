@@ -400,7 +400,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.errandsBanner.visibility = View.GONE
             binding.tileSuggested.visibility =
-                if (state.suggestions.isEmpty()) View.GONE else View.VISIBLE
+                if (state.suggestions.isEmpty() && !state.isSuggestionsLoading) View.GONE else View.VISIBLE
         }
     }
 

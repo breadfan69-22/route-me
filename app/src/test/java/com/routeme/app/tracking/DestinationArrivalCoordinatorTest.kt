@@ -26,6 +26,8 @@ class DestinationArrivalCoordinatorTest {
 
         val destination = destination("dest-1", "Supply House", 42.0, -85.0)
         every { preferences.activeDestination } returns destination
+        every { preferences.advanceDestinationQueueOnArrival(any()) } returns
+            PreferencesRepository.DestinationQueueSnapshot(emptyList(), 0)
         coEvery { dao.insertStop(any()) } returns 10L
 
         val coordinator = newCoordinator(

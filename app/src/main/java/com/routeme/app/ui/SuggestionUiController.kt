@@ -49,6 +49,18 @@ class SuggestionUiController(
     fun showCurrentPage() {
         val state = viewModel.uiState.value
 
+        if (state.isSuggestionsLoading) {
+            binding.tileSuggested.visibility = View.VISIBLE
+            binding.suggestionLoadingIndicator?.visibility = View.VISIBLE
+            binding.suggestionRecyclerView.visibility = View.GONE
+            binding.suggestionHeader.text =
+                binding.root.context.getString(R.string.suggestions_loading)
+            binding.badgeSuggestedRefresh.visibility = View.GONE
+            return
+        }
+
+        binding.suggestionLoadingIndicator?.visibility = View.GONE
+
         if (state.errandsModeEnabled) {
             showErrandsDestinations(state)
             return
