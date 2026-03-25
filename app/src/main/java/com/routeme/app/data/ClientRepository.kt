@@ -27,7 +27,9 @@ import com.routeme.app.network.GoogleSheetsSync
 import com.routeme.app.network.SheetsWriteBack
 import com.routeme.app.toDomain
 import com.routeme.app.toEntity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -366,20 +368,35 @@ class ClientRepository(
             .filter { it.latitude == null || it.longitude == null }
             .map { it.id }
             .toSet()
+        android.util.Log.d("GeocodingFlow", "geocodeClients: ${clientsNeedingGeocode.size} actually need API geocoding")
         val result = GeocodingHelper.geocodeClients(appContext, clientsWithCachedCoordinates)
-        for (client in result.clients) {
-            val lat = client.latitude
-            val lng = client.longitude
-            if (lat != null && lng != null) {
-                clientDao.updateClientCoordinates(client.id, lat, lng)
-                // Only write back coords for clients that were NEWLY geocoded
-                if (client.id in clientsNeedingGeocode && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+        android.util.Log.d("GeocodingFlow", "geocodeClients: API returned, geocoded=${result.geocodedCount}, failed=${result.failedCount}")
+        
+        // Only process clients that were newly geocoded (had no coords, now have coords)
+        val newlyGeocodedClients = result.clients.filter { client ->
+            client.id in clientsNeedingGeocode && client.latitude != null && client.longitude != null
+        }
+        android.util.Log.d("GeocodingFlow", "geocodeClients: ${newlyGeocodedClients.size} newly geocoded clients to update")
+        
+        for (client in newlyGeocodedClients) {
+            val lat = client.latitude!!
+            val lng = client.longitude!!
+            clientDao.updateClientCoordinates(client.id, lat, lng)
+        }
+        upsertGeocodeCacheEntries(cacheEntriesFrom(newlyGeocodedClients))
+        
+        // Write back coords to property sheet in background (fire-and-forget, don't block)
+        if (newlyGeocodedClients.isNotEmpty() && SheetsWriteBack.propertyWebAppUrl.isNotBlank()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                for (client in newlyGeocodedClients) {
+                    val lat = client.latitude!!
+                    val lng = client.longitude!!
                     runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lat", "%.7f".format(lat)) }
                     runCatching { SheetsWriteBack.postPropertyRaw(client.name, "lng", "%.7f".format(lng)) }
                 }
             }
         }
-        upsertGeocodeCacheEntries(cacheEntriesFrom(result.clients))
+        android.util.Log.d("GeocodingFlow", "geocodeClients: done")
         result
     }
 

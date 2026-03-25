@@ -266,6 +266,18 @@ class MainViewModel(
                     isDaytime = isDaytime
                 )
             }
+            
+            // Background: pre-fetch soil/rain signals to populate cache (fire-and-forget)
+            prefetchRecentWeatherSignalsInBackground()
+        }
+    }
+
+    /** Pre-fetch recent weather signals in the background to populate cache for later use. */
+    private fun prefetchRecentWeatherSignalsInBackground() {
+        val repo = weatherRepository ?: return
+        viewModelScope.launch(ioDispatcher) {
+            // Only fetch shop location signal - it will be used as a proxy for nearby clients
+            runCatching { repo.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) }
         }
     }
 
@@ -939,23 +951,22 @@ class MainViewModel(
             recentWeatherByClientId = emptyMap()
         )
 
-        return withContext(ioDispatcher) {
-            val dayStartMillis = startOfTodayMillis()
-            val today = runCatching { repo.getWeatherForDay(dayStartMillis) }.getOrNull()
-            val perClientSignals = runCatching {
-                repo.getRecentWeatherSignals(clients)
-            }.getOrDefault(emptyMap())
-            val shopSignal = runCatching { repo.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) }.getOrNull()
-            val recentPrecip = runCatching {
-                shopSignal?.rainLast48hInches
-                    ?: repo.getRecentPrecip(com.routeme.app.util.AppConfig.Routing.WEATHER_RAIN_LOOKBACK_DAYS)
-            }.getOrNull()
-            SuggestionWeatherInputs(
-                today = today,
-                recentPrecipInches = recentPrecip,
-                recentWeatherByClientId = perClientSignals
-            )
+        // Use cache-only for recent signals (soil/rain) - instant, no network blocking
+        // These values don't change fast, so cached data is fine for suggestions
+        val perClientSignals = repo.getRecentWeatherSignalsCacheOnly(clients)
+        val shopSignal = repo.getRecentWeatherSignalCacheOnly(SHOP_LAT, SHOP_LNG)
+        val recentPrecip = shopSignal?.rainLast48hInches
+
+        // Today's forecast can do a quick DB check (no network if missing)
+        val today = withContext(ioDispatcher) {
+            runCatching { repo.getWeatherForDay(startOfTodayMillis()) }.getOrNull()
         }
+
+        return SuggestionWeatherInputs(
+            today = today,
+            recentPrecipInches = recentPrecip,
+            recentWeatherByClientId = perClientSignals
+        )
     }
 
     private fun startOfTodayMillis(): Long {

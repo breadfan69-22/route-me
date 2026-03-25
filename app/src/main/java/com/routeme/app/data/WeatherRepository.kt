@@ -31,7 +31,7 @@ class WeatherRepository(
     companion object {
         private const val STALE_THRESHOLD_MS = 3 * 60 * 60 * 1000L // 3 hours
         private const val FORECAST_STALE_THRESHOLD_MS = 6 * 60 * 60 * 1000L // 6 hours
-        private const val RECENT_SIGNAL_TTL_MS = 30 * 60 * 1000L // 30 minutes
+        private const val RECENT_SIGNAL_TTL_MS = 4 * 60 * 60 * 1000L // 4 hours - soil/rain doesn't change fast
     }
 
     private data class CachedRecentSignal(
@@ -185,6 +185,33 @@ class WeatherRepository(
 
         recentSignalCache[cacheKey] = CachedRecentSignal(signal = fetched, cachedAtMillis = now)
         return fetched
+    }
+
+    /**
+     * Get recent weather signals from cache only — no network fetch.
+     * Returns instantly with whatever is cached (may be empty).
+     * Use for suggestion refresh where we don't want to block on weather API.
+     */
+    fun getRecentWeatherSignalsCacheOnly(clients: List<Client>): Map<String, RecentWeatherSignal> {
+        val now = System.currentTimeMillis()
+        val result = mutableMapOf<String, RecentWeatherSignal>()
+        for (client in clients) {
+            val lat = client.latitude ?: continue
+            val lng = client.longitude ?: continue
+            val cacheKey = roundedCoordinateKey(lat, lng)
+            val cached = recentSignalCache[cacheKey]
+            // Accept even stale cache for immediate results
+            if (cached != null) {
+                result[client.id] = cached.signal
+            }
+        }
+        return result
+    }
+
+    /** Get shop weather signal from cache only — no network fetch. */
+    fun getRecentWeatherSignalCacheOnly(lat: Double, lng: Double): RecentWeatherSignal? {
+        val cacheKey = roundedCoordinateKey(lat, lng)
+        return recentSignalCache[cacheKey]?.signal
     }
 
     private fun startOfTodayMillis(): Long {

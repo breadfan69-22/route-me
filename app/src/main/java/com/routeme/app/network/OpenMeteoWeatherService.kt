@@ -14,8 +14,8 @@ import kotlin.math.max
 object OpenMeteoWeatherService {
     private const val TAG = "OpenMeteoWeather"
     private const val BASE_URL = "https://api.open-meteo.com/v1/forecast"
-    private const val CONNECT_TIMEOUT = 10_000
-    private const val READ_TIMEOUT = 10_000
+    private const val CONNECT_TIMEOUT = 3_000
+    private const val READ_TIMEOUT = 3_000
     private const val MM_PER_INCH = 25.4
 
     fun fetchRecentWeatherSignal(lat: Double, lng: Double): RecentWeatherSignal? {

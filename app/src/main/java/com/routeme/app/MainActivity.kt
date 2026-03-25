@@ -334,8 +334,17 @@ class MainActivity : AppCompatActivity() {
     private fun handleSuggestionRefreshTriggers(state: MainUiState) {
         val previousClientCount = lastObservedClientCount
         lastObservedClientCount = state.clients.size
-        if (previousClientCount != null && previousClientCount == 0 && state.clients.isNotEmpty()) {
-            if (state.selectedServiceTypes.isNotEmpty()) suggestNextClients()
+
+        // Trigger suggestions when clients become available for the first time,
+        // or when clients transition from 0 → N (after a sync).
+        val clientsJustLoaded = state.clients.isNotEmpty() &&
+            !state.isLoading &&
+            !state.isSuggestionsLoading &&
+            state.suggestions.isEmpty() &&
+            (previousClientCount == null || previousClientCount == 0)
+
+        if (clientsJustLoaded && state.selectedServiceTypes.isNotEmpty()) {
+            suggestNextClients()
         }
 
         val previousServiceTypes = lastObservedServiceTypes
