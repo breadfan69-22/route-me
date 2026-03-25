@@ -1,5 +1,7 @@
 package com.routeme.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -16,6 +18,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.routeme.app.R
 import com.routeme.app.model.PlannedClient
 import com.routeme.app.model.PlannedDay
+import com.routeme.app.model.RouteItem
 
 class PlannerDayFragment : Fragment() {
 
@@ -46,7 +49,8 @@ class PlannerDayFragment : Fragment() {
             },
             onToggleLock = { client ->
                 (activity as? WeeklyPlannerActivity)?.toggleClientLock(dayIndex, client.client.id)
-            }
+            },
+            onSupplyHouseTap = ::navigateToSupplyHouse
         )
 
         val rv = view.findViewById<RecyclerView>(R.id.chipRecyclerView)
@@ -160,8 +164,21 @@ class PlannerDayFragment : Fragment() {
         } else {
             rv.visibility = View.VISIBLE
             emptyText.visibility = View.GONE
-            chipAdapter.submitList(day.clients)
+            chipAdapter.submitList(buildRouteItemList(day))
         }
+    }
+
+    /** Builds the route item list, inserting supply house stop at the right position if needed. */
+    private fun buildRouteItemList(day: PlannedDay): List<RouteItem> {
+        val items = mutableListOf<RouteItem>()
+        day.clients.forEachIndexed { index, plannedClient ->
+            items += RouteItem.ClientStop(plannedClient)
+            // Insert supply house after this client if this is the insertion point
+            if (day.supplyStopAfterIndex == index) {
+                items += RouteItem.SupplyHouseStop()
+            }
+        }
+        return items
     }
 
     private fun confirmRebuild() {
@@ -245,6 +262,18 @@ class PlannerDayFragment : Fragment() {
             .setMessage(message)
             .setPositiveButton(android.R.string.ok, null)
             .show()
+    }
+
+    private fun navigateToSupplyHouse(stop: RouteItem.SupplyHouseStop) {
+        val uri = Uri.parse("google.navigation:q=${stop.lat},${stop.lng}")
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+        intent.setPackage("com.google.android.apps.maps")
+        if (intent.resolveActivity(requireActivity().packageManager) != null) {
+            startActivity(intent)
+        } else {
+            // Fallback to browser
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }
     }
 
     companion object {

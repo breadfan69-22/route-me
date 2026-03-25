@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.routeme.app.R
 import com.routeme.app.ServiceType
 import com.routeme.app.model.PlannedClient
+import com.routeme.app.model.RouteItem
 import java.util.Collections
 
 class PlannerChipAdapter(
@@ -22,14 +23,15 @@ class PlannerChipAdapter(
     private val onChipTap: (PlannedClient) -> Unit,
     private val onDragStarted: () -> Unit,
     private val onRemoveClient: (PlannedClient) -> Unit,
-    private val onToggleLock: (PlannedClient) -> Unit
-) : ListAdapter<PlannedClient, PlannerChipAdapter.RowViewHolder>(DIFF) {
+    private val onToggleLock: (PlannedClient) -> Unit,
+    private val onSupplyHouseTap: ((RouteItem.SupplyHouseStop) -> Unit)? = null
+) : ListAdapter<RouteItem, RecyclerView.ViewHolder>(DIFF) {
 
     var onStartDrag: ((RecyclerView.ViewHolder) -> Unit)? = null
 
-    private val dragItems = mutableListOf<PlannedClient>()
+    private val dragItems = mutableListOf<RouteItem>()
 
-    override fun submitList(list: List<PlannedClient>?) {
+    override fun submitList(list: List<RouteItem>?) {
         dragItems.clear()
         if (list != null) dragItems.addAll(list)
         super.submitList(list?.toList())
@@ -37,22 +39,39 @@ class PlannerChipAdapter(
 
     fun onItemDragTo(from: Int, to: Int) {
         if (from in dragItems.indices && to in dragItems.indices) {
+            // Don't allow dragging supply house items
+            if (dragItems[from] is RouteItem.SupplyHouseStop || dragItems[to] is RouteItem.SupplyHouseStop) return
             Collections.swap(dragItems, from, to)
             notifyItemMoved(from, to)
         }
     }
 
-    fun getDraggedList(): List<PlannedClient> = dragItems.toList()
+    fun getDraggedList(): List<PlannedClient> = dragItems
+        .filterIsInstance<RouteItem.ClientStop>()
+        .map { it.planned }
 
     /** Called by ItemTouchHelper swipe — removes item from local list and notifies adapter. */
     fun removeAt(position: Int) {
         if (position !in dragItems.indices) return
         val removed = dragItems.removeAt(position)
-        notifyItemRemoved(position)
-        onRemoveClient(removed)
+        // Can only remove client items
+        if (removed is RouteItem.ClientStop) {
+            notifyItemRemoved(position)
+            onRemoveClient(removed.planned)
+        } else {
+            // Re-add supply house (can't be removed)
+            dragItems.add(position, removed)
+        }
     }
 
-    class RowViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+    override fun getItemViewType(position: Int): Int {
+        return when (getItem(position)) {
+            is RouteItem.ClientStop -> VIEW_TYPE_CLIENT
+            is RouteItem.SupplyHouseStop -> VIEW_TYPE_SUPPLY
+        }
+    }
+
+    class ClientViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val dragHandle: ImageView = view.findViewById(R.id.dragHandle)
         val fitnessDot: View = view.findViewById(R.id.fitnessDot)
         val clientName: TextView = view.findViewById(R.id.clientName)
@@ -63,14 +82,42 @@ class PlannerChipAdapter(
         val lockButton: ImageButton = view.findViewById(R.id.lockButton)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_planner_client_row, parent, false)
-        return RowViewHolder(view)
+    class SupplyViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val supplyName: TextView = view.findViewById(R.id.supplyName)
+        val supplyLabel: TextView = view.findViewById(R.id.supplyLabel)
+        val navigateButton: ImageButton = view.findViewById(R.id.navigateButton)
     }
 
-    override fun onBindViewHolder(holder: RowViewHolder, position: Int) {
-        val planned = getItem(position)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return when (viewType) {
+            VIEW_TYPE_SUPPLY -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_planner_supply_row, parent, false)
+                SupplyViewHolder(view)
+            }
+            else -> {
+                val view = LayoutInflater.from(parent.context)
+                    .inflate(R.layout.item_planner_client_row, parent, false)
+                ClientViewHolder(view)
+            }
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (val item = getItem(position)) {
+            is RouteItem.ClientStop -> bindClient(holder as ClientViewHolder, item.planned, position)
+            is RouteItem.SupplyHouseStop -> bindSupply(holder as SupplyViewHolder, item)
+        }
+    }
+
+    private fun bindSupply(holder: SupplyViewHolder, item: RouteItem.SupplyHouseStop) {
+        holder.supplyName.text = item.name
+        holder.supplyLabel.text = "Refill stop"
+        holder.navigateButton.setOnClickListener { onSupplyHouseTap?.invoke(item) }
+        holder.itemView.setOnClickListener { onSupplyHouseTap?.invoke(item) }
+    }
+
+    private fun bindClient(holder: ClientViewHolder, planned: PlannedClient, position: Int) {
 
         holder.clientName.text = planned.client.name
         holder.clientFitness.text = "${planned.fitnessLabel} (${planned.fitnessScore})"
@@ -141,10 +188,18 @@ class PlannerChipAdapter(
     }
 
     companion object {
-        private val DIFF = object : DiffUtil.ItemCallback<PlannedClient>() {
-            override fun areItemsTheSame(a: PlannedClient, b: PlannedClient) =
-                a.client.id == b.client.id
-            override fun areContentsTheSame(a: PlannedClient, b: PlannedClient) = a == b
+        private const val VIEW_TYPE_CLIENT = 0
+        private const val VIEW_TYPE_SUPPLY = 1
+
+        private val DIFF = object : DiffUtil.ItemCallback<RouteItem>() {
+            override fun areItemsTheSame(a: RouteItem, b: RouteItem): Boolean {
+                return when {
+                    a is RouteItem.ClientStop && b is RouteItem.ClientStop -> a.planned.client.id == b.planned.client.id
+                    a is RouteItem.SupplyHouseStop && b is RouteItem.SupplyHouseStop -> true
+                    else -> false
+                }
+            }
+            override fun areContentsTheSame(a: RouteItem, b: RouteItem) = a == b
         }
     }
 }

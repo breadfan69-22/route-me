@@ -146,15 +146,46 @@ class WeatherRepository(
 
     suspend fun getRecentWeatherSignals(clients: List<Client>): Map<String, RecentWeatherSignal> =
         withContext(Dispatchers.IO) {
+            // Group clients by rounded coordinate key to deduplicate API calls
+            val clientsByCoordKey = clients
+                .filter { it.latitude != null && it.longitude != null }
+                .groupBy { roundedCoordinateKey(it.latitude!!, it.longitude!!) }
+
+            // Fetch signal once per unique coordinate grid cell
+            val signalsByCoordKey = mutableMapOf<String, RecentWeatherSignal?>()
+            for (coordKey in clientsByCoordKey.keys) {
+                // Parse back the rounded coords for the API call
+                val parts = coordKey.split(",")
+                val lat = parts[0].toDoubleOrNull() ?: continue
+                val lng = parts[1].toDoubleOrNull() ?: continue
+                signalsByCoordKey[coordKey] = getRecentWeatherSignalCached(lat, lng, coordKey)
+            }
+
+            // Map results back to client IDs
             val result = mutableMapOf<String, RecentWeatherSignal>()
-            for (client in clients) {
-                val lat = client.latitude ?: continue
-                val lng = client.longitude ?: continue
-                val signal = getRecentWeatherSignal(lat, lng) ?: continue
-                result[client.id] = signal
+            for ((coordKey, clientsAtKey) in clientsByCoordKey) {
+                val signal = signalsByCoordKey[coordKey] ?: continue
+                for (client in clientsAtKey) {
+                    result[client.id] = signal
+                }
             }
             result
         }
+
+    /** Internal cached fetch - assumes already on IO dispatcher. */
+    private fun getRecentWeatherSignalCached(lat: Double, lng: Double, cacheKey: String): RecentWeatherSignal? {
+        val now = System.currentTimeMillis()
+        val cached = recentSignalCache[cacheKey]
+        if (cached != null && (now - cached.cachedAtMillis) <= RECENT_SIGNAL_TTL_MS) {
+            return cached.signal
+        }
+
+        val fetched = runCatching { OpenMeteoWeatherService.fetchRecentWeatherSignal(lat, lng) }.getOrNull()
+            ?: return cached?.signal
+
+        recentSignalCache[cacheKey] = CachedRecentSignal(signal = fetched, cachedAtMillis = now)
+        return fetched
+    }
 
     private fun startOfTodayMillis(): Long {
         val calendar = Calendar.getInstance()

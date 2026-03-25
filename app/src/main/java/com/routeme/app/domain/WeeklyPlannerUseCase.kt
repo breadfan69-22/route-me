@@ -248,6 +248,7 @@ class WeeklyPlannerUseCase(
         dayBuilders.forEach { day ->
             if (day.clients.size > 1) {
                 day.clients.replaceAll { it }
+                // Always use angular sweep + 2-opt for proper loop routing
                 val ordered = nearestNeighbourOrder(day.clients, lat, lng)
                 day.clients.clear()
                 day.clients.addAll(ordered)
@@ -288,6 +289,7 @@ class WeeklyPlannerUseCase(
             dayBuilders.forEach {
                 it.supplyStopNeeded = false
                 it.projectedInventoryPct = 0
+                it.supplyStopAfterIndex = null
             }
             return
         }
@@ -296,12 +298,23 @@ class WeeklyPlannerUseCase(
         var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
 
         dayBuilders.forEach { day ->
-            if (day.isWorkDay) {
-                runningBags = (runningBags - estimateDayGranularConsumptionBags(day)).coerceAtLeast(0.0)
-                if (runningBags < thresholdBags) {
-                    day.supplyStopNeeded = true
-                    runningBags = capacityBags
-                } else {
+            day.supplyStopAfterIndex = null
+            if (day.isWorkDay && day.clients.isNotEmpty()) {
+                // Walk through clients in route order to find exact insertion point
+                for ((index, plannedClient) in day.clients.withIndex()) {
+                    val consumption = estimateClientGranularConsumptionBags(plannedClient)
+                    runningBags = (runningBags - consumption).coerceAtLeast(0.0)
+
+                    if (runningBags < thresholdBags && day.supplyStopAfterIndex == null) {
+                        // Insert supply stop BEFORE this client runs us empty
+                        // Use previous index so we refill before serving this client
+                        day.supplyStopAfterIndex = (index - 1).coerceAtLeast(0)
+                        day.supplyStopNeeded = true
+                        runningBags = capacityBags  // Assume refill
+                    }
+                }
+                // If no insertion point was set, day doesn't need a supply stop
+                if (day.supplyStopAfterIndex == null) {
                     day.supplyStopNeeded = false
                 }
             } else {
@@ -314,15 +327,18 @@ class WeeklyPlannerUseCase(
         }
     }
 
-    private fun estimateDayGranularConsumptionBags(day: PlannedDayBuilder): Double {
-        return day.clients.sumOf { plannedClient ->
-            val hasGranularStep = plannedClient.eligibleSteps.any {
-                it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS
-            }
-            if (!hasGranularStep) return@sumOf 0.0
-            val sqFt = plannedClient.client.lawnSizeSqFt.takeIf { it > 0 } ?: DEFAULT_SQFT_ESTIMATE
-            estimateGranularConsumptionBags(sqFt)
+    /** Estimate granular consumption in bags for a single client stop. */
+    private fun estimateClientGranularConsumptionBags(plannedClient: PlannedClient): Double {
+        val hasGranularStep = plannedClient.eligibleSteps.any {
+            it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS
         }
+        if (!hasGranularStep) return 0.0
+        val sqFt = plannedClient.client.lawnSizeSqFt.takeIf { it > 0 } ?: DEFAULT_SQFT_ESTIMATE
+        return estimateGranularConsumptionBags(sqFt)
+    }
+
+    private fun estimateDayGranularConsumptionBags(day: PlannedDayBuilder): Double {
+        return day.clients.sumOf { estimateClientGranularConsumptionBags(it) }
     }
 
     private data class PlannedDayBuilder(
@@ -338,7 +354,8 @@ class WeeklyPlannerUseCase(
         val anchorLng: Double? = null,
         val anchorLabel: String? = null,
         var supplyStopNeeded: Boolean = false,
-        var projectedInventoryPct: Int = 100
+        var projectedInventoryPct: Int = 100,
+        var supplyStopAfterIndex: Int? = null
     ) {
         fun build(): PlannedDay {
             return PlannedDay(
@@ -354,7 +371,8 @@ class WeeklyPlannerUseCase(
                 anchorLng = anchorLng,
                 anchorLabel = anchorLabel,
                 supplyStopNeeded = supplyStopNeeded,
-                projectedInventoryPct = projectedInventoryPct
+                projectedInventoryPct = projectedInventoryPct,
+                supplyStopAfterIndex = supplyStopAfterIndex
             )
         }
     }
@@ -732,6 +750,8 @@ class WeeklyPlannerUseCase(
     ): PlannedDay? = withContext(Dispatchers.Default) {
         val targetDay = currentPlan.days.getOrNull(dayIndex) ?: return@withContext null
         if (targetDay.clients.isEmpty()) return@withContext null
+
+        // Always use proper angular sweep + 2-opt routing
         val reordered = nearestNeighbourOrder(targetDay.clients, lat, lng)
         targetDay.copy(clients = reordered)
     }
