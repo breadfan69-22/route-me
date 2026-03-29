@@ -30,6 +30,8 @@ import com.routeme.app.domain.WeeklyPlannerUseCase
 import com.routeme.app.model.PlannedClient
 import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.WeekPlan
+import com.routeme.app.model.toRouteItems
+import com.routeme.app.model.toSavedDestinationOrNull
 import com.routeme.app.network.GeocodingHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,7 +105,12 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val entity = withContext(Dispatchers.IO) { weekPlanDao.loadPlan() }
             if (entity != null) {
-                loadPlan(WeekPlan.fromJson(JSONObject(entity.planJson)))
+                val storedPlan = WeekPlan.fromJson(JSONObject(entity.planJson))
+                val reconciledPlan = weeklyPlannerUseCase.refreshInventoryProjection(storedPlan)
+                loadPlan(reconciledPlan)
+                if (reconciledPlan != storedPlan) {
+                    savePlanToRoom(reconciledPlan)
+                }
             } else {
                 Snackbar.make(viewPager, "No saved plan. Generate one from the main screen.", Snackbar.LENGTH_LONG).show()
                 finish()
@@ -116,24 +123,39 @@ class WeeklyPlannerActivity : AppCompatActivity() {
     private fun refreshFromRoom() {
         lifecycleScope.launch {
             val entity = withContext(Dispatchers.IO) { weekPlanDao.loadPlan() } ?: return@launch
-            val plan = WeekPlan.fromJson(JSONObject(entity.planJson))
-            weekPlan = plan
+            val storedPlan = WeekPlan.fromJson(JSONObject(entity.planJson))
+            val refreshedPlan = weeklyPlannerUseCase.refreshInventoryProjection(storedPlan)
+            weekPlan = refreshedPlan
             // Refresh any currently-attached fragments
             refreshVisibleFragments()
-            toolbar.subtitle = "${plan.totalClients} clients • ${plan.unassignedCount} unassigned"
+            buildDayPickerButtons(refreshedPlan.days)
+            toolbar.subtitle = "${refreshedPlan.totalClients} clients • ${refreshedPlan.unassignedCount} unassigned"
+            if (refreshedPlan != storedPlan) {
+                savePlanToRoom(refreshedPlan)
+            }
         }
     }
 
-    private fun savePlanToRoom() {
-        val plan = weekPlan ?: return
+    private fun savePlanToRoom(plan: WeekPlan? = weekPlan) {
+        val planToSave = plan ?: return
         lifecycleScope.launch(Dispatchers.IO) {
             weekPlanDao.savePlan(
                 SavedWeekPlanEntity(
-                    planJson = plan.toJson().toString(),
-                    generatedAtMillis = plan.generatedAtMillis
+                    planJson = planToSave.toJson().toString(),
+                    generatedAtMillis = planToSave.generatedAtMillis
                 )
             )
         }
+    }
+
+    private suspend fun applyUpdatedPlan(updatedPlan: WeekPlan): WeekPlan {
+        val refreshedPlan = weeklyPlannerUseCase.refreshInventoryProjection(updatedPlan)
+        weekPlan = refreshedPlan
+        toolbar.subtitle = "${refreshedPlan.totalClients} clients • ${refreshedPlan.unassignedCount} unassigned"
+        refreshVisibleFragments()
+        buildDayPickerButtons(refreshedPlan.days)
+        savePlanToRoom(refreshedPlan)
+        return refreshedPlan
     }
 
     // ── Drag-and-Drop ──
@@ -223,16 +245,14 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val movedClient = client.copy(manuallyPlaced = true)
         days[toDayIndex] = toDay.copy(clients = toDay.clients + movedClient)
 
-        val updated = plan.copy(days = days)
-        weekPlan = updated
-
-        // Refresh affected fragments
-        findDayFragment(fromDayIndex)?.updateDay(days[fromDayIndex])
-        findDayFragment(toDayIndex)?.updateDay(days[toDayIndex])
-
-        savePlanToRoom()
-
-        Snackbar.make(viewPager, "Moved ${client.client.name} to ${days[toDayIndex].dayName}", Snackbar.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val updatedPlan = applyUpdatedPlan(plan.copy(days = days))
+            Snackbar.make(
+                viewPager,
+                "Moved ${client.client.name} to ${updatedPlan.days[toDayIndex].dayName}",
+                Snackbar.LENGTH_SHORT
+            ).show()
+        }
     }
 
     fun removeClient(dayIndex: Int, clientId: String) {
@@ -242,17 +262,18 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val day = days[dayIndex]
         val client = day.clients.find { it.client.id == clientId } ?: return
         days[dayIndex] = day.copy(clients = day.clients.filter { it.client.id != clientId })
-        weekPlan = plan.copy(days = days)
-        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
-        savePlanToRoom()
-        Snackbar.make(viewPager, "${client.client.name} removed", Snackbar.LENGTH_SHORT)
-            .setAction("Undo") {
-                val restored = weekPlan?.days?.toMutableList() ?: return@setAction
-                restored[dayIndex] = restored[dayIndex].copy(clients = restored[dayIndex].clients + client)
-                weekPlan = weekPlan?.copy(days = restored)
-                findDayFragment(dayIndex)?.updateDay(restored[dayIndex])
-                savePlanToRoom()
-            }.show()
+        lifecycleScope.launch {
+            applyUpdatedPlan(plan.copy(days = days))
+            Snackbar.make(viewPager, "${client.client.name} removed", Snackbar.LENGTH_SHORT)
+                .setAction("Undo") {
+                    val currentPlan = weekPlan ?: return@setAction
+                    lifecycleScope.launch {
+                        val restored = currentPlan.days.toMutableList()
+                        restored[dayIndex] = restored[dayIndex].copy(clients = restored[dayIndex].clients + client)
+                        applyUpdatedPlan(currentPlan.copy(days = restored))
+                    }
+                }.show()
+        }
     }
 
     fun toggleClientLock(dayIndex: Int, clientId: String) {
@@ -265,9 +286,9 @@ class WeeklyPlannerActivity : AppCompatActivity() {
                 if (it.client.id == clientId) it.copy(locked = !it.locked) else it
             }
         )
-        weekPlan = plan.copy(days = days)
-        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
-        savePlanToRoom()
+        lifecycleScope.launch {
+            applyUpdatedPlan(plan.copy(days = days))
+        }
     }
 
     fun reorderDay(dayIndex: Int, reorderedClients: List<PlannedClient>) {
@@ -275,8 +296,9 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val days = plan.days.toMutableList()
         if (dayIndex !in days.indices) return
         days[dayIndex] = days[dayIndex].copy(clients = reorderedClients)
-        weekPlan = plan.copy(days = days)
-        savePlanToRoom()
+        lifecycleScope.launch {
+            applyUpdatedPlan(plan.copy(days = days))
+        }
     }
 
     private fun restoreChipAlphas() {
@@ -329,20 +351,22 @@ class WeeklyPlannerActivity : AppCompatActivity() {
             return
         }
 
-        // Convert PlannedClients to SavedDestinations
-        val destinations = day.clients.mapNotNull { plannedClient ->
+        val routeItems = day.toRouteItems()
+        val clientDestinations = day.clients.mapNotNull { plannedClient ->
             val c = plannedClient.client
-            if (c.latitude == null || c.longitude == null) return@mapNotNull null
+            val lat = c.latitude ?: return@mapNotNull null
+            val lng = c.longitude ?: return@mapNotNull null
             SavedDestination(
                 id = c.id,
                 name = c.name,
                 address = c.address,
-                lat = c.latitude,
-                lng = c.longitude
+                lat = lat,
+                lng = lng
             )
         }
+        val destinations = routeItems.mapNotNull { it.toSavedDestinationOrNull() }
 
-        if (destinations.isEmpty()) {
+        if (clientDestinations.isEmpty()) {
             Snackbar.make(viewPager, "No clients with GPS coordinates", Snackbar.LENGTH_SHORT).show()
             return
         }
@@ -416,10 +440,10 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val days = plan.days.toMutableList()
         if (dayIndex !in days.indices) return
         days[dayIndex] = days[dayIndex].copy(anchorLat = lat, anchorLng = lng, anchorLabel = label)
-        weekPlan = plan.copy(days = days)
-        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
-        savePlanToRoom()
-        Snackbar.make(viewPager, "Anchor set: $label", Snackbar.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            applyUpdatedPlan(plan.copy(days = days))
+            Snackbar.make(viewPager, "Anchor set: $label", Snackbar.LENGTH_SHORT).show()
+        }
     }
 
     fun clearAnchor(dayIndex: Int) {
@@ -427,10 +451,10 @@ class WeeklyPlannerActivity : AppCompatActivity() {
         val days = plan.days.toMutableList()
         if (dayIndex !in days.indices) return
         days[dayIndex] = days[dayIndex].copy(anchorLat = null, anchorLng = null, anchorLabel = null)
-        weekPlan = plan.copy(days = days)
-        findDayFragment(dayIndex)?.updateDay(days[dayIndex])
-        savePlanToRoom()
-        Snackbar.make(viewPager, "Anchor cleared", Snackbar.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            applyUpdatedPlan(plan.copy(days = days))
+            Snackbar.make(viewPager, "Anchor cleared", Snackbar.LENGTH_SHORT).show()
+        }
     }
 
     fun reoptimiseRoute(dayIndex: Int) {
@@ -440,9 +464,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
             if (newDay != null) {
                 val days = plan.days.toMutableList()
                 days[dayIndex] = newDay
-                weekPlan = plan.copy(days = days)
-                findDayFragment(dayIndex)?.updateDay(newDay)
-                savePlanToRoom()
+                applyUpdatedPlan(plan.copy(days = days))
                 Snackbar.make(viewPager, "Route reordered for ${newDay.dayName}", Snackbar.LENGTH_SHORT).show()
             }
         }
@@ -457,11 +479,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
             if (newDay != null && newDay.clients.size > allCurrentIds.size) {
                 val days = plan.days.toMutableList()
                 days[dayIndex] = newDay
-                val updated = plan.copy(days = days)
-                weekPlan = updated
-                findDayFragment(dayIndex)?.updateDay(newDay)
-                toolbar.subtitle = "${updated.totalClients} clients \u2022 ${updated.unassignedCount} unassigned"
-                savePlanToRoom()
+                applyUpdatedPlan(plan.copy(days = days))
                 val added = newDay.clients.size - allCurrentIds.size
                 Snackbar.make(viewPager, "Added $added client${if (added != 1) "s" else ""} to ${newDay.dayName}", Snackbar.LENGTH_SHORT).show()
             } else {
@@ -481,11 +499,7 @@ class WeeklyPlannerActivity : AppCompatActivity() {
             if (newDay != null) {
                 val days = plan.days.toMutableList()
                 days[dayIndex] = newDay
-                val updated = plan.copy(days = days)
-                weekPlan = updated
-                findDayFragment(dayIndex)?.updateDay(newDay)
-                toolbar.subtitle = "${updated.totalClients} clients \u2022 ${updated.unassignedCount} unassigned"
-                savePlanToRoom()
+                applyUpdatedPlan(plan.copy(days = days))
                 Snackbar.make(viewPager, "${newDay.dayName} rebuilt \u2014 ${newDay.clients.size} clients", Snackbar.LENGTH_SHORT).show()
             } else {
                 Snackbar.make(viewPager, "Cannot rebuild this day", Snackbar.LENGTH_SHORT).show()

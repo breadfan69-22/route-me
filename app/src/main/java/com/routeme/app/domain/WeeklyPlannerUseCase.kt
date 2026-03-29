@@ -39,6 +39,11 @@ class WeeklyPlannerUseCase(
     private val truckInventoryUseCase: TruckInventoryUseCase? = null,
     private val nowProvider: () -> Long = System::currentTimeMillis
 ) {
+    private data class GranularInventoryContext(
+        val startingGranularBags: Double,
+        val granularCapacity: Double
+    )
+
     suspend fun generateWeekPlan(
         lat: Double = SHOP_LAT,
         lng: Double = SHOP_LNG,
@@ -46,17 +51,7 @@ class WeeklyPlannerUseCase(
         minDays: Int = 7,
         dayAnchors: Map<Int, DayAnchor> = emptyMap()
     ): WeekPlan {
-        val inventorySnapshot = runCatching { truckInventoryUseCase?.loadInventory() }.getOrNull()
-        val granularCapacity = inventorySnapshot
-            ?.get(ProductType.GRANULAR)
-            ?.capacity
-            ?.takeIf { it > 0.0 }
-            ?: TruckInventoryUseCase.GRANULAR_CAPACITY_BAGS
-        val startingGranularBags = inventorySnapshot
-            ?.get(ProductType.GRANULAR)
-            ?.currentStock
-            ?.coerceIn(0.0, granularCapacity)
-            ?: granularCapacity
+        val inventoryContext = loadGranularInventoryContext()
 
         return withContext(Dispatchers.Default) {
         val forecastDays = weatherRepository.getForecastDays(dayCount = 7, lat = lat, lng = lng)
@@ -101,8 +96,8 @@ class WeeklyPlannerUseCase(
 
         val predictedRefillDayOfWeek = predictRefillDayOfWeek(
             dayBuilders = initialAssignment.dayBuilders,
-            startingGranularBags = startingGranularBags,
-            capacityBags = granularCapacity
+            startingGranularBags = inventoryContext.startingGranularBags,
+            capacityBags = inventoryContext.granularCapacity
         )
 
         val finalAssignment = assignClientsToDays(
@@ -117,8 +112,8 @@ class WeeklyPlannerUseCase(
 
         applyInventoryProjection(
             dayBuilders = finalAssignment.dayBuilders,
-            startingGranularBags = startingGranularBags,
-            capacityBags = granularCapacity
+            startingGranularBags = inventoryContext.startingGranularBags,
+            capacityBags = inventoryContext.granularCapacity
         )
 
         WeekPlan(
@@ -129,6 +124,38 @@ class WeeklyPlannerUseCase(
             noteOnlyClients = noteOnlyClients
         )
         }
+    }
+
+    suspend fun refreshInventoryProjection(plan: WeekPlan): WeekPlan {
+        val inventoryContext = loadGranularInventoryContext()
+        return withContext(Dispatchers.Default) {
+            plan.copy(
+                days = applyInventoryProjection(
+                    days = plan.days,
+                    startingGranularBags = inventoryContext.startingGranularBags,
+                    capacityBags = inventoryContext.granularCapacity
+                )
+            )
+        }
+    }
+
+    private suspend fun loadGranularInventoryContext(): GranularInventoryContext {
+        val inventorySnapshot = runCatching { truckInventoryUseCase?.loadInventory() }.getOrNull()
+        val granularCapacity = inventorySnapshot
+            ?.get(ProductType.GRANULAR)
+            ?.capacity
+            ?.takeIf { it > 0.0 }
+            ?: TruckInventoryUseCase.GRANULAR_CAPACITY_BAGS
+        val startingGranularBags = inventorySnapshot
+            ?.get(ProductType.GRANULAR)
+            ?.currentStock
+            ?.coerceIn(0.0, granularCapacity)
+            ?: granularCapacity
+
+        return GranularInventoryContext(
+            startingGranularBags = startingGranularBags,
+            granularCapacity = granularCapacity
+        )
     }
 
     private data class AssignmentResult(
@@ -327,14 +354,66 @@ class WeeklyPlannerUseCase(
         }
     }
 
+    private fun applyInventoryProjection(
+        days: List<PlannedDay>,
+        startingGranularBags: Double,
+        capacityBags: Double
+    ): List<PlannedDay> {
+        if (capacityBags <= 0.0) {
+            return days.map {
+                it.copy(
+                    supplyStopNeeded = false,
+                    projectedInventoryPct = 0,
+                    supplyStopAfterIndex = null
+                )
+            }
+        }
+
+        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
+        var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
+
+        return days.map { day ->
+            var supplyStopAfterIndex: Int? = null
+            var supplyStopNeeded = false
+
+            if (day.isWorkDay && day.clients.isNotEmpty()) {
+                for ((index, plannedClient) in day.clients.withIndex()) {
+                    val consumption = estimateClientGranularConsumptionBags(plannedClient)
+                    runningBags = (runningBags - consumption).coerceAtLeast(0.0)
+
+                    if (runningBags < thresholdBags && supplyStopAfterIndex == null) {
+                        supplyStopAfterIndex = (index - 1).coerceAtLeast(0)
+                        supplyStopNeeded = true
+                        runningBags = capacityBags
+                    }
+                }
+            }
+
+            day.copy(
+                supplyStopNeeded = supplyStopNeeded,
+                projectedInventoryPct = ((runningBags / capacityBags) * 100.0)
+                    .roundToInt()
+                    .coerceIn(0, 100),
+                supplyStopAfterIndex = supplyStopAfterIndex
+            )
+        }
+    }
+
     /** Estimate granular consumption in bags for a single client stop. */
     private fun estimateClientGranularConsumptionBags(plannedClient: PlannedClient): Double {
-        val hasGranularStep = plannedClient.eligibleSteps.any {
-            it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS
-        }
-        if (!hasGranularStep) return 0.0
+        val primaryGranularStep = plannedClient.eligibleSteps
+            .asSequence()
+            .filter { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+            .sortedBy { it.stepNumber }
+            .firstOrNull()
+            ?: return 0.0
         val sqFt = plannedClient.client.lawnSizeSqFt.takeIf { it > 0 } ?: DEFAULT_SQFT_ESTIMATE
-        return estimateGranularConsumptionBags(sqFt)
+        val configuredRate = preferencesRepository.getGranularRate(primaryGranularStep).takeIf { it > 0.0 }
+        return if (configuredRate != null) {
+            estimateGranularConsumptionBags(sqFt, configuredRate)
+        } else {
+            estimateGranularConsumptionBags(sqFt)
+        }
     }
 
     private fun estimateDayGranularConsumptionBags(day: PlannedDayBuilder): Double {

@@ -19,6 +19,7 @@ import com.routeme.app.R
 import com.routeme.app.model.PlannedClient
 import com.routeme.app.model.PlannedDay
 import com.routeme.app.model.RouteItem
+import com.routeme.app.model.toRouteItems
 
 class PlannerDayFragment : Fragment() {
 
@@ -164,21 +165,8 @@ class PlannerDayFragment : Fragment() {
         } else {
             rv.visibility = View.VISIBLE
             emptyText.visibility = View.GONE
-            chipAdapter.submitList(buildRouteItemList(day))
+            chipAdapter.submitList(day.toRouteItems())
         }
-    }
-
-    /** Builds the route item list, inserting supply house stop at the right position if needed. */
-    private fun buildRouteItemList(day: PlannedDay): List<RouteItem> {
-        val items = mutableListOf<RouteItem>()
-        day.clients.forEachIndexed { index, plannedClient ->
-            items += RouteItem.ClientStop(plannedClient)
-            // Insert supply house after this client if this is the insertion point
-            if (day.supplyStopAfterIndex == index) {
-                items += RouteItem.SupplyHouseStop()
-            }
-        }
-        return items
     }
 
     private fun confirmRebuild() {
