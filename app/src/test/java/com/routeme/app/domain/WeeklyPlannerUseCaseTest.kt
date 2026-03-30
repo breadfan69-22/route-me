@@ -3,17 +3,23 @@ package com.routeme.app.domain
 import com.routeme.app.Client
 import com.routeme.app.ClientProperty
 import com.routeme.app.ClientSuggestion
+import com.routeme.app.ProductType
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.ServiceType
 import com.routeme.app.SunShade
+import com.routeme.app.TruckInventory
 import com.routeme.app.WindExposure
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
 import com.routeme.app.data.WeatherRepository
 import com.routeme.app.model.ForecastDay
+import com.routeme.app.model.PlannedClient
+import com.routeme.app.model.PlannedDay
+import com.routeme.app.model.WeekPlan
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.mockk.every
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -160,6 +166,137 @@ class WeeklyPlannerUseCaseTest {
         assertTrue(tuesdayPlan.isWorkDay)
         assertTrue(tuesdayPlan.clients.any { it.client.id == "2" })
         assertEquals(0, plan.unassignedCount)
+    }
+
+    @Test
+    fun `refreshInventoryProjection uses configured granular rate and preserves route order`() = runTest {
+        val weatherRepository = mockk<WeatherRepository>()
+        val clientRepository = mockk<ClientRepository>()
+        val routingEngine = mockk<RoutingEngine>()
+        val preferencesRepository = mockk<PreferencesRepository>(relaxed = true)
+        val truckInventoryUseCase = mockk<TruckInventoryUseCase>()
+
+        val client = testClient("3").copy(
+            subscribedSteps = setOf(3),
+            lawnSizeSqFt = 10_000,
+            property = testClient("3").property?.copy(lawnSizeSqFt = 10_000)
+        )
+        val plan = WeekPlan(
+            days = listOf(
+                PlannedDay(
+                    dateMillis = nextDateMillis(Calendar.MONDAY),
+                    dayOfWeek = Calendar.MONDAY,
+                    dayName = "Monday",
+                    forecast = null,
+                    dayScore = 80,
+                    dayScoreLabel = "Great",
+                    clients = listOf(
+                        PlannedClient(
+                            client = client,
+                            fitnessScore = 75,
+                            fitnessLabel = "Great",
+                            primaryReason = "Test",
+                            eligibleSteps = setOf(ServiceType.ROUND_3),
+                            daysOverdue = 21
+                        )
+                    ),
+                    isWorkDay = true,
+                    projectedInventoryPct = 100
+                )
+            ),
+            generatedAtMillis = 0L,
+            totalClients = 1,
+            unassignedCount = 0
+        )
+
+        every { preferencesRepository.getGranularRate(ServiceType.ROUND_3) } returns 5.0
+        coEvery { truckInventoryUseCase.loadInventory() } returns mapOf(
+            ProductType.GRANULAR to TruckInventory(
+                productType = ProductType.GRANULAR,
+                currentStock = 50.0,
+                capacity = 50.0,
+                unit = "bags",
+                pctRemaining = 100
+            )
+        )
+
+        val useCase = WeeklyPlannerUseCase(
+            weatherRepository = weatherRepository,
+            clientRepository = clientRepository,
+            routingEngine = routingEngine,
+            preferencesRepository = preferencesRepository,
+            truckInventoryUseCase = truckInventoryUseCase
+        )
+
+        val refreshed = useCase.refreshInventoryProjection(plan)
+
+        assertEquals(listOf("3"), refreshed.days.first().clients.map { it.client.id })
+        assertEquals(98, refreshed.days.first().projectedInventoryPct)
+        assertFalse(refreshed.days.first().supplyStopNeeded)
+    }
+
+    @Test
+    fun `refreshInventoryProjection clears stale refill metadata after edits`() = runTest {
+        val weatherRepository = mockk<WeatherRepository>()
+        val clientRepository = mockk<ClientRepository>()
+        val routingEngine = mockk<RoutingEngine>()
+        val preferencesRepository = mockk<PreferencesRepository>(relaxed = true)
+        val truckInventoryUseCase = mockk<TruckInventoryUseCase>()
+
+        val client = testClient("4").copy(lawnSizeSqFt = 10_000)
+        val editedPlan = WeekPlan(
+            days = listOf(
+                PlannedDay(
+                    dateMillis = nextDateMillis(Calendar.TUESDAY),
+                    dayOfWeek = Calendar.TUESDAY,
+                    dayName = "Tuesday",
+                    forecast = null,
+                    dayScore = 70,
+                    dayScoreLabel = "Good",
+                    clients = listOf(
+                        PlannedClient(
+                            client = client,
+                            fitnessScore = 60,
+                            fitnessLabel = "Good",
+                            primaryReason = "Test",
+                            eligibleSteps = setOf(ServiceType.ROUND_1),
+                            daysOverdue = 14
+                        )
+                    ),
+                    isWorkDay = true,
+                    supplyStopNeeded = true,
+                    projectedInventoryPct = 0,
+                    supplyStopAfterIndex = 0
+                )
+            ),
+            generatedAtMillis = 0L,
+            totalClients = 1,
+            unassignedCount = 0
+        )
+
+        coEvery { truckInventoryUseCase.loadInventory() } returns mapOf(
+            ProductType.GRANULAR to TruckInventory(
+                productType = ProductType.GRANULAR,
+                currentStock = 1.3,
+                capacity = 2.0,
+                unit = "bags",
+                pctRemaining = 65
+            )
+        )
+
+        val useCase = WeeklyPlannerUseCase(
+            weatherRepository = weatherRepository,
+            clientRepository = clientRepository,
+            routingEngine = routingEngine,
+            preferencesRepository = preferencesRepository,
+            truckInventoryUseCase = truckInventoryUseCase
+        )
+
+        val refreshed = useCase.refreshInventoryProjection(editedPlan)
+
+        assertFalse(refreshed.days.first().supplyStopNeeded)
+        assertEquals(30, refreshed.days.first().projectedInventoryPct)
+        assertEquals(null, refreshed.days.first().supplyStopAfterIndex)
     }
 
     private fun testClient(id: String): Client {
