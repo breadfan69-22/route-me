@@ -64,7 +64,13 @@ class LocationTrackingNotifier(
         context.getSystemService(NotificationManager::class.java).notify(notifId, notification)
     }
 
-    fun postCompletionNotification(client: Client, minutesOnSite: Int, location: Location, arrivedAtMillis: Long) {
+    fun postCompletionNotification(
+        client: Client,
+        minutesOnSite: Int,
+        location: Location,
+        arrivedAtMillis: Long,
+        completedAtMillis: Long
+    ) {
         val notifId = completeNotifBase + client.id.hashCode()
         val manager = context.getSystemService(NotificationManager::class.java)
 
@@ -75,6 +81,7 @@ class LocationTrackingNotifier(
             minutesOnSite = minutesOnSite,
             location = location,
             arrivedAtMillis = arrivedAtMillis,
+            completedAtMillis = completedAtMillis,
             completionAction = LocationTrackingService.COMPLETE_ACTION_PROMPT
         )
         val contentPendingIntent = PendingIntent.getActivity(
@@ -89,6 +96,7 @@ class LocationTrackingNotifier(
             minutesOnSite = minutesOnSite,
             location = location,
             arrivedAtMillis = arrivedAtMillis,
+            completedAtMillis = completedAtMillis,
             completionAction = LocationTrackingService.COMPLETE_ACTION_DONE
         )
         val donePendingIntent = PendingIntent.getActivity(
@@ -103,6 +111,7 @@ class LocationTrackingNotifier(
             minutesOnSite = minutesOnSite,
             location = location,
             arrivedAtMillis = arrivedAtMillis,
+            completedAtMillis = completedAtMillis,
             completionAction = LocationTrackingService.COMPLETE_ACTION_NOT_YET
         )
         val notYetPendingIntent = PendingIntent.getActivity(
@@ -117,6 +126,7 @@ class LocationTrackingNotifier(
             minutesOnSite = minutesOnSite,
             location = location,
             arrivedAtMillis = arrivedAtMillis,
+            completedAtMillis = completedAtMillis,
             completionAction = LocationTrackingService.COMPLETE_ACTION_PROPERTY
         )
         val propertyPendingIntent = PendingIntent.getActivity(
@@ -159,6 +169,7 @@ class LocationTrackingNotifier(
         minutesOnSite: Int,
         location: Location,
         arrivedAtMillis: Long,
+        completedAtMillis: Long,
         completionAction: String
     ): Intent {
         return Intent(context, MainActivity::class.java).apply {
@@ -170,6 +181,7 @@ class LocationTrackingNotifier(
             putExtra(LocationTrackingService.EXTRA_COMPLETE_LNG, location.longitude)
             putExtra(LocationTrackingService.EXTRA_COMPLETE_TIME, location.time)
             putExtra(LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT, arrivedAtMillis)
+            putExtra(LocationTrackingService.EXTRA_COMPLETE_COMPLETED_AT, completedAtMillis)
             putExtra(LocationTrackingService.EXTRA_COMPLETE_ACTION, completionAction)
         }
     }
@@ -182,6 +194,7 @@ class LocationTrackingNotifier(
         val clientIds = members.map { it.client.id }.toTypedArray()
         val minutesArray = members.map { (it.timeOnSiteMillis / 60_000).toInt() }.toIntArray()
         val arrivedAtArray = members.map { it.arrivedAtMillis }.toLongArray()
+        val completedAtArray = members.map { it.completedAtMillis }.toLongArray()
         val weatherTempArray = members.map { it.weatherTempF ?: Int.MIN_VALUE }.toIntArray()
         val weatherWindArray = members.map { it.weatherWindMph ?: Int.MIN_VALUE }.toIntArray()
         val weatherDescArray = members.map { it.weatherDesc.orEmpty() }.toTypedArray()
@@ -196,6 +209,7 @@ class LocationTrackingNotifier(
             putExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS, clientIds)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES, minutesArray)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT, arrivedAtArray)
+            putExtra(LocationTrackingService.EXTRA_CLUSTER_COMPLETED_AT, completedAtArray)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F, weatherTempArray)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH, weatherWindArray)
             putExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC, weatherDescArray)

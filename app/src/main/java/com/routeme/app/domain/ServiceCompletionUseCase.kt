@@ -30,6 +30,7 @@ class ServiceCompletionUseCase(
         val clientId: String,
         val clientName: String,
         val arrivedAtMillis: Long,
+        val completedAtMillis: Long,
         val location: GeoPoint,
         val weatherTempF: Int? = null,
         val weatherWindMph: Int? = null,
@@ -45,6 +46,7 @@ class ServiceCompletionUseCase(
         val weatherTempF: Int? = null,
         val weatherWindMph: Int? = null,
         val weatherDesc: String? = null,
+        val completedAtMillisOverride: Long? = null,
         val selectedSuggestionEligibleSteps: Set<ServiceType>,
         val selectedServiceTypes: Set<ServiceType>,
         val currentLocation: GeoPoint?,
@@ -137,7 +139,7 @@ class ServiceCompletionUseCase(
         val arrivalStartedAtMillis = request.arrivalStartedAtMillis
             ?: return ConfirmSelectedResult.Error("Tap Arrived first")
 
-        val finishedAt = nowProvider()
+        val finishedAt = request.completedAtMillisOverride ?: nowProvider()
         val durationMinutes = (((finishedAt - arrivalStartedAtMillis) / 60000.0).toLong()).coerceAtLeast(1)
 
         val stepsToConfirm = if (request.selectedSuggestionEligibleSteps.isNotEmpty()) {
@@ -309,14 +311,15 @@ class ServiceCompletionUseCase(
 
     suspend fun confirmClusterService(request: ConfirmClusterRequest): ConfirmClusterResult {
         val serviceTypes = request.selectedServiceTypes
-        val finishedAt = nowProvider()
+        val finishedAt = request.selectedMembers.maxOfOrNull { it.completedAtMillis } ?: nowProvider()
         val confirmedNames = mutableListOf<String>()
         val transientFailures = mutableListOf<String>()
         var updatedClients = request.clients
 
         for (member in request.selectedMembers) {
             val client = updatedClients.find { it.id == member.clientId } ?: continue
-            val durationMinutes = ((finishedAt - member.arrivedAtMillis) / 60_000L).coerceAtLeast(1)
+            val memberFinishedAt = member.completedAtMillis
+            val durationMinutes = ((memberFinishedAt - member.arrivedAtMillis) / 60_000L).coerceAtLeast(1)
             var updatedClient = client
             var savedAnyRecord = false
 
@@ -328,7 +331,7 @@ class ServiceCompletionUseCase(
                 val record = ServiceRecord(
                     serviceType = serviceType,
                     arrivedAtMillis = member.arrivedAtMillis,
-                    completedAtMillis = finishedAt,
+                    completedAtMillis = memberFinishedAt,
                     durationMinutes = durationMinutes,
                     lat = member.location.latitude,
                     lng = member.location.longitude,
@@ -346,12 +349,12 @@ class ServiceCompletionUseCase(
 
                 if (SheetsWriteBack.webAppUrl.isNotBlank()) {
                     try {
-                        val result = clientRepository.writeBackServiceCompletion(updatedClient.name, serviceType, finishedAt)
+                        val result = clientRepository.writeBackServiceCompletion(updatedClient.name, serviceType, memberFinishedAt)
                         if (!result.success) {
-                            retryQueue.enqueue(updatedClient.name, serviceTypeToColumn(serviceType), "√${formatCheckValue(finishedAt)}")
+                            retryQueue.enqueue(updatedClient.name, serviceTypeToColumn(serviceType), "√${formatCheckValue(memberFinishedAt)}")
                         }
                     } catch (_: Exception) {
-                        retryQueue.enqueue(updatedClient.name, serviceTypeToColumn(serviceType), "√${formatCheckValue(finishedAt)}")
+                        retryQueue.enqueue(updatedClient.name, serviceTypeToColumn(serviceType), "√${formatCheckValue(memberFinishedAt)}")
                     }
                 }
             }
@@ -364,7 +367,7 @@ class ServiceCompletionUseCase(
                         clientId = updatedClient.id,
                         clientName = updatedClient.name,
                         arrivedAtMillis = member.arrivedAtMillis,
-                        endedAtMillis = finishedAt,
+                        endedAtMillis = memberFinishedAt,
                         durationMinutes = durationMinutes,
                         status = ClientStopStatus.DONE,
                         serviceTypes = stepsForClient,

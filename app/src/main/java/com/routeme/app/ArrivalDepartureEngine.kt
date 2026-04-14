@@ -43,6 +43,7 @@ class ArrivalDepartureEngine(
     private var dwellClientId: String? = null
     private var dwellStartTime: Long = 0L
     private val activeArrivals = mutableMapOf<String, ActiveArrivalState>()
+    private var externalArrivalClientId: String? = null
 
     fun hasActiveArrivals(): Boolean = activeArrivals.isNotEmpty()
 
@@ -52,6 +53,35 @@ class ArrivalDepartureEngine(
         dwellClientId = null
         dwellStartTime = 0L
         activeArrivals.clear()
+        externalArrivalClientId = null
+    }
+
+    fun syncExternalArrival(client: Client?, arrivedAtMillis: Long?, location: Location?) {
+        val currentExternalId = externalArrivalClientId
+
+        if (client == null || arrivedAtMillis == null || location == null) {
+            if (currentExternalId != null) {
+                activeArrivals.remove(currentExternalId)
+                externalArrivalClientId = null
+            }
+            return
+        }
+
+        if (currentExternalId != null && currentExternalId != client.id) {
+            activeArrivals.remove(currentExternalId)
+        }
+
+        if (!activeArrivals.containsKey(client.id)) {
+            activeArrivals[client.id] = ActiveArrivalState(
+                client = client,
+                arrivedAtMillis = arrivedAtMillis,
+                location = location
+            )
+        }
+
+        dwellClientId = null
+        dwellStartTime = 0L
+        externalArrivalClientId = client.id
     }
 
     fun evaluateArrival(

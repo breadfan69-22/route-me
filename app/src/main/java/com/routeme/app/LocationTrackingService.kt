@@ -3,6 +3,8 @@ package com.routeme.app
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.net.ConnectivityManager
+import android.net.Network
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -13,6 +15,7 @@ import android.os.IBinder
 import android.util.Log
 import com.routeme.app.data.ClientRepository
 import com.routeme.app.data.PreferencesRepository
+import com.routeme.app.data.WriteBackRetryQueue
 import com.routeme.app.data.WeatherRepository
 import com.routeme.app.tracking.ArrivalDispatchCoordinator
 import com.routeme.app.tracking.DestinationArrivalCoordinator
@@ -61,6 +64,7 @@ class LocationTrackingService : Service(), KoinComponent {
         const val EXTRA_COMPLETE_LNG = "complete_lng"
         const val EXTRA_COMPLETE_TIME = "complete_time"
         const val EXTRA_COMPLETE_ARRIVED_AT = "complete_arrived_at"
+        const val EXTRA_COMPLETE_COMPLETED_AT = "complete_completed_at"
         const val EXTRA_COMPLETE_ACTION = "complete_action"
         const val COMPLETE_ACTION_PROMPT = "complete_action_prompt"
         const val COMPLETE_ACTION_DONE = "complete_action_done"
@@ -69,6 +73,7 @@ class LocationTrackingService : Service(), KoinComponent {
         const val EXTRA_CLUSTER_CLIENT_IDS = "cluster_client_ids"
         const val EXTRA_CLUSTER_MINUTES = "cluster_minutes"
         const val EXTRA_CLUSTER_ARRIVED_AT = "cluster_arrived_at"
+        const val EXTRA_CLUSTER_COMPLETED_AT = "cluster_completed_at"
         const val EXTRA_CLUSTER_WEATHER_TEMP_F = "cluster_weather_temp_f"
         const val EXTRA_CLUSTER_WEATHER_WIND_MPH = "cluster_weather_wind_mph"
         const val EXTRA_CLUSTER_WEATHER_DESC = "cluster_weather_desc"
@@ -93,6 +98,18 @@ class LocationTrackingService : Service(), KoinComponent {
     private val preferencesRepository: PreferencesRepository by inject()
     private val nonClientStopDao: NonClientStopDao by inject()
     private val weatherRepository: WeatherRepository by inject()
+    private val retryQueue: WriteBackRetryQueue by inject()
+    private val connectivityManager by lazy {
+        getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            serviceScope.launch {
+                runCatching { retryQueue.drainQueue() }
+            }
+        }
+    }
+    private var networkCallbackRegistered = false
 
     private val trackingNotifier by lazy {
         LocationTrackingNotifier(
@@ -160,6 +177,7 @@ class LocationTrackingService : Service(), KoinComponent {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -209,6 +227,7 @@ class LocationTrackingService : Service(), KoinComponent {
         destinationArrivalCoordinator.reset()
         arrivalDispatchCoordinator.reset()
         modeController.reset()
+        unregisterNetworkCallback()
         Log.d(TAG, "Location tracking stopped")
     }
 
@@ -244,6 +263,7 @@ class LocationTrackingService : Service(), KoinComponent {
                 trackingEventBus.tryEmit(TrackingEvent.LocationUpdated(location))
             },
             onLocationTick = { location ->
+                syncExternalArrivalState()
                 arrivalDispatchCoordinator.onLocationTick(location, trackedClients)
                 // Compute proximity once; both remaining coordinators share the result
                 // to avoid redundant O(N) client-list scans on every GPS tick.
@@ -287,6 +307,38 @@ class LocationTrackingService : Service(), KoinComponent {
      */
     private fun isNearAnyClient(location: Location, radiusMeters: Float): Boolean {
         return ClientProximityHelper.isNearAnyClient(location, trackedClients, radiusMeters)
+    }
+
+    private fun syncExternalArrivalState() {
+        val activeArrival = trackingEventBus.activeArrival.value
+        if (activeArrival == null) {
+            arrivalDispatchCoordinator.syncExternalArrival(null, null, null)
+            return
+        }
+
+        val client = trackedClients.find { it.id == activeArrival.clientId } ?: return
+        val location = Location("manual-arrival").apply {
+            latitude = activeArrival.lat
+            longitude = activeArrival.lng
+            time = activeArrival.arrivedAtMillis
+        }
+        arrivalDispatchCoordinator.syncExternalArrival(client, activeArrival.arrivedAtMillis, location)
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallbackRegistered) return
+        runCatching {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
+            networkCallbackRegistered = true
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!networkCallbackRegistered) return
+        runCatching {
+            connectivityManager.unregisterNetworkCallback(networkCallback)
+        }
+        networkCallbackRegistered = false
     }
 
     // ─── Notifications ─────────────────────────────────────────

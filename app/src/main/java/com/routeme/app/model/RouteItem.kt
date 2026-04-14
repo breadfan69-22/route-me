@@ -22,6 +22,9 @@ const val WEEKLY_PLANNER_SUPPLY_HOUSE_DESTINATION_ID = "__weekly_planner_supply_
 
 fun PlannedDay.toRouteItems(): List<RouteItem> {
     val items = mutableListOf<RouteItem>()
+    if (supplyStopAfterIndex == -1) {
+        items += RouteItem.SupplyHouseStop()
+    }
     clients.forEachIndexed { index, plannedClient ->
         items += RouteItem.ClientStop(plannedClient)
         if (supplyStopAfterIndex == index) {

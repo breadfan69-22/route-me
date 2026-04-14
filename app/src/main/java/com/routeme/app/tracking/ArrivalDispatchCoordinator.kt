@@ -45,6 +45,10 @@ class ArrivalDispatchCoordinator(
         return arrivalDepartureEngine.hasActiveArrivals()
     }
 
+    fun syncExternalArrival(client: Client?, arrivedAtMillis: Long?, location: Location?) {
+        arrivalDepartureEngine.syncExternalArrival(client, arrivedAtMillis, location)
+    }
+
     fun recordArrivalWeather(
         clientId: String,
         arrivedAtMillis: Long,
@@ -113,6 +117,7 @@ class ArrivalDispatchCoordinator(
                     client = summary.client,
                     timeOnSiteMillis = summary.timeOnSiteMillis,
                     arrivedAtMillis = summary.arrivedAtMillis,
+                    completedAtMillis = now,
                     location = summary.location,
                     weatherTempF = weather?.tempF,
                     weatherWindMph = weather?.windMph,
@@ -141,7 +146,8 @@ class ArrivalDispatchCoordinator(
                     summary.client,
                     minutesOnSite,
                     summary.location,
-                    summary.arrivedAtMillis
+                    summary.arrivedAtMillis,
+                    now
                 )
                 logDebug(
                     "Posted completion notification for ${summary.client.name} (${minutesOnSite}min, notifId=$notifId)"
@@ -151,6 +157,7 @@ class ArrivalDispatchCoordinator(
                         summary.client,
                         timeOnSite,
                         summary.arrivedAtMillis,
+                        now,
                         summary.location
                     )
                 )

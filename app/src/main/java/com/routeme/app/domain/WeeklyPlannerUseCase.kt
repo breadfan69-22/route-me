@@ -23,6 +23,7 @@ import com.routeme.app.model.RecentWeatherSignal
 import com.routeme.app.model.WeekPlan
 import com.routeme.app.util.AppConfig
 import com.routeme.app.util.DateUtils
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.roundToInt
@@ -202,14 +203,14 @@ class WeeklyPlannerUseCase(
             val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
 
             val dayFitness = workDays.map { day ->
+                val isRefillDay = day.dayOfWeek in refillDayOfWeek
                 val (fitnessScore, reason) = scoreClientDayFitness(
                     client = suggestion.client,
                     property = suggestion.client.property,
                     forecast = day.forecast,
                     dayOfWeek = day.dayOfWeek,
                     eligibleSteps = suggestion.eligibleSteps,
-                    recentWeatherSignal = shopWeatherSignal,
-                    dayIsRefillDay = day.dayOfWeek in refillDayOfWeek
+                    recentWeatherSignal = shopWeatherSignal
                 )
 
                 val daysSinceMow = if (clientMowDay != null) {
@@ -227,14 +228,32 @@ class WeeklyPlannerUseCase(
                     )
                 }
 
-                val corridorBonus = if (blockedByMow || day.anchorLat == null || day.anchorLng == null) {
+                val anchorCorridorBonus = if (blockedByMow || day.anchorLat == null || day.anchorLng == null) {
                     0
                 } else {
                     corridorScore(suggestion.client, lat, lng, day.anchorLat, day.anchorLng)
                 }
 
+                val refillCorridorBonus = if (blockedByMow || !isRefillDay) {
+                    0
+                } else {
+                    corridorScore(
+                        suggestion.client,
+                        lat,
+                        lng,
+                        AppConfig.SupplyHouse.LAT,
+                        AppConfig.SupplyHouse.LNG
+                    )
+                }
+
                 val proximityBonus = if (blockedByMow) 0 else proximityScore(suggestion.client, day.clients)
-                val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus
+                val refillAffinityBonus = if (blockedByMow || !isRefillDay) {
+                    0
+                } else {
+                    refillDayAffinityScore(suggestion.client, day.clients)
+                }
+                val corridorBonus = maxOf(anchorCorridorBonus, refillCorridorBonus)
+                val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus + refillAffinityBonus
                 val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
                 DayFitness(day, finalScore, reason)
             }
@@ -292,19 +311,189 @@ class WeeklyPlannerUseCase(
     ): Set<Int> {
         if (capacityBags <= 0.0) return emptySet()
 
-        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
+        val hardFloorBags = AppConfig.WeeklyPlanner.REFILL_HARD_FLOOR_BAGS
+        val targetMaxBags = AppConfig.WeeklyPlanner.REFILL_TARGET_MAX_BAGS
+        val idealArrivalBags = AppConfig.WeeklyPlanner.REFILL_TARGET_IDEAL_BAGS
         var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
         val refillDays = mutableSetOf<Int>()
 
         dayBuilders.forEach { day ->
-            if (!day.isWorkDay) return@forEach
-            runningBags = (runningBags - estimateDayGranularConsumptionBags(day)).coerceAtLeast(0.0)
-            if (runningBags < thresholdBags) {
+            if (!day.isWorkDay || day.clients.isEmpty()) return@forEach
+
+            val dayConsumption = estimateDayGranularConsumptionBags(day)
+            val shouldRefillBeforeDay =
+                runningBags <= targetMaxBags && dayConsumption > (runningBags - hardFloorBags).coerceAtLeast(0.0)
+            val willNeedRefillDuringDay = runningBags - dayConsumption < hardFloorBags
+
+            if (shouldRefillBeforeDay || willNeedRefillDuringDay) {
                 refillDays += day.dayOfWeek
-                runningBags = capacityBags
+                runningBags = if (shouldRefillBeforeDay) {
+                    (capacityBags - dayConsumption).coerceAtLeast(0.0)
+                } else {
+                    val consumedBeforeRefill = (runningBags - idealArrivalBags).coerceAtLeast(0.0)
+                    val consumedAfterRefill = (dayConsumption - consumedBeforeRefill).coerceAtLeast(0.0)
+                    (capacityBags - consumedAfterRefill).coerceAtLeast(0.0)
+                }
+            } else {
+                runningBags = (runningBags - dayConsumption).coerceAtLeast(0.0)
             }
         }
         return refillDays
+    }
+
+    private data class DayInventoryRoutePlan(
+        val orderedClients: List<PlannedClient>,
+        val supplyStopNeeded: Boolean,
+        val supplyStopAfterIndex: Int?,
+        val endingBags: Double
+    )
+
+    private data class RefillCandidate(
+        val orderedClients: List<PlannedClient>,
+        val supplyStopAfterIndex: Int,
+        val remainingAtSupply: Double,
+        val endingBags: Double,
+        val targetPenalty: Double,
+        val routeDistanceMiles: Double
+    )
+
+    private fun planDayRouteWithInventory(
+        clients: List<PlannedClient>,
+        startingBags: Double,
+        capacityBags: Double,
+        startLat: Double = SHOP_LAT,
+        startLng: Double = SHOP_LNG
+    ): DayInventoryRoutePlan {
+        if (clients.isEmpty()) {
+            return DayInventoryRoutePlan(
+                orderedClients = emptyList(),
+                supplyStopNeeded = false,
+                supplyStopAfterIndex = null,
+                endingBags = startingBags.coerceAtLeast(0.0)
+            )
+        }
+
+        val defaultRoute = nearestNeighbourOrder(clients, startLat, startLng)
+        val totalDayConsumption = defaultRoute.sumOf(::estimateClientGranularConsumptionBags)
+        val hardFloorBags = AppConfig.WeeklyPlanner.REFILL_HARD_FLOOR_BAGS
+
+        if (capacityBags <= 0.0 || startingBags - totalDayConsumption >= hardFloorBags) {
+            return DayInventoryRoutePlan(
+                orderedClients = defaultRoute,
+                supplyStopNeeded = false,
+                supplyStopAfterIndex = null,
+                endingBags = (startingBags - totalDayConsumption).coerceAtLeast(0.0)
+            )
+        }
+
+        val towardSupply = orderClientsForOpenRoute(
+            clients = clients,
+            startLat = startLat,
+            startLng = startLng,
+            endLat = AppConfig.SupplyHouse.LAT,
+            endLng = AppConfig.SupplyHouse.LNG
+        )
+
+        val candidates = (0 until towardSupply.size).mapNotNull { preCount ->
+            buildRefillCandidate(
+                clientsTowardSupply = towardSupply,
+                preCount = preCount,
+                startingBags = startingBags,
+                capacityBags = capacityBags,
+                startLat = startLat,
+                startLng = startLng
+            )
+        }
+
+        val bestCandidate = candidates.minWithOrNull(
+            compareBy<RefillCandidate> { it.targetPenalty }
+                .thenBy { it.routeDistanceMiles }
+        ) ?: run {
+            val fallbackRoute = orderClientsForOpenRoute(
+                clients = clients,
+                startLat = AppConfig.SupplyHouse.LAT,
+                startLng = AppConfig.SupplyHouse.LNG
+            )
+            return DayInventoryRoutePlan(
+                orderedClients = fallbackRoute,
+                supplyStopNeeded = true,
+                supplyStopAfterIndex = -1,
+                endingBags = (capacityBags - fallbackRoute.sumOf(::estimateClientGranularConsumptionBags)).coerceAtLeast(0.0)
+            )
+        }
+
+        return DayInventoryRoutePlan(
+            orderedClients = bestCandidate.orderedClients,
+            supplyStopNeeded = true,
+            supplyStopAfterIndex = bestCandidate.supplyStopAfterIndex,
+            endingBags = bestCandidate.endingBags
+        )
+    }
+
+    private fun buildRefillCandidate(
+        clientsTowardSupply: List<PlannedClient>,
+        preCount: Int,
+        startingBags: Double,
+        capacityBags: Double,
+        startLat: Double,
+        startLng: Double
+    ): RefillCandidate? {
+        val hardFloorBags = AppConfig.WeeklyPlanner.REFILL_HARD_FLOOR_BAGS
+        val targetMinBags = AppConfig.WeeklyPlanner.REFILL_TARGET_MIN_BAGS
+        val targetMaxBags = AppConfig.WeeklyPlanner.REFILL_TARGET_MAX_BAGS
+        val idealArrivalBags = AppConfig.WeeklyPlanner.REFILL_TARGET_IDEAL_BAGS
+
+        val preClients = clientsTowardSupply.take(preCount)
+        val postClients = clientsTowardSupply.drop(preCount)
+        if (postClients.isEmpty()) return null
+
+        val consumedBeforeRefill = preClients.sumOf(::estimateClientGranularConsumptionBags)
+        val remainingAtSupply = (startingBags - consumedBeforeRefill).coerceAtLeast(0.0)
+        if (preCount > 0 && remainingAtSupply < hardFloorBags) return null
+
+        val preRoute = orderClientsForOpenRoute(
+            clients = preClients,
+            startLat = startLat,
+            startLng = startLng,
+            endLat = AppConfig.SupplyHouse.LAT,
+            endLng = AppConfig.SupplyHouse.LNG
+        )
+        val postRoute = orderClientsForOpenRoute(
+            clients = postClients,
+            startLat = AppConfig.SupplyHouse.LAT,
+            startLng = AppConfig.SupplyHouse.LNG
+        )
+
+        val consumedAfterRefill = postRoute.sumOf(::estimateClientGranularConsumptionBags)
+        val endingBags = (capacityBags - consumedAfterRefill).coerceAtLeast(0.0)
+        val routeDistanceMiles = openRouteDistance(
+            route = preRoute,
+            startLat = startLat,
+            startLng = startLng,
+            endLat = AppConfig.SupplyHouse.LAT,
+            endLng = AppConfig.SupplyHouse.LNG
+        ) + openRouteDistance(
+            route = postRoute,
+            startLat = AppConfig.SupplyHouse.LAT,
+            startLng = AppConfig.SupplyHouse.LNG
+        )
+
+        val targetPenalty = when {
+            preCount == 0 && startingBags < hardFloorBags -> 0.0
+            remainingAtSupply in targetMinBags..targetMaxBags -> abs(remainingAtSupply - idealArrivalBags)
+            preCount == 0 && startingBags <= targetMaxBags -> abs(remainingAtSupply - idealArrivalBags)
+            remainingAtSupply > targetMaxBags -> 100.0 + abs(remainingAtSupply - idealArrivalBags)
+            else -> Double.MAX_VALUE
+        }
+
+        return RefillCandidate(
+            orderedClients = preRoute + postRoute,
+            supplyStopAfterIndex = preCount - 1,
+            remainingAtSupply = remainingAtSupply,
+            endingBags = endingBags,
+            targetPenalty = targetPenalty,
+            routeDistanceMiles = routeDistanceMiles
+        )
     }
 
     private fun applyInventoryProjection(
@@ -321,29 +510,23 @@ class WeeklyPlannerUseCase(
             return
         }
 
-        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
         var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
 
         dayBuilders.forEach { day ->
             day.supplyStopAfterIndex = null
             if (day.isWorkDay && day.clients.isNotEmpty()) {
-                // Walk through clients in route order to find exact insertion point
-                for ((index, plannedClient) in day.clients.withIndex()) {
-                    val consumption = estimateClientGranularConsumptionBags(plannedClient)
-                    runningBags = (runningBags - consumption).coerceAtLeast(0.0)
-
-                    if (runningBags < thresholdBags && day.supplyStopAfterIndex == null) {
-                        // Insert supply stop BEFORE this client runs us empty
-                        // Use previous index so we refill before serving this client
-                        day.supplyStopAfterIndex = (index - 1).coerceAtLeast(0)
-                        day.supplyStopNeeded = true
-                        runningBags = capacityBags  // Assume refill
-                    }
-                }
-                // If no insertion point was set, day doesn't need a supply stop
-                if (day.supplyStopAfterIndex == null) {
-                    day.supplyStopNeeded = false
-                }
+                val routePlan = planDayRouteWithInventory(
+                    clients = day.clients.toList(),
+                    startingBags = runningBags,
+                    capacityBags = capacityBags,
+                    startLat = SHOP_LAT,
+                    startLng = SHOP_LNG
+                )
+                day.clients.clear()
+                day.clients.addAll(routePlan.orderedClients)
+                day.supplyStopNeeded = routePlan.supplyStopNeeded
+                day.supplyStopAfterIndex = routePlan.supplyStopAfterIndex
+                runningBags = routePlan.endingBags
             } else {
                 day.supplyStopNeeded = false
             }
@@ -369,33 +552,36 @@ class WeeklyPlannerUseCase(
             }
         }
 
-        val thresholdBags = capacityBags * AppConfig.WeeklyPlanner.REFILL_THRESHOLD_PCT
         var runningBags = startingGranularBags.coerceIn(0.0, capacityBags)
 
         return days.map { day ->
-            var supplyStopAfterIndex: Int? = null
-            var supplyStopNeeded = false
-
             if (day.isWorkDay && day.clients.isNotEmpty()) {
-                for ((index, plannedClient) in day.clients.withIndex()) {
-                    val consumption = estimateClientGranularConsumptionBags(plannedClient)
-                    runningBags = (runningBags - consumption).coerceAtLeast(0.0)
+                val routePlan = planDayRouteWithInventory(
+                    clients = day.clients,
+                    startingBags = runningBags,
+                    capacityBags = capacityBags,
+                    startLat = SHOP_LAT,
+                    startLng = SHOP_LNG
+                )
+                runningBags = routePlan.endingBags
 
-                    if (runningBags < thresholdBags && supplyStopAfterIndex == null) {
-                        supplyStopAfterIndex = (index - 1).coerceAtLeast(0)
-                        supplyStopNeeded = true
-                        runningBags = capacityBags
-                    }
-                }
+                day.copy(
+                    clients = routePlan.orderedClients,
+                    supplyStopNeeded = routePlan.supplyStopNeeded,
+                    projectedInventoryPct = ((runningBags / capacityBags) * 100.0)
+                        .roundToInt()
+                        .coerceIn(0, 100),
+                    supplyStopAfterIndex = routePlan.supplyStopAfterIndex
+                )
+            } else {
+                day.copy(
+                    supplyStopNeeded = false,
+                    projectedInventoryPct = ((runningBags / capacityBags) * 100.0)
+                        .roundToInt()
+                        .coerceIn(0, 100),
+                    supplyStopAfterIndex = null
+                )
             }
-
-            day.copy(
-                supplyStopNeeded = supplyStopNeeded,
-                projectedInventoryPct = ((runningBags / capacityBags) * 100.0)
-                    .roundToInt()
-                    .coerceIn(0, 100),
-                supplyStopAfterIndex = supplyStopAfterIndex
-            )
         }
     }
 
@@ -418,6 +604,115 @@ class WeeklyPlannerUseCase(
 
     private fun estimateDayGranularConsumptionBags(day: PlannedDayBuilder): Double {
         return day.clients.sumOf { estimateClientGranularConsumptionBags(it) }
+    }
+
+    private fun orderClientsForOpenRoute(
+        clients: List<PlannedClient>,
+        startLat: Double,
+        startLng: Double,
+        endLat: Double? = null,
+        endLng: Double? = null
+    ): List<PlannedClient> {
+        val geocoded = clients.filter { it.client.latitude != null && it.client.longitude != null }
+        val ungeocoded = clients.filter { it.client.latitude == null || it.client.longitude == null }
+
+        if (geocoded.size <= 1) return geocoded + ungeocoded
+
+        val remaining = geocoded.toMutableList()
+        val ordered = mutableListOf<PlannedClient>()
+        var currentLat = startLat
+        var currentLng = startLng
+
+        while (remaining.isNotEmpty()) {
+            val next = remaining.minByOrNull { plannedClient ->
+                val lat = plannedClient.client.latitude!!
+                val lng = plannedClient.client.longitude!!
+                val hopMiles = routingEngine.distanceMilesBetween(currentLat, currentLng, lat, lng)
+                val endBias = if (endLat != null && endLng != null) {
+                    routingEngine.distanceMilesBetween(lat, lng, endLat, endLng) * 0.15
+                } else {
+                    0.0
+                }
+                hopMiles + endBias
+            } ?: break
+
+            ordered += next
+            remaining.remove(next)
+            currentLat = next.client.latitude!!
+            currentLng = next.client.longitude!!
+        }
+
+        fun routeDistance(route: List<PlannedClient>): Double = openRouteDistance(
+            route = route,
+            startLat = startLat,
+            startLng = startLng,
+            endLat = endLat,
+            endLng = endLng
+        )
+
+        var improved = true
+        var passes = 0
+        while (improved && passes < AppConfig.Routing.TWO_OPT_MAX_PASSES) {
+            improved = false
+            passes++
+            for (i in 0 until ordered.size - 1) {
+                for (j in i + 1 until ordered.size) {
+                    val before = routeDistance(ordered)
+                    ordered.subList(i, j + 1).reverse()
+                    val after = routeDistance(ordered)
+                    if (after + AppConfig.Routing.TWO_OPT_IMPROVEMENT_EPSILON < before) {
+                        improved = true
+                    } else {
+                        ordered.subList(i, j + 1).reverse()
+                    }
+                }
+            }
+        }
+
+        return ordered + ungeocoded
+    }
+
+    private fun openRouteDistance(
+        route: List<PlannedClient>,
+        startLat: Double,
+        startLng: Double,
+        endLat: Double? = null,
+        endLng: Double? = null
+    ): Double {
+        if (route.isEmpty()) {
+            return if (endLat != null && endLng != null) {
+                routingEngine.distanceMilesBetween(startLat, startLng, endLat, endLng)
+            } else {
+                0.0
+            }
+        }
+
+        var total = routingEngine.distanceMilesBetween(
+            startLat,
+            startLng,
+            route.first().client.latitude!!,
+            route.first().client.longitude!!
+        )
+
+        for (index in 0 until route.size - 1) {
+            total += routingEngine.distanceMilesBetween(
+                route[index].client.latitude!!,
+                route[index].client.longitude!!,
+                route[index + 1].client.latitude!!,
+                route[index + 1].client.longitude!!
+            )
+        }
+
+        if (endLat != null && endLng != null) {
+            total += routingEngine.distanceMilesBetween(
+                route.last().client.latitude!!,
+                route.last().client.longitude!!,
+                endLat,
+                endLng
+            )
+        }
+
+        return total
     }
 
     private data class PlannedDayBuilder(
@@ -521,8 +816,7 @@ class WeeklyPlannerUseCase(
         forecast: ForecastDay,
         dayOfWeek: Int,
         eligibleSteps: Set<ServiceType> = emptySet(),
-        recentWeatherSignal: RecentWeatherSignal? = null,
-        dayIsRefillDay: Boolean = false
+        recentWeatherSignal: RecentWeatherSignal? = null
     ): Pair<Int, String> {
         if (property == null) {
             return 50 to "No property data — neutral fit"
@@ -651,17 +945,6 @@ class WeeklyPlannerUseCase(
             // No mow day set — flexible schedule, treat every day as ideal.
             score += 30
             reasons += "No mow day — flexible schedule"
-        }
-
-        if (dayIsRefillDay) {
-            val zone = client.zone.trim().uppercase()
-            if (zone in AppConfig.SupplyHouse.SUPPLY_HOUSE_ZONES) {
-                score += AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_BONUS
-                reasons += "Refill day near supply house"
-            } else {
-                score += AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_PENALTY
-                reasons += "Refill day detour"
-            }
         }
 
         return score.coerceAtMost(100) to (reasons.firstOrNull() ?: "Standard fit")
@@ -984,6 +1267,56 @@ class WeeklyPlannerUseCase(
         if (closestMiles >= radius) return 0
         val fraction = 1.0 - (closestMiles / radius)
         return (fraction * AppConfig.WeeklyPlanner.GEO_AFFINITY_MAX_BONUS).toInt()
+    }
+
+    private fun refillDayAffinityScore(client: Client, dayClients: List<PlannedClient>): Int {
+        val zone = client.zone.trim().uppercase()
+        val inSupplyZone = zone in AppConfig.SupplyHouse.SUPPLY_HOUSE_ZONES
+        val sameSupplyZoneClients = dayClients.count {
+            it.client.zone.trim().uppercase() in AppConfig.SupplyHouse.SUPPLY_HOUSE_ZONES
+        }
+        val supplyZoneBonus = if (inSupplyZone) {
+            AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_BONUS
+        } else {
+            0
+        }
+        val supplyZoneClusterBonus = if (inSupplyZone) {
+            minOf(
+                sameSupplyZoneClients * AppConfig.WeeklyPlanner.REFILL_DAY_SUPPLY_ZONE_CLUSTER_BONUS_PER_CLIENT,
+                AppConfig.WeeklyPlanner.REFILL_DAY_SUPPLY_ZONE_CLUSTER_BONUS_MAX
+            )
+        } else {
+            0
+        }
+        val supplyDistanceBonus = proximityToPointScore(
+            client = client,
+            pointLat = AppConfig.SupplyHouse.LAT,
+            pointLng = AppConfig.SupplyHouse.LNG,
+            radiusMiles = AppConfig.WeeklyPlanner.REFILL_DAY_SUPPLY_DISTANCE_RADIUS_MILES,
+            maxBonus = AppConfig.WeeklyPlanner.REFILL_DAY_SUPPLY_DISTANCE_BONUS_MAX
+        )
+        val detourPenalty = if (!inSupplyZone && supplyDistanceBonus == 0) {
+            AppConfig.WeeklyPlanner.REFILL_DAY_ZONE_PENALTY
+        } else {
+            0
+        }
+
+        return supplyZoneBonus + supplyZoneClusterBonus + supplyDistanceBonus + detourPenalty
+    }
+
+    private fun proximityToPointScore(
+        client: Client,
+        pointLat: Double,
+        pointLng: Double,
+        radiusMiles: Double,
+        maxBonus: Int
+    ): Int {
+        val cLat = client.latitude ?: return 0
+        val cLng = client.longitude ?: return 0
+        val distanceMiles = routingEngine.distanceMilesBetween(cLat, cLng, pointLat, pointLng)
+        if (distanceMiles >= radiusMiles) return 0
+        val fraction = 1.0 - (distanceMiles / radiusMiles)
+        return (fraction * maxBonus).toInt()
     }
 
     /**

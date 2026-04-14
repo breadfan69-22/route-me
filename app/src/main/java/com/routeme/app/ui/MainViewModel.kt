@@ -18,6 +18,7 @@ import com.routeme.app.ServiceType
 import com.routeme.app.SHOP_LAT
 import com.routeme.app.SHOP_LNG
 import com.routeme.app.NonClientStop
+import com.routeme.app.ActiveArrivalState
 import com.routeme.app.TruckInventory
 import com.routeme.app.suggestedStepsForDate
 import com.routeme.app.TrackingEvent
@@ -59,6 +60,7 @@ class MainViewModel(
     private val routingEngine: RoutingEngine,
     private val savedStateHandle: SavedStateHandle,
     private val retryQueue: com.routeme.app.data.WriteBackRetryQueue,
+    private val trackingEventBus: TrackingEventBus,
     private val suggestionUseCase: SuggestionUseCase = SuggestionUseCase(routingEngine),
     private val arrivalUseCase: ArrivalUseCase = ArrivalUseCase(routingEngine),
     private val serviceCompletionUseCase: ServiceCompletionUseCase = ServiceCompletionUseCase(clientRepository, retryQueue, preferencesRepository),
@@ -191,6 +193,7 @@ class MainViewModel(
     val events: SharedFlow<MainEvent> = _events.asSharedFlow()
 
     init {
+        syncTrackingActiveArrival(_uiState.value)
         loadSyncSettings()
         loadClients()
         loadSavedDestinations()
@@ -1353,6 +1356,7 @@ class MainViewModel(
                 current.withClearedArrival()
             }
         }
+        syncTrackingActiveArrival(_uiState.value)
         clearArrivalSavedState()
     }
 
@@ -1593,13 +1597,22 @@ class MainViewModel(
         amountUsed: Double? = null,
         amountUsed2: Double? = null,
         property: PropertyInput = PropertyInput(),
+        completedAtMillisOverride: Long? = null,
         onSuccess: (() -> Unit)? = null
     ) {
         viewModelScope.launch {
             val state = _uiState.value
             when (
                 val result = serviceCompletionUseCase.confirmSelectedClientService(
-                    buildConfirmSelectedRequest(state, currentLocation, visitNotes, amountUsed, amountUsed2, property)
+                    buildConfirmSelectedRequest(
+                        state = state,
+                        currentLocation = currentLocation,
+                        visitNotes = visitNotes,
+                        amountUsed = amountUsed,
+                        amountUsed2 = amountUsed2,
+                        property = property,
+                        completedAtMillisOverride = completedAtMillisOverride
+                    )
                 )
             ) {
                 is ServiceCompletionUseCase.ConfirmSelectedResult.Error -> {
@@ -1698,7 +1711,8 @@ class MainViewModel(
         visitNotes: String,
         amountUsed: Double? = null,
         amountUsed2: Double? = null,
-        property: PropertyInput = PropertyInput()
+        property: PropertyInput = PropertyInput(),
+        completedAtMillisOverride: Long? = null
     ): ServiceCompletionUseCase.ConfirmSelectedRequest {
         return ServiceCompletionUseCase.ConfirmSelectedRequest(
             clients = state.clients,
@@ -1709,6 +1723,7 @@ class MainViewModel(
             weatherTempF = state.arrivalWeatherTempF,
             weatherWindMph = state.arrivalWeatherWindMph,
             weatherDesc = state.arrivalWeatherDesc,
+            completedAtMillisOverride = completedAtMillisOverride,
             selectedSuggestionEligibleSteps = selectedSuggestionEligibleStepsForSelectedClient(state),
             selectedServiceTypes = state.selectedServiceTypes,
             currentLocation = serviceCompletionGeoPoint(currentLocation),
@@ -1912,6 +1927,7 @@ class MainViewModel(
             clientId = member.client.id,
             clientName = member.client.name,
             arrivedAtMillis = member.arrivedAtMillis,
+            completedAtMillis = member.completedAtMillis,
             location = ServiceCompletionUseCase.GeoPoint(
                 member.location.latitude,
                 member.location.longitude
@@ -2758,6 +2774,33 @@ class MainViewModel(
         persistArrivalState(state)
         persistTrackingState(state)
         persistDestinationState(state)
+        syncTrackingActiveArrival(state)
+    }
+
+    private fun syncTrackingActiveArrival(state: MainUiState) {
+        val selectedClient = state.selectedClient
+        val startedAtMillis = state.arrivalStartedAtMillis
+        val lat = state.arrivalLat
+        val lng = state.arrivalLng
+
+        val activeArrival = if (
+            selectedClient != null &&
+            startedAtMillis != null &&
+            lat != null &&
+            lng != null
+        ) {
+            ActiveArrivalState(
+                clientId = selectedClient.id,
+                clientName = selectedClient.name,
+                arrivedAtMillis = startedAtMillis,
+                lat = lat,
+                lng = lng
+            )
+        } else {
+            null
+        }
+
+        trackingEventBus.setActiveArrival(activeArrival)
     }
 
     private fun persistSelectionState(state: MainUiState) {

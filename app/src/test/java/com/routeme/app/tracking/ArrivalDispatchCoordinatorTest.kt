@@ -83,7 +83,7 @@ class ArrivalDispatchCoordinatorTest {
         assertEquals("c2", completionEvents.first().client.id)
 
         verify(exactly = 1) {
-            notifier.postCompletionNotification(client, 1, any(), 1_000L)
+            notifier.postCompletionNotification(client, 1, any(), 1_000L, 86_000L)
         }
     }
 

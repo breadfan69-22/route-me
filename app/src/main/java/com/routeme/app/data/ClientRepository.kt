@@ -150,8 +150,10 @@ class ClientRepository(
 
         if (result.clients.isNotEmpty()) {
             val existingClients = clientDao.getAllClients()
+            val existingClientsWithRecords = clientDao.getAllClientsWithRecords().map { it.toDomain() }
             val existingPropertiesByClientKey = existingPropertiesByClientKey(existingClients)
             val existingByName = existingClients.associateBy { it.name.lowercase() }
+            val existingWithRecordsByName = existingClientsWithRecords.associateBy { it.name.lowercase() }
 
             // Preserve existing coordinates so a re-sync doesn't lose geocoded data
             val existingCoords = existingClients.associate { entity ->
@@ -224,7 +226,11 @@ class ClientRepository(
                     sunShade = mergedSunShade,
                     windExposure = mergedWindExposure,
                     terrain = mergedTerrain,
-                    irrigation = mergedIrrigation
+                    irrigation = mergedIrrigation,
+                    records = mergeServiceRecords(
+                        importedRecords = client.records,
+                        localRecords = existingWithRecordsByName[nameKey]?.records.orEmpty()
+                    )
                 )
             }
 
@@ -401,6 +407,60 @@ class ClientRepository(
     }
 
     private fun addressKeyFor(client: Client): String? = addressKeyFor(client.address, client.zone)
+
+    private fun mergeServiceRecords(
+        importedRecords: List<ServiceRecord>,
+        localRecords: List<ServiceRecord>
+    ): List<ServiceRecord> {
+        val merged = linkedMapOf<String, ServiceRecord>()
+
+        for (record in importedRecords + localRecords) {
+            val key = serviceRecordMergeKey(record)
+            val existing = merged[key]
+            merged[key] = when {
+                existing == null -> record
+                isMoreCompleteServiceRecord(record, existing) -> record
+                else -> existing
+            }
+        }
+
+        return merged.values.sortedBy { it.completedAtMillis }
+    }
+
+    private fun serviceRecordMergeKey(record: ServiceRecord): String {
+        val dayBucket = localDayStartMillis(record.completedAtMillis)
+        return "${record.serviceType.name}|$dayBucket"
+    }
+
+    private fun isMoreCompleteServiceRecord(candidate: ServiceRecord, existing: ServiceRecord): Boolean {
+        val candidateScore = serviceRecordCompletenessScore(candidate)
+        val existingScore = serviceRecordCompletenessScore(existing)
+        return when {
+            candidateScore != existingScore -> candidateScore > existingScore
+            candidate.completedAtMillis != existing.completedAtMillis -> candidate.completedAtMillis > existing.completedAtMillis
+            else -> candidate.durationMinutes > existing.durationMinutes
+        }
+    }
+
+    private fun serviceRecordCompletenessScore(record: ServiceRecord): Int {
+        var score = 0
+        if (record.arrivedAtMillis != null) score += 4
+        if (record.durationMinutes > 0) score += 2
+        if (record.notes.isNotBlank()) score += 1
+        if (record.lat != null && record.lng != null) score += 1
+        return score
+    }
+
+    private fun localDayStartMillis(timestampMillis: Long): Long {
+        val cal = java.util.Calendar.getInstance().apply {
+            timeInMillis = timestampMillis
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        return cal.timeInMillis
+    }
 
     private fun addressKeyFor(address: String, zone: String): String? {
         val enrichedAddress = GeocodingHelper.enrichAddress(address, zone)

@@ -117,6 +117,35 @@ class ServiceCompletionUseCaseTest {
     }
 
     @Test
+    fun `confirmSelectedClientService uses provided completion timestamp override`() = runTest {
+        val fixedNow = 200_000L
+        val overrideCompletedAt = 175_000L
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
+        val client = testClient("11")
+
+        coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
+
+        val result = useCase.confirmSelectedClientService(
+            ServiceCompletionUseCase.ConfirmSelectedRequest(
+                clients = listOf(client),
+                selectedClient = client,
+                arrivalStartedAtMillis = 140_000L,
+                arrivalLat = 42.2,
+                arrivalLng = -85.5,
+                completedAtMillisOverride = overrideCompletedAt,
+                selectedSuggestionEligibleSteps = setOf(ServiceType.ROUND_2),
+                selectedServiceTypes = setOf(ServiceType.ROUND_1),
+                currentLocation = null,
+                visitNotes = ""
+            )
+        )
+
+        assertTrue(result is ServiceCompletionUseCase.ConfirmSelectedResult.Success)
+        val success = result as ServiceCompletionUseCase.ConfirmSelectedResult.Success
+        assertEquals(overrideCompletedAt, success.selectedClient.records.last().completedAtMillis)
+    }
+
+    @Test
     fun `confirmClusterService confirms selected members`() = runTest {
         val fixedNow = 500_000L
         val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
@@ -134,6 +163,7 @@ class ServiceCompletionUseCaseTest {
                         clientId = client.id,
                         clientName = client.name,
                         arrivedAtMillis = 440_000L,
+                        completedAtMillis = 500_000L,
                         location = ServiceCompletionUseCase.GeoPoint(42.1, -85.1)
                     )
                 )

@@ -51,7 +51,10 @@ data class PlannedDay(
     val anchorLabel: String? = null,
     val supplyStopNeeded: Boolean = false,
     val projectedInventoryPct: Int = 100,
-    /** Index in [clients] after which to visit the supply house, or null if not needed. */
+    /**
+     * Index in [clients] after which to visit the supply house, or null if not needed.
+     * A value of -1 means visit the supply house before the first client.
+     */
     val supplyStopAfterIndex: Int? = null
 ) {
     fun toJson(): JSONObject = JSONObject().apply {

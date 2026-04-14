@@ -702,7 +702,13 @@ class MainActivity : AppCompatActivity() {
             }
 
             is TrackingEvent.JobComplete -> {
-                showCompletionDialog(event.client, event.timeOnSiteMillis, event.arrivedAtMillis, event.location)
+                showCompletionDialog(
+                    client = event.client,
+                    timeOnSiteMillis = event.timeOnSiteMillis,
+                    arrivedAtMillis = event.arrivedAtMillis,
+                    completedAtMillis = event.completedAtMillis,
+                    location = event.location
+                )
             }
 
             is TrackingEvent.ClusterComplete -> {
@@ -955,13 +961,21 @@ class MainActivity : AppCompatActivity() {
         visitNotes: String = "",
         amountUsed: Double? = null,
         amountUsed2: Double? = null,
-        property: PropertyInput = PropertyInput()
+        property: PropertyInput = PropertyInput(),
+        completedAtMillisOverride: Long? = null
     ) {
         val current = getCurrentLocation()
         lastLocation = current
         val types = viewModel.uiState.value.selectedServiceTypes.ifEmpty { setOf(ServiceType.ROUND_1) }
         viewModel.setServiceTypes(types)
-        viewModel.confirmSelectedClientService(current, visitNotes, amountUsed, amountUsed2, property)
+        viewModel.confirmSelectedClientService(
+            currentLocation = current,
+            visitNotes = visitNotes,
+            amountUsed = amountUsed,
+            amountUsed2 = amountUsed2,
+            property = property,
+            completedAtMillisOverride = completedAtMillisOverride
+        )
     }
 
     private fun showClientActionDialog(client: Client) {
@@ -1290,7 +1304,13 @@ class MainActivity : AppCompatActivity() {
      * Shows a dialog to confirm job completion after the user departed a client site.
      * This fires when the user was on site 5+ min and then drove away.
      */
-    private fun showCompletionDialog(client: Client, timeOnSiteMillis: Long, arrivedAtMillis: Long, location: Location) {
+    private fun showCompletionDialog(
+        client: Client,
+        timeOnSiteMillis: Long,
+        arrivedAtMillis: Long,
+        completedAtMillis: Long,
+        location: Location
+    ) {
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
         val stepsLabel = formatStepLabel(viewModel.uiState.value.selectedServiceTypes)
         val primaryType = viewModel.uiState.value.selectedServiceTypes.firstOrNull() ?: ServiceType.ROUND_1
@@ -1349,7 +1369,11 @@ class MainActivity : AppCompatActivity() {
                 val amt2 = amount2Input.text?.toString()?.toDoubleOrNull()
                 lastLocation = location
                 viewModel.markArrivalForClient(client, location, arrivedAtMillis)
-                confirmServiceForSelectedClient(amountUsed = amt1, amountUsed2 = amt2)
+                confirmServiceForSelectedClient(
+                    amountUsed = amt1,
+                    amountUsed2 = amt2,
+                    completedAtMillisOverride = completedAtMillis
+                )
                 trackingUiController.dismissNotification(3000 + client.id.hashCode())
                 DialogFactory.showPropertyStatsDialog(
                     context = this,
@@ -1470,8 +1494,12 @@ class MainActivity : AppCompatActivity() {
             LocationTrackingService.EXTRA_COMPLETE_LNG,
             LocationTrackingService.EXTRA_COMPLETE_TIME
         ) ?: return true
+        val completedAt = intent.getLongExtra(
+            LocationTrackingService.EXTRA_COMPLETE_COMPLETED_AT,
+            arrivedAt + minutes * 60_000L
+        )
 
-        showCompletionDialog(client, minutes * 60_000L, arrivedAt, location)
+        showCompletionDialog(client, minutes * 60_000L, arrivedAt, completedAt, location)
         clearIntentExtras(
             intent,
             LocationTrackingService.EXTRA_COMPLETE_CLIENT_ID,
@@ -1479,7 +1507,8 @@ class MainActivity : AppCompatActivity() {
             LocationTrackingService.EXTRA_COMPLETE_LAT,
             LocationTrackingService.EXTRA_COMPLETE_LNG,
             LocationTrackingService.EXTRA_COMPLETE_TIME,
-            LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT
+            LocationTrackingService.EXTRA_COMPLETE_ARRIVED_AT,
+            LocationTrackingService.EXTRA_COMPLETE_COMPLETED_AT
         )
         return true
     }
@@ -1498,6 +1527,7 @@ class MainActivity : AppCompatActivity() {
             LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS,
             LocationTrackingService.EXTRA_CLUSTER_MINUTES,
             LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT,
+            LocationTrackingService.EXTRA_CLUSTER_COMPLETED_AT,
             LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F,
             LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH,
             LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC
@@ -1508,6 +1538,7 @@ class MainActivity : AppCompatActivity() {
         val minutesArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_MINUTES)
             ?: IntArray(clusterClientIds.size) { 5 }
         val arrivedAtArray = intent.getLongArrayExtra(LocationTrackingService.EXTRA_CLUSTER_ARRIVED_AT)
+        val completedAtArray = intent.getLongArrayExtra(LocationTrackingService.EXTRA_CLUSTER_COMPLETED_AT)
         val weatherTempArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_TEMP_F)
         val weatherWindArray = intent.getIntArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_WIND_MPH)
         val weatherDescArray = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_WEATHER_DESC)
@@ -1518,6 +1549,7 @@ class MainActivity : AppCompatActivity() {
             val client = clients.find { it.id == id } ?: return@mapIndexedNotNull null
             val mins = minutesArray.getOrElse(index) { 5 }
             val arrivedAt = arrivedAtArray?.getOrElse(index) { now - mins * 60_000L } ?: (now - mins * 60_000L)
+            val completedAt = completedAtArray?.getOrElse(index) { arrivedAt + mins * 60_000L } ?: (arrivedAt + mins * 60_000L)
             val weatherTemp = weatherTempArray
                 ?.getOrElse(index) { Int.MIN_VALUE }
                 ?.takeUnless { it == Int.MIN_VALUE }
@@ -1532,6 +1564,7 @@ class MainActivity : AppCompatActivity() {
                 client = client,
                 timeOnSiteMillis = mins * 60_000L,
                 arrivedAtMillis = arrivedAt,
+                completedAtMillis = completedAt,
                 location = location ?: Location("notification"),
                 weatherTempF = weatherTemp,
                 weatherWindMph = weatherWind,

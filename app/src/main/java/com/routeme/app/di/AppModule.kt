@@ -48,5 +48,5 @@ val appModule = module {
     factory { WeeklyPlannerUseCase(get(), get(), get(), get(), getOrNull()) }
     single { TruckInventoryUseCase(get()) }
 
-    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { MainViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 }

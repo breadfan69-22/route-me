@@ -73,12 +73,22 @@ object AppConfig {
         /** Score penalty applied when rain is expected on a liquid-step day. */
         const val LIQUID_STEP_RAIN_PENALTY = 40
 
-        /** Trigger threshold for marking a day as requiring a supply refill stop. */
-        const val REFILL_THRESHOLD_PCT = 0.20
+        /** Preferred arrival window at the supply house before a granular refill. */
+        const val REFILL_TARGET_MIN_BAGS = 1.0
+        const val REFILL_TARGET_MAX_BAGS = 3.0
+        const val REFILL_TARGET_IDEAL_BAGS = 2.0
+        /** Never plan a route that reaches the supply house below this remaining bag count. */
+        const val REFILL_HARD_FLOOR_BAGS = 1.0
         /** Bonus for supply-house-adjacent zones on refill days (strong pull). */
         const val REFILL_DAY_ZONE_BONUS = 80
         /** Penalty for out-of-way zones on refill days (mild discouragement). */
         const val REFILL_DAY_ZONE_PENALTY = -30
+        /** Extra clustering pull for supply-house zones once a refill day already contains them. */
+        const val REFILL_DAY_SUPPLY_ZONE_CLUSTER_BONUS_PER_CLIENT = 20
+        const val REFILL_DAY_SUPPLY_ZONE_CLUSTER_BONUS_MAX = 60
+        /** Distance bonus for clients physically near SiteOne on refill days. */
+        const val REFILL_DAY_SUPPLY_DISTANCE_RADIUS_MILES = 6.0
+        const val REFILL_DAY_SUPPLY_DISTANCE_BONUS_MAX = 60
     }
 
     object SupplyHouse {
