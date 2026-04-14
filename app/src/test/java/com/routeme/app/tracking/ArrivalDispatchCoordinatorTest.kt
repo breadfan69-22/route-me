@@ -15,7 +15,7 @@ import org.junit.Test
 class ArrivalDispatchCoordinatorTest {
 
     @Test
-    fun `emits arrival event and posts arrival notification after dwell`() {
+    fun `geofence arrival is silent — no notification or event emitted`() {
         var nowMillis = 0L
         val events = mutableListOf<TrackingEvent>()
         val notifier = mockk<LocationTrackingNotifier>(relaxed = true)
@@ -35,11 +35,11 @@ class ArrivalDispatchCoordinatorTest {
         nowMillis = 2_100L
         coordinator.onLocationTick(here, listOf(client))
 
+        // Arrival is tracked internally but no event or notification fires
         val arrivalEvents = events.filterIsInstance<TrackingEvent.ClientArrival>()
-        assertEquals(1, arrivalEvents.size)
-        assertEquals("c1", arrivalEvents.first().client.id)
-        verify(exactly = 1) {
-            notifier.postArrivalNotification(client, any(), 1_000L)
+        assertTrue(arrivalEvents.isEmpty())
+        verify(exactly = 0) {
+            notifier.postArrivalNotification(any(), any(), any())
         }
     }
 

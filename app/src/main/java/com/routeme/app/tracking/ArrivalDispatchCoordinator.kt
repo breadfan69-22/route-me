@@ -81,12 +81,9 @@ class ArrivalDispatchCoordinator(
         )
 
         if (prompt != null) {
-            logDebug("Dwell threshold reached at ${prompt.client.name}! Triggering arrival.")
-            postToMainThread {
-                logDebug("Firing arrival event for ${prompt.client.name}")
-                trackingNotifier.postArrivalNotification(prompt.client, prompt.location, prompt.arrivedAtMillis)
-                emitEvent(TrackingEvent.ClientArrival(prompt.client, prompt.arrivedAtMillis, prompt.location))
-            }
+            // Silent arrival — engine tracks internally for departure detection.
+            // No notification or dialog; the user marks arrival manually if needed.
+            logDebug("Auto-arrival detected at ${prompt.client.name} (silent)")
         }
     }
 

@@ -1383,6 +1383,16 @@ class MainActivity : AppCompatActivity() {
                     onSkip = {}
                 )
             }
+            .setNeutralButton(R.string.dialog_skip_no_service) { _, _ ->
+                viewModel.recordCancelledClientStop(
+                    client = client,
+                    arrivedAtMillis = arrivedAtMillis,
+                    reason = "skip_no_service",
+                    location = location
+                )
+                viewModel.clearArrivalStateForSkippedClient()
+                trackingUiController.dismissNotification(3000 + client.id.hashCode())
+            }
             .setNegativeButton(R.string.dialog_not_yet) { _, _ ->
                 viewModel.recordCancelledClientStop(
                     client = client,

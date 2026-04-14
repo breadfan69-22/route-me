@@ -44,6 +44,8 @@ class ArrivalDepartureEngine(
     private var dwellStartTime: Long = 0L
     private val activeArrivals = mutableMapOf<String, ActiveArrivalState>()
     private var externalArrivalClientId: String? = null
+    /** Clients that have already departed this session — prevents re-arrival after completion. */
+    private val completedClientIds = mutableSetOf<String>()
 
     fun hasActiveArrivals(): Boolean = activeArrivals.isNotEmpty()
 
@@ -54,6 +56,7 @@ class ArrivalDepartureEngine(
         dwellStartTime = 0L
         activeArrivals.clear()
         externalArrivalClientId = null
+        completedClientIds.clear()
     }
 
     fun syncExternalArrival(client: Client?, arrivedAtMillis: Long?, location: Location?) {
@@ -103,6 +106,13 @@ class ArrivalDepartureEngine(
                 dwellStartTime = 0L
                 return null
             }
+
+        // Already departed this session — don't re-trigger while still parked nearby.
+        if (nearestClient.id in completedClientIds) {
+            dwellClientId = null
+            dwellStartTime = 0L
+            return null
+        }
 
         if (hasNearbyActiveArrival(nearestClient, clusterRadiusMeters)) {
             dwellClientId = null
@@ -241,6 +251,8 @@ class ArrivalDepartureEngine(
         }
 
         departed.forEach { activeArrivals.remove(it) }
+        completedClientIds.addAll(departed)
+        completedClientIds.addAll(completable.map { it.client.id })
         return DepartureEvaluation(departedClientIds = departed, completionCandidates = completable)
     }
 }

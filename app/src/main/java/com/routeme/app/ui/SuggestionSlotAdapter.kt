@@ -88,7 +88,7 @@ class SuggestionSlotAdapter(
                 suggestion.distanceMiles != null -> String.format(Locale.US, "%.1f mi", suggestion.distanceMiles)
                 else -> ""
             }
-            val mowText = if (suggestion.mowWindowPreferred) " ✓mow" else ""
+            val mowText = if (suggestion.client.mowDayOfWeek != 0 && suggestion.mowWindowPreferred) " ✓mow" else ""
             val cuText = if (suggestion.requiresCuOverride) " ⚠CU" else ""
             val weatherText = compactWeatherSummary(suggestion.weatherFitSummary)
             val stepTag = if (suggestion.eligibleSteps.size == 1 && selectedServiceTypeCount == 1) {

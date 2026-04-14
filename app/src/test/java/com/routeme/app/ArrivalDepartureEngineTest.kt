@@ -268,6 +268,31 @@ class ArrivalDepartureEngineTest {
     }
 
     @Test
+    fun `completed client does not re-trigger arrival after departure`() {
+        val engine = newEngine()
+        val client = client("c1", 42.0, -85.0)
+        val here = location(42.0, -85.0)
+        val far = location(42.005, -85.0)
+
+        // Arrive
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 500L, 1_000L)
+        engine.evaluateArrival(here, listOf(client), 60f, 200f, 500L, 1_600L)
+        assertTrue(engine.hasActiveArrivals())
+
+        // Depart (out-of-range + confirm)
+        engine.evaluateDepartures(far, listOf(client), 150f, 200f, 1_000L, 10_000L)
+        engine.evaluateDepartures(far, listOf(client), 150f, 200f, 1_000L, 31_000L)
+        assertFalse(engine.hasActiveArrivals())
+
+        // Still parked near the same client — should NOT re-trigger arrival
+        val reDwell = engine.evaluateArrival(here, listOf(client), 60f, 200f, 500L, 50_000L)
+        assertNull(reDwell)
+        val reDwell2 = engine.evaluateArrival(here, listOf(client), 60f, 200f, 500L, 50_600L)
+        assertNull(reDwell2)
+        assertFalse(engine.hasActiveArrivals())
+    }
+
+    @Test
     fun `transient out-of-range blip does not clear active arrival`() {
         val engine = newEngine()
         val client = client("c1", 42.0, -85.0)

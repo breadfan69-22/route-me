@@ -1365,6 +1365,11 @@ class MainViewModel(
         arrivalUseCase.hideStaleArrival()?.invoke()
     }
 
+    /** Clear arrival state when the user explicitly skips a client (no service performed). */
+    fun clearArrivalStateForSkippedClient() {
+        clearArrivalState(clearCurrentStopClientName = true)
+    }
+
     fun recordCancelledClientStop(
         client: Client,
         arrivedAtMillis: Long,

@@ -127,7 +127,7 @@ class RoutingEngine {
                 } else {
                     null
                 }
-                val mowPreferred = isGoodDayToVisit(today, client.mowDayOfWeek)
+                val mowPreferred = client.mowDayOfWeek != 0 && isGoodDayToVisit(today, client.mowDayOfWeek)
                 // Use the MOST overdue step for ranking
                 val mostOverdueDays = eligible.maxOfOrNull { st ->
                     daysSinceLast(client, st) ?: Int.MAX_VALUE
@@ -337,6 +337,15 @@ class RoutingEngine {
         val mowAdj = mowWindowAdjustment(today, suggestion.client.mowDayOfWeek)
         score += mowAdj
 
+        // No-mow clients eligible for Step 1 get a small scheduling flexibility bonus.
+        var noMowAdj = 0.0
+        if (suggestion.client.mowDayOfWeek == 0 &&
+            suggestion.eligibleSteps.any { it.stepNumber == 1 }
+        ) {
+            noMowAdj = AppConfig.Routing.NO_MOW_STEP1_BONUS
+            score += noMowAdj
+        }
+
         var distAdj = 0.0
         val distance = suggestion.distanceMiles
         if (distance != null) {
@@ -437,8 +446,8 @@ class RoutingEngine {
         if (AppConfig.Routing.DEBUG_SCORING_ENABLED) {
             Log.d(
                 "RoutingScore",
-                "${suggestion.client.name}: dist=%+.0f mow=%+.0f overdue=%+.0f dir=%+.0f ngb=%+.0f cu=%+.0f wx=%+.0f total=%+.0f".format(
-                    distAdj, mowAdj, overdueAdj, dirAdj, nonGrubAdj, cuAdj, weatherAdj, score
+                "${suggestion.client.name}: dist=%+.0f mow=%+.0f nm1=%+.0f overdue=%+.0f dir=%+.0f ngb=%+.0f cu=%+.0f wx=%+.0f total=%+.0f".format(
+                    distAdj, mowAdj, noMowAdj, overdueAdj, dirAdj, nonGrubAdj, cuAdj, weatherAdj, score
                 )
             )
         }

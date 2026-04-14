@@ -225,6 +225,7 @@ object AppConfig {
         const val MOW_ADJACENT_DAY_PENALTY = -120.0
         const val MOW_NEAR_TERM_BONUS = 15.0
         const val MOW_DEFAULT_BONUS = 5.0
+        const val NO_MOW_STEP1_BONUS = 10.0
 
         const val MILLIS_PER_DAY = 24L * 60L * 60L * 1000L
         const val EARTH_RADIUS_MILES = 3958.7613

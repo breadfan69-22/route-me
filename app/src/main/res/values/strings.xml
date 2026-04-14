@@ -126,6 +126,7 @@
     <string name="dialog_complete_message">You were at %1$s for %2$d minutes.\n\nMark %3$s as done?</string>
     <string name="dialog_yes_complete">Yes — Mark Complete</string>
     <string name="dialog_not_yet">Not yet</string>
+    <string name="dialog_skip_no_service">Skip — No Service</string>
 
     <!-- Cluster completion -->
     <string name="notif_cluster_title">Mark all %d complete?</string>
