@@ -83,6 +83,12 @@ class WeeklyPlannerUseCase(
         val sortedClients = eligibleSuggestions.sortedWith(
             compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
                 .thenByDescending { it.daysSinceLast == null }
+                // Non-grub clients eligible for a granular fert step sort first
+                // so they are served before grub clients (tighter Step 3 window).
+                .thenByDescending {
+                    !it.client.hasGrub &&
+                        it.eligibleSteps.any { s -> s.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+                }
         )
 
         val initialAssignment = assignClientsToDays(
@@ -266,7 +272,16 @@ class WeeklyPlannerUseCase(
                 }
                 val corridorBonus = maxOf(anchorCorridorBonus, refillCorridorBonus)
                 val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus + refillAffinityBonus
-                val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
+
+                // Non-grub clients with a granular step get a priority boost
+                // applied after the fitness cap so it doesn't mask weather
+                // differentiation between days.
+                val nonGrubBonus = if (
+                    !suggestion.client.hasGrub &&
+                    suggestion.eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+                ) AppConfig.Routing.NON_GRUB_GRANULAR_PRIORITY_BONUS.toInt() else 0
+
+                val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus + nonGrubBonus
                 DayFitness(day, finalScore, reason)
             }
 

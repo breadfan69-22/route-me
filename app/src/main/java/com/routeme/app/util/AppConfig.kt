@@ -214,6 +214,13 @@ object AppConfig {
         const val OVERDUE_90_DAY_BONUS = 15.0
         const val CU_OVERRIDE_PENALTY = -40.0
 
+        /**
+         * Non-grub clients eligible for a granular fert step (1, 3, 4, 6) get
+         * this bonus so they are served before grub clients, keeping the 45-day
+         * inter-fert gap on track for their earlier Step 3 window.
+         */
+        const val NON_GRUB_GRANULAR_PRIORITY_BONUS = 65.0
+
         const val MOW_SAME_DAY_PENALTY = -180.0
         const val MOW_ADJACENT_DAY_PENALTY = -120.0
         const val MOW_NEAR_TERM_BONUS = 15.0

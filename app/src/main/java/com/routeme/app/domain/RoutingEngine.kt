@@ -408,6 +408,17 @@ class RoutingEngine {
         }
         score += overdueAdj
 
+        // Non-grub clients eligible for a granular step get a strong boost
+        // so they are completed before grub clients, preserving the 45-day
+        // inter-fert gap before their earlier Step 3 window.
+        var nonGrubAdj = 0.0
+        if (!suggestion.client.hasGrub &&
+            suggestion.eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
+        ) {
+            nonGrubAdj = AppConfig.Routing.NON_GRUB_GRANULAR_PRIORITY_BONUS
+            score += nonGrubAdj
+        }
+
         var cuAdj = 0.0
         if (suggestion.requiresCuOverride) {
             cuAdj -= AppConfig.Routing.CU_OVERRIDE_PENALTY
@@ -426,8 +437,8 @@ class RoutingEngine {
         if (AppConfig.Routing.DEBUG_SCORING_ENABLED) {
             Log.d(
                 "RoutingScore",
-                "${suggestion.client.name}: dist=%+.0f mow=%+.0f overdue=%+.0f dir=%+.0f cu=%+.0f wx=%+.0f total=%+.0f".format(
-                    distAdj, mowAdj, overdueAdj, dirAdj, cuAdj, weatherAdj, score
+                "${suggestion.client.name}: dist=%+.0f mow=%+.0f overdue=%+.0f dir=%+.0f ngb=%+.0f cu=%+.0f wx=%+.0f total=%+.0f".format(
+                    distAdj, mowAdj, overdueAdj, dirAdj, nonGrubAdj, cuAdj, weatherAdj, score
                 )
             )
         }
