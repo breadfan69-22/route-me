@@ -19,7 +19,7 @@ import androidx.room.RoomDatabase
         com.routeme.app.data.db.GeocodeCacheEntity::class,
         com.routeme.app.data.db.SavedWeekPlanEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -58,7 +58,8 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabaseMigrations.MIGRATION_12_13,
                         AppDatabaseMigrations.MIGRATION_13_14,
                         AppDatabaseMigrations.MIGRATION_14_15,
-                        AppDatabaseMigrations.MIGRATION_15_16
+                        AppDatabaseMigrations.MIGRATION_15_16,
+                        AppDatabaseMigrations.MIGRATION_16_17
                     )
                     .build()
                 INSTANCE = instance

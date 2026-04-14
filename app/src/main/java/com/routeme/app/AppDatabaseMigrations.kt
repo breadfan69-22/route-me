@@ -248,6 +248,31 @@ object AppDatabaseMigrations {
         }
     }
 
+    val MIGRATION_16_17 = object : Migration(16, 17) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                DELETE FROM client_stop_events
+                WHERE arrivedAtMillis IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM client_stop_events newer
+                      WHERE newer.clientId = client_stop_events.clientId
+                        AND newer.status = client_stop_events.status
+                        AND newer.arrivedAtMillis = client_stop_events.arrivedAtMillis
+                        AND (
+                            newer.endedAtMillis > client_stop_events.endedAtMillis
+                            OR (
+                                newer.endedAtMillis = client_stop_events.endedAtMillis
+                                AND newer.stopEventId > client_stop_events.stopEventId
+                            )
+                        )
+                  )
+                """.trimIndent()
+            )
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
         MIGRATION_1_2,
         MIGRATION_2_3,
@@ -263,6 +288,7 @@ object AppDatabaseMigrations {
         MIGRATION_12_13,
         MIGRATION_13_14,
         MIGRATION_14_15,
-        MIGRATION_15_16
+        MIGRATION_15_16,
+        MIGRATION_16_17
     )
 }

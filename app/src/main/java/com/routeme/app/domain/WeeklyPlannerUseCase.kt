@@ -130,14 +130,26 @@ class WeeklyPlannerUseCase(
     suspend fun refreshInventoryProjection(plan: WeekPlan): WeekPlan {
         val inventoryContext = loadGranularInventoryContext()
         return withContext(Dispatchers.Default) {
+            val normalizedPlan = normalizeWorkDays(plan)
             plan.copy(
                 days = applyInventoryProjection(
-                    days = plan.days,
+                    days = normalizedPlan.days,
                     startingGranularBags = inventoryContext.startingGranularBags,
                     capacityBags = inventoryContext.granularCapacity
-                )
+                ),
+                generatedAtMillis = normalizedPlan.generatedAtMillis,
+                totalClients = normalizedPlan.totalClients,
+                unassignedCount = normalizedPlan.unassignedCount,
+                noteOnlyClients = normalizedPlan.noteOnlyClients
             )
         }
+    }
+
+    private fun normalizeWorkDays(plan: WeekPlan): WeekPlan {
+        val normalizedDays = plan.days.map { day ->
+            day.copy(isWorkDay = shouldIncludeDayOfWeekAsWorkDay(day.dayOfWeek))
+        }
+        return plan.copy(days = normalizedDays)
     }
 
     private suspend fun loadGranularInventoryContext(): GranularInventoryContext {
@@ -758,9 +770,13 @@ class WeeklyPlannerUseCase(
     )
 
     private fun shouldIncludeAsWorkDay(day: PlannedDayBuilder): Boolean {
-        return when (day.dayOfWeek) {
-            Calendar.SUNDAY, Calendar.SATURDAY -> false  // Weekend: not auto-scheduled; Saturday is manual-add only
-            else -> true  // Mon-Fri always scheduled; weather shown as label only
+        return shouldIncludeDayOfWeekAsWorkDay(day.dayOfWeek)
+    }
+
+    private fun shouldIncludeDayOfWeekAsWorkDay(dayOfWeek: Int): Boolean {
+        return when (dayOfWeek) {
+            Calendar.SUNDAY, Calendar.SATURDAY -> false
+            else -> true
         }
     }
 

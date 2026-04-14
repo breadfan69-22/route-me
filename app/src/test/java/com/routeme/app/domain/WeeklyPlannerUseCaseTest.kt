@@ -353,6 +353,54 @@ class WeeklyPlannerUseCaseTest {
     }
 
     @Test
+    fun `refreshInventoryProjection normalizes stale workday flags`() = runTest {
+        val weatherRepository = mockk<WeatherRepository>()
+        val clientRepository = mockk<ClientRepository>()
+        val routingEngine = RoutingEngine()
+        val preferencesRepository = mockk<PreferencesRepository>(relaxed = true)
+
+        val plan = WeekPlan(
+            days = listOf(
+                PlannedDay(
+                    dateMillis = nextDateMillis(Calendar.MONDAY),
+                    dayOfWeek = Calendar.MONDAY,
+                    dayName = "Monday",
+                    forecast = null,
+                    dayScore = 80,
+                    dayScoreLabel = "Great",
+                    clients = emptyList(),
+                    isWorkDay = false
+                ),
+                PlannedDay(
+                    dateMillis = nextDateMillis(Calendar.SATURDAY),
+                    dayOfWeek = Calendar.SATURDAY,
+                    dayName = "Saturday",
+                    forecast = null,
+                    dayScore = 80,
+                    dayScoreLabel = "Great",
+                    clients = emptyList(),
+                    isWorkDay = true
+                )
+            ),
+            generatedAtMillis = System.currentTimeMillis(),
+            totalClients = 0,
+            unassignedCount = 0
+        )
+
+        val useCase = WeeklyPlannerUseCase(
+            weatherRepository = weatherRepository,
+            clientRepository = clientRepository,
+            routingEngine = routingEngine,
+            preferencesRepository = preferencesRepository
+        )
+
+        val refreshed = useCase.refreshInventoryProjection(plan)
+
+        assertTrue(refreshed.days.first { it.dayOfWeek == Calendar.MONDAY }.isWorkDay)
+        assertFalse(refreshed.days.first { it.dayOfWeek == Calendar.SATURDAY }.isWorkDay)
+    }
+
+    @Test
     fun `refreshInventoryProjection clears stale refill metadata after edits`() = runTest {
         val weatherRepository = mockk<WeatherRepository>()
         val clientRepository = mockk<ClientRepository>()

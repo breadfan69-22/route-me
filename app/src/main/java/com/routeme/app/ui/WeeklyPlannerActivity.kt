@@ -337,6 +337,10 @@ class WeeklyPlannerActivity : AppCompatActivity() {
                 confirmRegenerate()
                 true
             }
+            R.id.action_clear_saved_plan -> {
+                confirmClearSavedPlan()
+                true
+            }
             else -> false
         }
     }
@@ -405,6 +409,21 @@ class WeeklyPlannerActivity : AppCompatActivity() {
                 }
                 setResult(RESULT_REGENERATE, intent)
                 finish()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun confirmClearSavedPlan() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Clear Saved Plan?")
+            .setMessage("This deletes the saved weekly planner so the next open starts from a fresh generation.")
+            .setPositiveButton("Clear") { _, _ ->
+                lifecycleScope.launch {
+                    withContext(Dispatchers.IO) { weekPlanDao.deletePlan() }
+                    Snackbar.make(viewPager, "Saved weekly plan cleared", Snackbar.LENGTH_SHORT).show()
+                    finish()
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()

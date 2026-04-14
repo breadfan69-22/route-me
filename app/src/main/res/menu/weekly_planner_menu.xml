@@ -13,4 +13,9 @@
         android:title="Regenerate"
         app:showAsAction="ifRoom" />
 
+    <item
+        android:id="@+id/action_clear_saved_plan"
+        android:title="Clear Saved Plan"
+        app:showAsAction="never" />
+
 </menu>
