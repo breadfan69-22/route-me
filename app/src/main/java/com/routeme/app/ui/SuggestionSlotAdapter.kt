@@ -18,6 +18,7 @@ class SuggestionSlotAdapter(
 
     companion object {
         private const val WEATHER_SUMMARY_MAX_CHARS = 48
+        private const val NOTES_MAX_CHARS = 50
     }
 
     private val items = mutableListOf<ClientSuggestion>()
@@ -101,13 +102,17 @@ class SuggestionSlotAdapter(
                 if (numbers.isNotEmpty()) "[S${numbers.joinToString("+")}] " else ""
             }
             val propTag = if (suggestion.propertyCompletionPct < 100) "📋 " else ""
+            val notesText = suggestion.client.notes.trim().takeIf { it.isNotEmpty() }?.let {
+                if (it.length > NOTES_MAX_CHARS) it.take(NOTES_MAX_CHARS).trimEnd() + "…" else it
+            }
 
             val topLine = "${index + 1}. $propTag$stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
-            button.text = if (weatherText.isNullOrBlank()) {
-                topLine
-            } else {
-                "$topLine\n↳ ${weatherText}"
+            val lines = buildString {
+                append(topLine)
+                if (!notesText.isNullOrBlank()) append("\n\uD83D\uDCDD $notesText")
+                if (!weatherText.isNullOrBlank()) append("\n↳ $weatherText")
             }
+            button.text = lines
             val isSelected = selectedClientId == suggestion.client.id
             val context = button.context
 

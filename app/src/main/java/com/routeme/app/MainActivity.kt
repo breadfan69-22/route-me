@@ -69,6 +69,10 @@ class MainActivity : AppCompatActivity() {
      *  so we don't nag repeatedly. Resets when tracking is stopped. */
     private val arrivedClientIds = mutableSetOf<String>()
 
+    /** Guards against showing duplicate completion/cluster dialogs when both the
+     *  event bus and a notification tap try to surface the same prompt. */
+    private val completionShownClientIds = mutableSetOf<String>()
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) {
             return@registerForActivityResult
@@ -182,7 +186,10 @@ class MainActivity : AppCompatActivity() {
             activity = this,
             viewModel = viewModel,
             trackingEventBus = trackingEventBus,
-            onTrackingSessionReset = { arrivedClientIds.clear() }
+            onTrackingSessionReset = {
+                arrivedClientIds.clear()
+                completionShownClientIds.clear()
+            }
         )
         destinationInputController = DestinationInputController(
             activity = this,
@@ -698,7 +705,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleTrackingEvent(event: TrackingEvent) {
         when (event) {
             is TrackingEvent.ClientArrival -> {
-                showArrivalDialog(event.client, event.arrivedAtMillis, event.location)
+                // Geofence arrivals are now silent; this branch is a no-op.
             }
 
             is TrackingEvent.JobComplete -> {
@@ -1311,6 +1318,7 @@ class MainActivity : AppCompatActivity() {
         completedAtMillis: Long,
         location: Location
     ) {
+        if (!completionShownClientIds.add(client.id)) return
         val minutesOnSite = (timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
         val stepsLabel = formatStepLabel(viewModel.uiState.value.selectedServiceTypes)
         val primaryType = viewModel.uiState.value.selectedServiceTypes.firstOrNull() ?: ServiceType.ROUND_1
@@ -1411,6 +1419,9 @@ class MainActivity : AppCompatActivity() {
      * they didn't actually service.
      */
     private fun showClusterCompletionDialog(members: List<ClusterMember>) {
+        val memberIds = members.map { it.client.id }
+        if (memberIds.any { it in completionShownClientIds }) return
+        completionShownClientIds.addAll(memberIds)
         DialogFactory.showClusterCompletionDialog(
             context = this,
             members = members,

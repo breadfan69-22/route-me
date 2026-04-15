@@ -48,6 +48,7 @@ class LocationTrackingService : Service(), KoinComponent {
     companion object {
         private const val TAG = "LocationTracking"
         private const val CHANNEL_ID = "routeme_tracking"
+        private const val EVENT_CHANNEL_ID = "routeme_events"
         private const val NOTIFICATION_ID = 1001
         private const val ARRIVAL_NOTIF_BASE = 2000
         private const val COMPLETE_NOTIF_BASE = 3000
@@ -115,6 +116,7 @@ class LocationTrackingService : Service(), KoinComponent {
         LocationTrackingNotifier(
             context = this,
             channelId = CHANNEL_ID,
+            eventChannelId = EVENT_CHANNEL_ID,
             arrivalNotifBase = ARRIVAL_NOTIF_BASE,
             completeNotifBase = COMPLETE_NOTIF_BASE,
             clusterNotifBase = CLUSTER_NOTIF_BASE
@@ -345,15 +347,24 @@ class LocationTrackingService : Service(), KoinComponent {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java)
+            val trackingChannel = NotificationChannel(
                 CHANNEL_ID,
                 getString(R.string.notif_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = getString(R.string.notif_channel_desc)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager.createNotificationChannel(trackingChannel)
+
+            val eventChannel = NotificationChannel(
+                EVENT_CHANNEL_ID,
+                getString(R.string.notif_event_channel_name),
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = getString(R.string.notif_event_channel_desc)
+            }
+            manager.createNotificationChannel(eventChannel)
         }
     }
 

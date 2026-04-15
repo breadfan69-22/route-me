@@ -111,6 +111,8 @@
     <!-- Notification -->
     <string name="notif_channel_name">Route Tracking</string>
     <string name="notif_channel_desc">Shows when RouteMe is tracking your location for auto-arrival detection</string>
+    <string name="notif_event_channel_name">Route Events</string>
+    <string name="notif_event_channel_desc">Alerts for job completions and cluster departures</string>
     <string name="notif_tracking_title">RouteMe Active</string>
     <string name="notif_tracking_text">Tracking location — will detect when you arrive at a client</string>
     <string name="notif_arrival_title">Arrived at %s?</string>

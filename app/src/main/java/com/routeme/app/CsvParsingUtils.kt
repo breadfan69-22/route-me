@@ -123,6 +123,9 @@ object CsvParsingUtils {
         return cal.timeInMillis
     }
 
+    /** Sentinel for "is a mow client but day-of-week not yet assigned". */
+    const val MOW_YES_NO_DAY = -1
+
     fun parseDayOfWeek(value: String): Int {
         return when (value.trim().lowercase(Locale.US)) {
             "sun", "sunday" -> Calendar.SUNDAY
@@ -132,6 +135,7 @@ object CsvParsingUtils {
             "thu", "thur", "thurs", "thursday" -> Calendar.THURSDAY
             "fri", "friday" -> Calendar.FRIDAY
             "sat", "saturday" -> Calendar.SATURDAY
+            "yes", "y" -> MOW_YES_NO_DAY
             else -> 0
         }
     }

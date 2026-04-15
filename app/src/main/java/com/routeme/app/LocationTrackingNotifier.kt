@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 class LocationTrackingNotifier(
     private val context: Context,
     private val channelId: String,
+    private val eventChannelId: String,
     private val arrivalNotifBase: Int,
     private val completeNotifBase: Int,
     private val clusterNotifBase: Int
@@ -136,7 +137,7 @@ class LocationTrackingNotifier(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, channelId)
+        val notification = NotificationCompat.Builder(context, eventChannelId)
             .setContentTitle(context.getString(R.string.notif_complete_title, client.name))
             .setContentText(context.getString(R.string.notif_complete_text, client.address, minutesOnSite))
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -219,7 +220,7 @@ class LocationTrackingNotifier(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, channelId)
+        val notification = NotificationCompat.Builder(context, eventChannelId)
             .setContentTitle(context.getString(R.string.notif_cluster_title, members.size))
             .setContentText(context.getString(R.string.notif_cluster_text, names))
             .setSmallIcon(android.R.drawable.ic_dialog_info)
