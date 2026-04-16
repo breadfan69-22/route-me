@@ -102,8 +102,15 @@ class SuggestionSlotAdapter(
                 if (numbers.isNotEmpty()) "[S${numbers.joinToString("+")}] " else ""
             }
             val propTag = if (suggestion.propertyCompletionPct < 100) "📋 " else ""
-            val notesText = suggestion.client.notes.trim().takeIf { it.isNotEmpty() }?.let {
-                if (it.length > NOTES_MAX_CHARS) it.take(NOTES_MAX_CHARS).trimEnd() + "…" else it
+            val notesText = suggestion.client.notes.trim().takeIf { it.isNotEmpty() }?.let { raw ->
+                val lines = raw.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                val contactPattern = Regex("""(\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\S+@\S+\.\S+)""")
+                val keywords = listOf("call", "email", "notify", "notification", "request")
+                val best = lines.firstOrNull { line ->
+                    val lower = line.lowercase()
+                    keywords.any { lower.contains(it) } || contactPattern.containsMatchIn(line)
+                } ?: lines.firstOrNull() ?: return@let null
+                if (best.length > NOTES_MAX_CHARS) best.take(NOTES_MAX_CHARS).trimEnd() + "…" else best
             }
 
             val topLine = "${index + 1}. $propTag$stepTag${suggestion.client.name}  •  ${daysText}d  •  $distText$mowText$cuText".trim()
