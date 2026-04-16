@@ -360,6 +360,21 @@ class ServiceCompletionUseCase(
             }
 
             if (savedAnyRecord) {
+                val primaryServiceType = stepsForClient.firstOrNull()
+                if (primaryServiceType != null) {
+                    runCatching {
+                        truckInventoryUseCase?.deductForService(
+                            serviceType = primaryServiceType,
+                            amountUsed = null,
+                            amountUsed2 = null,
+                            clientSqFt = client.lawnSizeSqFt.takeIf { it > 0 },
+                            granularRate = if (!primaryServiceType.isSpray)
+                                preferencesRepository.getGranularRate(primaryServiceType).takeIf { it > 0.0 }
+                            else null
+                        )
+                    }
+                }
+
                 val mLat = member.location.latitude
                 val mLng = member.location.longitude
                 runCatching {
