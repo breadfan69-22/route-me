@@ -108,7 +108,6 @@ class RoutingEngine {
             .mapNotNull { client ->
                 val latestProgramService = latestProgramServiceThisSeason(client, currentSeasonYear)
                 val daysSinceLatestProgramService = latestProgramService?.let { daysSince(it.completedAtMillis) }
-                val firstPendingRoundStep = firstPendingRoundStep(client, currentSeasonYear)
                 // Determine which of the requested types this client is eligible for
                 val eligible = serviceTypes.filter { st ->
                     val subscribed = when (st) {
@@ -124,8 +123,7 @@ class RoutingEngine {
                         minDays = minDays,
                         currentSeasonYear = currentSeasonYear,
                         latestProgramService = latestProgramService,
-                        daysSinceLatestProgramService = daysSinceLatestProgramService,
-                        firstPendingRoundStep = firstPendingRoundStep
+                        daysSinceLatestProgramService = daysSinceLatestProgramService
                     )
                 }.toSet()
                 if (eligible.isEmpty()) return@mapNotNull null
@@ -663,15 +661,10 @@ class RoutingEngine {
         minDays: Int,
         currentSeasonYear: Int,
         latestProgramService: com.routeme.app.ServiceRecord?,
-        daysSinceLatestProgramService: Int?,
-        firstPendingRoundStep: ServiceType?
+        daysSinceLatestProgramService: Int?
     ): Boolean {
         if (serviceType == ServiceType.INCIDENTAL) return true
         if (hasCompletedThisSeason(client, serviceType, currentSeasonYear)) return false
-
-        if (serviceType.stepNumber in 1..6 && firstPendingRoundStep != serviceType) {
-            return false
-        }
 
         if (latestProgramService == null) {
             return true
@@ -691,13 +684,6 @@ class RoutingEngine {
             hasCompletedThisSeason(client, serviceType, currentSeasonYear) -> daysSinceLast(client, serviceType)
             else -> latestProgramService?.let { daysSince(it.completedAtMillis) }
         }
-    }
-
-    private fun firstPendingRoundStep(client: Client, currentSeasonYear: Int): ServiceType? {
-        return client.subscribedSteps
-            .sorted()
-            .mapNotNull(ServiceType::forStep)
-            .firstOrNull { !hasCompletedThisSeason(client, it, currentSeasonYear) }
     }
 
     private fun latestProgramServiceThisSeason(client: Client, currentSeasonYear: Int): com.routeme.app.ServiceRecord? {

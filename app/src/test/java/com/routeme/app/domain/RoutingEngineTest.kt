@@ -94,6 +94,50 @@ class RoutingEngineTest {
     }
 
     @Test
+    fun `rankClients includes all selected unfinished round steps when no current season service exists`() {
+        val client = testClient(id = "step-1-and-2")
+
+        val results = engine.rankClients(
+            clients = listOf(client),
+            serviceTypes = linkedSetOf(ServiceType.ROUND_1, ServiceType.ROUND_2),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD
+        )
+
+        assertEquals(setOf(ServiceType.ROUND_1, ServiceType.ROUND_2), results.single().eligibleSteps)
+    }
+
+    @Test
+    fun `rankClients includes all selected unfinished steps after min days since prior service`() {
+        val now = System.currentTimeMillis()
+        val client = testClient(
+            id = "step-2-and-3",
+            records = listOf(
+                ServiceRecord(
+                    serviceType = ServiceType.ROUND_1,
+                    completedAtMillis = now - 30L * DAY_MS,
+                    durationMinutes = 20,
+                    lat = null,
+                    lng = null
+                )
+            )
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(client),
+            serviceTypes = linkedSetOf(ServiceType.ROUND_2, ServiceType.ROUND_3),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD
+        )
+
+        assertEquals(setOf(ServiceType.ROUND_2, ServiceType.ROUND_3), results.single().eligibleSteps)
+    }
+
+    @Test
     fun `rankClients excludes next step until min days since last service`() {
         val now = System.currentTimeMillis()
         val client = testClient(
