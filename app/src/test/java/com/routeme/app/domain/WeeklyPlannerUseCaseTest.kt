@@ -598,7 +598,7 @@ class WeeklyPlannerUseCaseTest {
     }
 
     @Test
-    fun `generateWeekPlan assigns non-grub granular clients to earlier days than grub clients`() = runTest {
+    fun `generateWeekPlan prefers corridor fit over non-grub priority`() = runTest {
         val weatherRepository = mockk<WeatherRepository>()
         val clientRepository = mockk<ClientRepository>()
         val routingEngine = mockk<RoutingEngine>()
@@ -606,7 +606,6 @@ class WeeklyPlannerUseCaseTest {
 
         val monday = nextDateMillis(Calendar.MONDAY)
         val tuesday = nextDateMillis(Calendar.TUESDAY)
-        // Make Monday clearly better so both clients prefer it
         val forecast = listOf(
             ForecastDay(
                 dateMillis = monday,
@@ -622,25 +621,129 @@ class WeeklyPlannerUseCaseTest {
             )
         )
 
-        // Two clients with identical overdue days — only difference is grub flag.
-        // Large lawns so only one fits per day (MAX_SQFT_PER_DAY = 500k).
-        val nonGrubClient = testClient("NG").copy(
+        // Both clients want Monday because of weather, but only the east-side grub
+        // client also matches Monday's corridor. The planner should place that
+        // constrained fit first instead of seeding the week with non-grub priority.
+        val westNonGrubClient = testClient("NG").copy(
             hasGrub = false,
             subscribedSteps = setOf(1),
             zone = "WEST",
             lawnSizeSqFt = 300_000,
-            latitude = 42.2480, longitude = -85.5650,
+            latitude = 42.2478, longitude = -85.8000,
             property = testClient("NG").property?.copy(lawnSizeSqFt = 300_000)
         )
-        val grubClient = testClient("G").copy(
+        val eastGrubClient = testClient("G").copy(
             hasGrub = true,
             subscribedSteps = setOf(1),
             zone = "EAST",
             lawnSizeSqFt = 300_000,
-            latitude = 42.3100, longitude = -85.5000,
+            latitude = 42.2478, longitude = -85.4600,
             property = testClient("G").property?.copy(lawnSizeSqFt = 300_000)
         )
-        val allClients = listOf(grubClient, nonGrubClient) // grub listed first to be fair
+        val allClients = listOf(westNonGrubClient, eastGrubClient)
+
+        val suggestions = allClients.map { client ->
+            ClientSuggestion(
+                client = client,
+                daysSinceLast = 30,
+                distanceMiles = 1.0,
+                distanceToShopMiles = 1.0,
+                mowWindowPreferred = true,
+                eligibleSteps = setOf(ServiceType.ROUND_1)
+            )
+        }
+
+        coEvery { weatherRepository.getForecastDays(dayCount = 7, lat = SHOP_LAT, lng = SHOP_LNG) } returns forecast
+        coEvery { weatherRepository.getRecentWeatherSignal(SHOP_LAT, SHOP_LNG) } returns null
+        coEvery { clientRepository.loadAllClients() } returns allClients
+        coEvery {
+            routingEngine.rankClients(
+                clients = allClients,
+                serviceTypes = ServiceType.entries.toSet(),
+                minDays = 7,
+                lastLocation = null,
+                cuOverrideEnabled = false,
+                routeDirection = RouteDirection.OUTWARD,
+                weather = null,
+                recentPrecipInches = null,
+                propertyMap = allClients.associate { it.id to it.property!! },
+                recentWeatherByClientId = emptyMap()
+            )
+        } returns suggestions
+
+        val useCase = WeeklyPlannerUseCase(
+            weatherRepository = weatherRepository,
+            clientRepository = clientRepository,
+            routingEngine = routingEngine,
+            preferencesRepository = preferencesRepository
+        )
+
+        val plan = useCase.generateWeekPlan(
+            dayAnchors = mapOf(
+                Calendar.MONDAY to DayAnchor(
+                    lat = eastGrubClient.latitude!!,
+                    lng = eastGrubClient.longitude!!,
+                    label = "East corridor"
+                )
+            )
+        )
+
+        val mondayClients = plan.days.first { it.dayOfWeek == Calendar.MONDAY }.clients
+        val tuesdayClients = plan.days.first { it.dayOfWeek == Calendar.TUESDAY }.clients
+
+        assertTrue(
+            "Corridor-fit grub client should keep the best Monday slot",
+            mondayClients.any { it.client.id == "G" }
+        )
+        assertTrue(
+            "Non-grub client should move to Tuesday once Monday is taken",
+            tuesdayClients.any { it.client.id == "NG" }
+        )
+    }
+
+    @Test
+    fun `generateWeekPlan uses non-grub priority as tiebreak when route fit is even`() = runTest {
+        val weatherRepository = mockk<WeatherRepository>()
+        val clientRepository = mockk<ClientRepository>()
+        val routingEngine = mockk<RoutingEngine>()
+        val preferencesRepository = mockk<PreferencesRepository>(relaxed = true)
+
+        val monday = nextDateMillis(Calendar.MONDAY)
+        val tuesday = nextDateMillis(Calendar.TUESDAY)
+        val forecast = listOf(
+            ForecastDay(
+                dateMillis = monday,
+                highTempF = 72, lowTempF = 52, windSpeedMph = 3,
+                windGustMph = null, precipProbabilityPct = 5,
+                shortForecast = "Sunny", detailedForecast = "Sunny"
+            ),
+            ForecastDay(
+                dateMillis = tuesday,
+                highTempF = 68, lowTempF = 48, windSpeedMph = 18,
+                windGustMph = 25, precipProbabilityPct = 50,
+                shortForecast = "Windy/Showers", detailedForecast = "Windy with showers"
+            )
+        )
+
+        val nonGrubClient = testClient("NG2").copy(
+            hasGrub = false,
+            subscribedSteps = setOf(1),
+            zone = "WEST",
+            lawnSizeSqFt = 300_000,
+            latitude = 42.2478,
+            longitude = -85.5640,
+            property = testClient("NG2").property?.copy(lawnSizeSqFt = 300_000)
+        )
+        val grubClient = testClient("G2").copy(
+            hasGrub = true,
+            subscribedSteps = setOf(1),
+            zone = "EAST",
+            lawnSizeSqFt = 300_000,
+            latitude = 42.2478,
+            longitude = -85.5635,
+            property = testClient("G2").property?.copy(lawnSizeSqFt = 300_000)
+        )
+        val allClients = listOf(grubClient, nonGrubClient)
 
         val suggestions = allClients.map { client ->
             ClientSuggestion(
@@ -680,17 +783,16 @@ class WeeklyPlannerUseCaseTest {
 
         val plan = useCase.generateWeekPlan()
 
-        // Non-grub client should be on the earliest day (Monday)
         val mondayClients = plan.days.first { it.dayOfWeek == Calendar.MONDAY }.clients
         val tuesdayClients = plan.days.first { it.dayOfWeek == Calendar.TUESDAY }.clients
 
         assertTrue(
-            "Non-grub client should appear on Monday (earliest day)",
-            mondayClients.any { it.client.id == "NG" }
+            "Non-grub client should win the Monday tie when route fit is effectively equal",
+            mondayClients.any { it.client.id == "NG2" }
         )
         assertTrue(
-            "Grub client should appear on Tuesday (later day)",
-            tuesdayClients.any { it.client.id == "G" }
+            "Grub client should move to Tuesday after losing the tie",
+            tuesdayClients.any { it.client.id == "G2" }
         )
     }
 

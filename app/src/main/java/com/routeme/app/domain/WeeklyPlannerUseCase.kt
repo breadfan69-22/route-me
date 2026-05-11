@@ -79,16 +79,12 @@ class WeeklyPlannerUseCase(
             recentWeatherByClientId = emptyMap()
         )
 
-        // Sort by urgency (most overdue first) — tiebreaker only, not primary driver.
+        // Keep overdue clients near the front. Day assignment still decides with
+        // mow/weather fit and route geometry, while client-type priority is only
+        // used later as a soft tiebreak between similarly strong candidates.
         val sortedClients = eligibleSuggestions.sortedWith(
             compareByDescending<com.routeme.app.ClientSuggestion> { it.daysSinceLast ?: Int.MAX_VALUE }
                 .thenByDescending { it.daysSinceLast == null }
-                // Non-grub clients eligible for a granular fert step sort first
-                // so they are served before grub clients (tighter Step 3 window).
-                .thenByDescending {
-                    !it.client.hasGrub &&
-                        it.eligibleSteps.any { s -> s.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
-                }
         )
 
         val initialAssignment = assignClientsToDays(
@@ -182,6 +178,12 @@ class WeeklyPlannerUseCase(
         val assignedCount: Int
     )
 
+    private data class AssignmentPriority(
+        val sortEligibleDayCount: Int,
+        val scoreSpread: Int,
+        val bestScore: Int
+    )
+
     private fun assignClientsToDays(
         forecastDays: List<ForecastDay>,
         dayAnchors: Map<Int, DayAnchor>,
@@ -211,12 +213,31 @@ class WeeklyPlannerUseCase(
         workDays.forEach { it.isWorkDay = true }
         if (workDays.isEmpty()) return AssignmentResult(dayBuilders, 0)
 
+        val assignmentPriorityByClientId = sortedClients.associate { suggestion ->
+            suggestion.client.id to buildAssignmentPriority(
+                suggestion = suggestion,
+                workDays = workDays,
+                shopWeatherSignal = shopWeatherSignal,
+                lat = lat,
+                lng = lng,
+                refillDayOfWeek = refillDayOfWeek
+            )
+        }
+        val assignmentOrder = sortedClients.sortedWith(
+            compareBy<ClientSuggestion> { assignmentPriorityByClientId.getValue(it.client.id).sortEligibleDayCount }
+                .thenByDescending { assignmentPriorityByClientId.getValue(it.client.id).scoreSpread }
+                .thenByDescending { assignmentPriorityByClientId.getValue(it.client.id).bestScore }
+                .thenByDescending { it.daysSinceLast ?: Int.MAX_VALUE }
+                .thenByDescending { hasPlannerPriority(it) }
+                .thenBy { it.client.id }
+        )
+
         val targetPerDay = ceil(sortedClients.size.toDouble() / workDays.size.toDouble()).toInt().coerceAtLeast(1)
         val softCap = minOf(targetPerDay + 2, AppConfig.WeeklyPlanner.MAX_CLIENTS_PER_DAY)
         val sqFtPerDay = mutableMapOf<PlannedDayBuilder, Int>()
 
         var assignedCount = 0
-        for (suggestion in sortedClients) {
+        for (suggestion in assignmentOrder) {
             val clientSqFt = suggestion.client.lawnSizeSqFt.takeIf { it > 0 }
             val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
 
@@ -273,15 +294,7 @@ class WeeklyPlannerUseCase(
                 val corridorBonus = maxOf(anchorCorridorBonus, refillCorridorBonus)
                 val geoBonus = maxOf(zoneDensityBonus, corridorBonus) + proximityBonus + refillAffinityBonus
 
-                // Non-grub clients with a granular step get a priority boost
-                // applied after the fitness cap so it doesn't mask weather
-                // differentiation between days.
-                val nonGrubBonus = if (
-                    !suggestion.client.hasGrub &&
-                    suggestion.eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
-                ) AppConfig.Routing.NON_GRUB_GRANULAR_PRIORITY_BONUS.toInt() else 0
-
-                val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus + nonGrubBonus
+                val finalScore = if (blockedByMow) Int.MIN_VALUE else fitnessScore + geoBonus
                 DayFitness(day, finalScore, reason)
             }
 
@@ -329,6 +342,71 @@ class WeeklyPlannerUseCase(
         }
 
         return AssignmentResult(dayBuilders, assignedCount)
+    }
+
+    private fun buildAssignmentPriority(
+        suggestion: ClientSuggestion,
+        workDays: List<PlannedDayBuilder>,
+        shopWeatherSignal: RecentWeatherSignal?,
+        lat: Double,
+        lng: Double,
+        refillDayOfWeek: Set<Int>
+    ): AssignmentPriority {
+        val clientMowDay = suggestion.client.mowDayOfWeek.takeIf { it in Calendar.SUNDAY..Calendar.SATURDAY }
+        val candidateScores = workDays.mapNotNull { day ->
+            val daysSinceMow = if (clientMowDay != null) {
+                ((day.dayOfWeek - clientMowDay + 7) % 7)
+            } else null
+            val blockedByMow = daysSinceMow != null && (daysSinceMow in 0..1 || daysSinceMow == 6)
+            if (blockedByMow) return@mapNotNull null
+
+            val fitnessScore = scoreClientDayFitness(
+                client = suggestion.client,
+                property = suggestion.client.property,
+                forecast = day.forecast,
+                dayOfWeek = day.dayOfWeek,
+                eligibleSteps = suggestion.eligibleSteps,
+                recentWeatherSignal = shopWeatherSignal
+            ).first
+
+            val anchorCorridorBonus = if (day.anchorLat == null || day.anchorLng == null) {
+                0
+            } else {
+                corridorScore(suggestion.client, lat, lng, day.anchorLat, day.anchorLng)
+            }
+            val refillCorridorBonus = if (day.dayOfWeek !in refillDayOfWeek) {
+                0
+            } else {
+                corridorScore(
+                    suggestion.client,
+                    lat,
+                    lng,
+                    AppConfig.SupplyHouse.LAT,
+                    AppConfig.SupplyHouse.LNG
+                )
+            }
+
+            fitnessScore + maxOf(anchorCorridorBonus, refillCorridorBonus)
+        }.sortedDescending()
+
+        val eligibleDayCount = candidateScores.size
+        val bestScore = candidateScores.firstOrNull() ?: Int.MIN_VALUE
+        val scoreSpread = when {
+            eligibleDayCount == 0 -> Int.MIN_VALUE
+            eligibleDayCount == 1 -> Int.MAX_VALUE
+            else -> bestScore - candidateScores[1]
+        }
+
+        return AssignmentPriority(
+            sortEligibleDayCount = if (eligibleDayCount == 0) Int.MAX_VALUE else eligibleDayCount,
+            scoreSpread = scoreSpread,
+            bestScore = bestScore
+        )
+    }
+
+    private fun hasPlannerPriority(suggestion: ClientSuggestion): Boolean {
+        return !suggestion.client.hasGrub &&
+            suggestion.eligibleSteps.any { it.stepNumber in AppConfig.WeeklyPlanner.GRANULAR_STEPS }
     }
 
     private fun predictRefillDayOfWeek(
