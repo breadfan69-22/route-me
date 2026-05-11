@@ -260,8 +260,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun syncRenderedState(state: MainUiState) {
+        val hadNoClients = clients.isEmpty()
         clients.clear()
         clients.addAll(state.clients)
+        // Notification taps can arrive before state hydration on a cold start.
+        if (hadNoClients && clients.isNotEmpty()) {
+            handleArrivalIntent(intent)
+        }
         sheetsUrl = state.sheetsReadUrl
         if (state.sheetsWriteUrl != SheetsWriteBack.webAppUrl) {
             SheetsWriteBack.webAppUrl = state.sheetsWriteUrl
@@ -1420,6 +1425,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun showClusterCompletionDialog(members: List<ClusterMember>) {
         val memberIds = members.map { it.client.id }
+        val notificationId = clusterNotificationId(4000, members)
         if (memberIds.any { it in completionShownClientIds }) return
         completionShownClientIds.addAll(memberIds)
         DialogFactory.showClusterCompletionDialog(
@@ -1435,7 +1441,10 @@ class MainActivity : AppCompatActivity() {
                 for (member in members) {
                     trackingUiController.dismissNotification(3000 + member.client.id.hashCode())
                 }
-                trackingUiController.dismissNotification(4000 + members.hashCode())
+                trackingUiController.dismissNotification(notificationId)
+            },
+            onCancelSelection = {
+                completionShownClientIds.removeAll(memberIds)
             }
         )
     }
@@ -1537,12 +1546,19 @@ class MainActivity : AppCompatActivity() {
     private fun handleClusterCompletionNotificationIntent(intent: Intent) {
         val clusterClientIds = intent.getStringArrayExtra(LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS)
         if (clusterClientIds == null || clusterClientIds.size < 2) return
+        if (clients.isEmpty()) return
 
         val members = buildClusterMembers(intent, clusterClientIds)
-        if (members.size >= 2) {
-            showClusterCompletionDialog(members)
+        if (members.size < 2) {
+            clearClusterCompletionIntentExtras(intent)
+            return
         }
+        showClusterCompletionDialog(members)
 
+        clearClusterCompletionIntentExtras(intent)
+    }
+
+    private fun clearClusterCompletionIntentExtras(intent: Intent) {
         clearIntentExtras(
             intent,
             LocationTrackingService.EXTRA_CLUSTER_CLIENT_IDS,

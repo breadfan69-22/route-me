@@ -188,7 +188,7 @@ class LocationTrackingNotifier(
     }
 
     fun postClusterCompletionNotification(members: List<ClusterMember>): Int {
-        val notifId = clusterNotifBase + members.hashCode()
+        val notifId = clusterNotificationId(clusterNotifBase, members)
         val requestCode = notifId
         val manager = context.getSystemService(NotificationManager::class.java)
 
@@ -225,7 +225,7 @@ class LocationTrackingNotifier(
             .setContentText(context.getString(R.string.notif_cluster_text, names))
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setAutoCancel(false)
-            .setOngoing(true)
+            .setOngoing(false)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .build()
@@ -233,4 +233,13 @@ class LocationTrackingNotifier(
         manager.notify(notifId, notification)
         return notifId
     }
+}
+
+internal fun clusterNotificationId(clusterNotifBase: Int, members: List<ClusterMember>): Int {
+    val stableKey = members
+        .sortedWith(compareBy<ClusterMember>({ it.client.id }, { it.arrivedAtMillis }, { it.completedAtMillis }))
+        .joinToString("|") { member ->
+            "${member.client.id}:${member.arrivedAtMillis}:${member.completedAtMillis}"
+        }
+    return clusterNotifBase + stableKey.hashCode()
 }

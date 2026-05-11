@@ -299,7 +299,8 @@ object DialogFactory {
     fun showClusterCompletionDialog(
         context: Context,
         members: List<ClusterMember>,
-        onConfirmSelection: (selectedMembers: List<ClusterMember>) -> Unit
+        onConfirmSelection: (selectedMembers: List<ClusterMember>) -> Unit,
+        onCancelSelection: () -> Unit = {}
     ) {
         val names = members.map { member ->
             val mins = (member.timeOnSiteMillis / 60_000).toInt().coerceAtLeast(1)
@@ -316,7 +317,9 @@ object DialogFactory {
                 val selected = members.filterIndexed { index, _ -> checked[index] }
                 onConfirmSelection(selected)
             }
-            .setNegativeButton(context.getString(R.string.dialog_cluster_cancel), null)
+            .setNegativeButton(context.getString(R.string.dialog_cluster_cancel)) { _, _ ->
+                onCancelSelection()
+            }
             .setCancelable(false)
             .show()
     }
