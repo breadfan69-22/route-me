@@ -142,11 +142,10 @@ class ServiceCompletionUseCase(
         val finishedAt = request.completedAtMillisOverride ?: nowProvider()
         val durationMinutes = (((finishedAt - arrivalStartedAtMillis) / 60000.0).toLong()).coerceAtLeast(1)
 
-        val stepsToConfirm = if (request.selectedSuggestionEligibleSteps.isNotEmpty()) {
-            request.selectedSuggestionEligibleSteps
-        } else {
-            setOf(request.selectedServiceTypes.first())
-        }
+        val stepsToConfirm = resolveStepsToConfirm(
+            suggestionEligibleSteps = request.selectedSuggestionEligibleSteps,
+            selectedServiceTypes = request.selectedServiceTypes
+        ) ?: return ConfirmSelectedResult.Error("Pick at least one step")
 
         val trimmedNotes = request.visitNotes.trim()
         var updatedClient = client
@@ -323,9 +322,10 @@ class ServiceCompletionUseCase(
             var updatedClient = client
             var savedAnyRecord = false
 
-            val stepsForClient = request.suggestionEligibleStepsByClientId[client.id]
-                ?.takeIf { it.isNotEmpty() }
-                ?: setOf(serviceTypes.first())
+            val stepsForClient = resolveStepsToConfirm(
+                suggestionEligibleSteps = request.suggestionEligibleStepsByClientId[client.id].orEmpty(),
+                selectedServiceTypes = serviceTypes
+            ) ?: return ConfirmClusterResult.Error("Pick at least one step")
 
             for (serviceType in stepsForClient) {
                 val record = ServiceRecord(
@@ -414,6 +414,14 @@ class ServiceCompletionUseCase(
             statusMessage = msg,
             transientFailureMessages = transientFailures
         )
+    }
+
+    private fun resolveStepsToConfirm(
+        suggestionEligibleSteps: Set<ServiceType>,
+        selectedServiceTypes: Set<ServiceType>
+    ): Set<ServiceType>? {
+        return suggestionEligibleSteps.takeIf { it.isNotEmpty() }
+            ?: selectedServiceTypes.takeIf { it.isNotEmpty() }
     }
 
     suspend fun undoLastConfirmation(

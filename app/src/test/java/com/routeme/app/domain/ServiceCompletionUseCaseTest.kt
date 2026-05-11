@@ -146,6 +146,35 @@ class ServiceCompletionUseCaseTest {
     }
 
     @Test
+    fun `confirmSelectedClientService saves all manually selected steps when no suggestion steps exist`() = runTest {
+        val fixedNow = 200_000L
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
+        val client = testClient("12")
+        val selectedTypes = linkedSetOf(ServiceType.ROUND_1, ServiceType.ROUND_2)
+
+        coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
+
+        val result = useCase.confirmSelectedClientService(
+            ServiceCompletionUseCase.ConfirmSelectedRequest(
+                clients = listOf(client),
+                selectedClient = client,
+                arrivalStartedAtMillis = 140_000L,
+                arrivalLat = 42.2,
+                arrivalLng = -85.5,
+                selectedSuggestionEligibleSteps = emptySet(),
+                selectedServiceTypes = selectedTypes,
+                currentLocation = null,
+                visitNotes = ""
+            )
+        )
+
+        assertTrue(result is ServiceCompletionUseCase.ConfirmSelectedResult.Success)
+        val success = result as ServiceCompletionUseCase.ConfirmSelectedResult.Success
+        assertEquals(selectedTypes, success.selectedClient.records.map { it.serviceType }.toSet())
+        coVerify(exactly = 2) { repository.saveServiceRecord(client.id, any()) }
+    }
+
+    @Test
     fun `confirmClusterService confirms selected members`() = runTest {
         val fixedNow = 500_000L
         val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
@@ -176,6 +205,39 @@ class ServiceCompletionUseCaseTest {
         assertEquals(listOf(client.id), success.confirmedIds)
         assertTrue(success.statusMessage.contains("1 stops"))
         coVerify(exactly = 1) { repository.saveServiceRecord(client.id, any()) }
+    }
+
+    @Test
+    fun `confirmClusterService saves all manually selected steps when suggestion steps are absent`() = runTest {
+        val fixedNow = 500_000L
+        val useCase = ServiceCompletionUseCase(repository, retryQueue, preferencesRepository, nowProvider = { fixedNow })
+        val client = testClient("21")
+        val selectedTypes = linkedSetOf(ServiceType.ROUND_1, ServiceType.ROUND_2)
+
+        coEvery { repository.saveServiceRecord(any(), any()) } returns Unit
+
+        val result = useCase.confirmClusterService(
+            ServiceCompletionUseCase.ConfirmClusterRequest(
+                clients = listOf(client),
+                selectedServiceTypes = selectedTypes,
+                suggestionEligibleStepsByClientId = emptyMap(),
+                selectedMembers = listOf(
+                    ServiceCompletionUseCase.ClusterMemberInput(
+                        clientId = client.id,
+                        clientName = client.name,
+                        arrivedAtMillis = 440_000L,
+                        completedAtMillis = 500_000L,
+                        location = ServiceCompletionUseCase.GeoPoint(42.1, -85.1)
+                    )
+                )
+            )
+        )
+
+        assertTrue(result is ServiceCompletionUseCase.ConfirmClusterResult.Success)
+        val success = result as ServiceCompletionUseCase.ConfirmClusterResult.Success
+        val updatedClient = success.updatedClients.single { it.id == client.id }
+        assertEquals(selectedTypes, updatedClient.records.map { it.serviceType }.toSet())
+        coVerify(exactly = 2) { repository.saveServiceRecord(client.id, any()) }
     }
 
     @Test

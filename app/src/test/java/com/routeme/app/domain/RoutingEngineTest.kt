@@ -55,7 +55,7 @@ class RoutingEngineTest {
 
         val results = engine.rankClients(
             clients = listOf(recent, overdue),
-            serviceTypes = setOf(ServiceType.ROUND_1),
+            serviceTypes = setOf(ServiceType.ROUND_2),
             minDays = 21,
             lastLocation = null,
             cuOverrideEnabled = false,
@@ -63,6 +63,90 @@ class RoutingEngineTest {
         )
 
         assertEquals("overdue", results.first().client.id)
+    }
+
+    @Test
+    fun `rankClients excludes step already completed this season`() {
+        val now = System.currentTimeMillis()
+        val client = testClient(
+            id = "repeat-step-1",
+            records = listOf(
+                ServiceRecord(
+                    serviceType = ServiceType.ROUND_1,
+                    completedAtMillis = now - 30L * DAY_MS,
+                    durationMinutes = 20,
+                    lat = null,
+                    lng = null
+                )
+            )
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(client),
+            serviceTypes = setOf(ServiceType.ROUND_1),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD
+        )
+
+        assertTrue(results.isEmpty())
+    }
+
+    @Test
+    fun `rankClients excludes next step until min days since last service`() {
+        val now = System.currentTimeMillis()
+        val client = testClient(
+            id = "too-soon-step-2",
+            records = listOf(
+                ServiceRecord(
+                    serviceType = ServiceType.ROUND_1,
+                    completedAtMillis = now - 10L * DAY_MS,
+                    durationMinutes = 20,
+                    lat = null,
+                    lng = null
+                )
+            )
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(client),
+            serviceTypes = setOf(ServiceType.ROUND_2),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD
+        )
+
+        assertTrue(results.isEmpty())
+    }
+
+    @Test
+    fun `rankClients allows next sequential step after min days since last service`() {
+        val now = System.currentTimeMillis()
+        val client = testClient(
+            id = "ready-step-2",
+            records = listOf(
+                ServiceRecord(
+                    serviceType = ServiceType.ROUND_1,
+                    completedAtMillis = now - 30L * DAY_MS,
+                    durationMinutes = 20,
+                    lat = null,
+                    lng = null
+                )
+            )
+        )
+
+        val results = engine.rankClients(
+            clients = listOf(client),
+            serviceTypes = setOf(ServiceType.ROUND_2),
+            minDays = 21,
+            lastLocation = null,
+            cuOverrideEnabled = false,
+            routeDirection = RouteDirection.OUTWARD
+        )
+
+        assertEquals(listOf(ServiceType.ROUND_2), results.single().eligibleSteps.toList())
     }
 
     @Test

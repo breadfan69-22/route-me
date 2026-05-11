@@ -95,6 +95,7 @@ class RoutingEngine {
         recentWeatherByClientId: Map<String, RecentWeatherSignal> = emptyMap()
     ): List<ClientSuggestion> {
         val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        val currentSeasonYear = currentSeasonYear()
         val destLat = destination?.lat ?: SHOP_LAT
         val destLng = destination?.lng ?: SHOP_LNG
         val userDistanceToShopMiles = lastLocation?.let { loc ->
@@ -105,6 +106,9 @@ class RoutingEngine {
             .asSequence()
             .filter { it.id !in skippedClientIds }
             .mapNotNull { client ->
+                val latestProgramService = latestProgramServiceThisSeason(client, currentSeasonYear)
+                val daysSinceLatestProgramService = latestProgramService?.let { daysSince(it.completedAtMillis) }
+                val firstPendingRoundStep = firstPendingRoundStep(client, currentSeasonYear)
                 // Determine which of the requested types this client is eligible for
                 val eligible = serviceTypes.filter { st ->
                     val subscribed = when (st) {
@@ -114,8 +118,15 @@ class RoutingEngine {
                     }
                     if (!subscribed) return@filter false
                     if (!cuOverrideEnabled && isCuBlockedForService(client, st)) return@filter false
-                    val days = daysSinceLast(client, st)
-                    days == null || days >= minDays
+                    isEligibleForRequestedService(
+                        client = client,
+                        serviceType = st,
+                        minDays = minDays,
+                        currentSeasonYear = currentSeasonYear,
+                        latestProgramService = latestProgramService,
+                        daysSinceLatestProgramService = daysSinceLatestProgramService,
+                        firstPendingRoundStep = firstPendingRoundStep
+                    )
                 }.toSet()
                 if (eligible.isEmpty()) return@mapNotNull null
 
@@ -130,7 +141,12 @@ class RoutingEngine {
                 val mowPreferred = client.mowDayOfWeek != 0 && isGoodDayToVisit(today, client.mowDayOfWeek)
                 // Use the MOST overdue step for ranking
                 val mostOverdueDays = eligible.maxOfOrNull { st ->
-                    daysSinceLast(client, st) ?: Int.MAX_VALUE
+                    daysSinceReferenceService(
+                        client = client,
+                        serviceType = st,
+                        currentSeasonYear = currentSeasonYear,
+                        latestProgramService = latestProgramService
+                    ) ?: Int.MAX_VALUE
                 }
                 // CU override flag: true if any eligible step is CU-blocked
                 val requiresCuOverride = eligible.any { isCuBlockedForService(client, it) }
@@ -641,14 +657,87 @@ class RoutingEngine {
         return !inAvoidWindow
     }
 
+    private fun isEligibleForRequestedService(
+        client: Client,
+        serviceType: ServiceType,
+        minDays: Int,
+        currentSeasonYear: Int,
+        latestProgramService: com.routeme.app.ServiceRecord?,
+        daysSinceLatestProgramService: Int?,
+        firstPendingRoundStep: ServiceType?
+    ): Boolean {
+        if (serviceType == ServiceType.INCIDENTAL) return true
+        if (hasCompletedThisSeason(client, serviceType, currentSeasonYear)) return false
+
+        if (serviceType.stepNumber in 1..6 && firstPendingRoundStep != serviceType) {
+            return false
+        }
+
+        if (latestProgramService == null) {
+            return true
+        }
+
+        return daysSinceLatestProgramService != null && daysSinceLatestProgramService >= minDays
+    }
+
+    private fun daysSinceReferenceService(
+        client: Client,
+        serviceType: ServiceType,
+        currentSeasonYear: Int,
+        latestProgramService: com.routeme.app.ServiceRecord?
+    ): Int? {
+        return when {
+            serviceType == ServiceType.INCIDENTAL -> daysSinceLast(client, serviceType)
+            hasCompletedThisSeason(client, serviceType, currentSeasonYear) -> daysSinceLast(client, serviceType)
+            else -> latestProgramService?.let { daysSince(it.completedAtMillis) }
+        }
+    }
+
+    private fun firstPendingRoundStep(client: Client, currentSeasonYear: Int): ServiceType? {
+        return client.subscribedSteps
+            .sorted()
+            .mapNotNull(ServiceType::forStep)
+            .firstOrNull { !hasCompletedThisSeason(client, it, currentSeasonYear) }
+    }
+
+    private fun latestProgramServiceThisSeason(client: Client, currentSeasonYear: Int): com.routeme.app.ServiceRecord? {
+        return client.records
+            .asSequence()
+            .filter { it.serviceType != ServiceType.INCIDENTAL }
+            .filter { seasonYear(it.completedAtMillis) == currentSeasonYear }
+            .maxByOrNull { it.completedAtMillis }
+    }
+
+    private fun hasCompletedThisSeason(client: Client, serviceType: ServiceType, currentSeasonYear: Int): Boolean {
+        return client.records.any { record ->
+            record.serviceType == serviceType && seasonYear(record.completedAtMillis) == currentSeasonYear
+        }
+    }
+
+    private fun currentSeasonYear(nowMillis: Long = System.currentTimeMillis()): Int {
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = nowMillis
+        return calendar.get(Calendar.YEAR)
+    }
+
+    private fun seasonYear(completedAtMillis: Long): Int {
+        val calendar = Calendar.getInstance()
+        calendar.timeInMillis = completedAtMillis
+        return calendar.get(Calendar.YEAR)
+    }
+
+    private fun daysSince(completedAtMillis: Long): Int {
+        val diff = System.currentTimeMillis() - completedAtMillis
+        return (diff / AppConfig.Routing.MILLIS_PER_DAY).toInt()
+    }
+
     fun daysSinceLast(client: Client, serviceType: ServiceType): Int? {
         val last = client.records
             .filter { it.serviceType == serviceType || serviceType == ServiceType.INCIDENTAL }
             .maxByOrNull { it.completedAtMillis }
             ?: return null
 
-        val diff = System.currentTimeMillis() - last.completedAtMillis
-        return (diff / AppConfig.Routing.MILLIS_PER_DAY).toInt()
+        return daysSince(last.completedAtMillis)
     }
 
     fun distanceMiles(client: Client, lastLocation: Location?): Double? {
